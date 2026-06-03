@@ -128,6 +128,31 @@ def test_txt_narrative_indexes_and_is_queryable(store, tmp_path):
     _run(store, go)
 
 
+def test_byte_identical_files_record_both_paths(store, tmp_path):
+    async def go():
+        a = tmp_path / "a.md"; a.write_text("# Same\n\nidentical bytes\n")
+        b = tmp_path / "b.md"; b.write_text("# Same\n\nidentical bytes\n")  # identical content
+        await store.add_file({"exp_id": "K1-1", "path": "K1-1/protocol/a.md",
+                              "role": "protocol", "file_type": "md", "sha256": "x"}, ingest_path=a)
+        await store.add_file({"exp_id": "K1-1", "path": "K1-1/reports/b.md",
+                              "role": "report", "file_type": "md", "sha256": "x"}, ingest_path=b)
+        files = await store.files("K1-1")
+        assert len(files) == 1                       # one document (byte-identical)
+        f = files[0]
+        assert f["path"] == "K1-1/protocol/a.md"     # first-seen path is primary, preserved
+        assert f.get("other_paths") == ["K1-1/reports/b.md"]   # duplicate path kept, not dropped
+        # both paths resolve to the record
+        assert (await store.get_file("K1-1/protocol/a.md")) is not None
+        assert (await store.get_file("K1-1/reports/b.md")) is not None
+        # re-indexing the duplicate path doesn't clobber the primary
+        await store.add_file({"exp_id": "K1-1", "path": "K1-1/reports/b.md",
+                              "role": "report", "file_type": "md", "sha256": "x"}, ingest_path=b)
+        f2 = (await store.files("K1-1"))[0]
+        assert f2["path"] == "K1-1/protocol/a.md"
+        assert f2.get("other_paths") == ["K1-1/reports/b.md"]
+    _run(store, go)
+
+
 def test_add_file_replaces_changed_content(store, tmp_path):
     async def go():
         f = tmp_path / "README.md"

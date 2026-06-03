@@ -16,6 +16,7 @@ def _make_experiment(root):
     (root / ".DS_Store").write_bytes(b"junk")
     (root / "~$report.docx").write_bytes(b"lockfile")     # Office temp/lock file
     (root / "._hidden.csv").write_bytes(b"appledouble")   # macOS AppleDouble
+    (root / "empty.md").write_bytes(b"")                  # 0-byte file: skipped
     venv = root / "analysis" / ".venv" / "lib"
     venv.mkdir(parents=True)
     (venv / "thing.py").write_text("x = 1\n")
@@ -34,6 +35,8 @@ def test_iter_experiment_files_classifies_and_ignores(tmp_path):
     assert files["report.pdf"]["role"] == "report"
     # nothing from inside the .venv leaked in
     assert "thing.py" not in files
+    # 0-byte file is skipped (no content; collapses by hash)
+    assert "empty.md" not in files
 
 
 def test_csv_schema_and_preview(tmp_path):

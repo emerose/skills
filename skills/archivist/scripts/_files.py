@@ -66,6 +66,8 @@ def iter_experiment_files(exp_root: Path) -> Iterator[dict[str, Any]]:
         filename = path.name
         if _is_ignored(rel_parts, filename):
             continue
+        if path.stat().st_size == 0:
+            continue  # empty files carry no content and collapse spuriously by hash
         ext = path.suffix.lower()
         yield {
             "abs_path": path,

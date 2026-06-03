@@ -56,6 +56,21 @@ def test_structural_flags(tmp_path):
     assert any("layout:root-file:stray.txt" == f for f in flags)
 
 
+def test_duplicate_path_not_flagged_unindexed(tmp_path):
+    exp = _exp(tmp_path)
+    (exp / "protocol").mkdir()
+    (exp / "protocol" / "a.md").write_text("dup")
+    (exp / "reports").mkdir()
+    (exp / "reports" / "b.md").write_text("dup")        # both on disk
+    home = tmp_path
+    rel = lambda p: str(p.resolve().relative_to(home.resolve()))
+    # one record with the second path tracked as a duplicate
+    recs = [{"path": rel(exp / "protocol" / "a.md"), "role": "protocol", "cro": "X",
+             "other_paths": [rel(exp / "reports" / "b.md")]}]
+    flags = _audit.structural_flags(home, exp, {"exp_id": "K1-1", "cro": "X"}, recs)
+    assert not any(f.startswith("unindexed") for f in flags)   # dup path counts as indexed
+
+
 def test_staleness_via_deps_block(tmp_path):
     home = tmp_path
     (home / "K1-1" ).mkdir()

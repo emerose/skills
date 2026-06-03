@@ -41,8 +41,13 @@ def structural_flags(home: Path, exp_dir: Path, exp_rec: dict[str, Any],
         if p and not (home / p).exists():
             flags.append(f"file-missing:{p}")
 
-    # on-disk indexable files not represented in the index (drift -> reindex)
-    indexed = {fr.get("path") for fr in file_records}
+    # on-disk indexable files not represented in the index (drift -> reindex).
+    # A file is "indexed" if it's a primary path OR a tracked duplicate (other_paths).
+    indexed: set[str] = set()
+    for fr in file_records:
+        if fr.get("path"):
+            indexed.add(fr["path"])
+        indexed.update(fr.get("other_paths") or [])
     on_disk = {_relhome(home, f["abs_path"]) for f in _files.iter_experiment_files(exp_dir)}
     missing_from_index = sorted(on_disk - indexed)
     if missing_from_index:

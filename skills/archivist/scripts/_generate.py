@@ -48,8 +48,10 @@ def files_on_disk_table(file_records: list[dict[str, Any]], *, list_threshold: i
             continue
         names = sorted(_basename(r.get("path", "")) for r in recs)
         n = len(recs)
+        dups = sorted({_basename(p) for r in recs for p in (r.get("other_paths") or [])})
+        dup_note = f" (duplicate copies also on disk: {', '.join(f'`{d}`' for d in dups)})" if dups else ""
         if n <= list_threshold:
-            listing = ", ".join(f"`{x}`" for x in names)
+            listing = ", ".join(f"`{x}`" for x in names) + dup_note
         else:
             exts = Counter((r.get("file_type") or "?") for r in recs)
             ext_str = ", ".join(f"{c}×{e}" for e, c in exts.most_common())
