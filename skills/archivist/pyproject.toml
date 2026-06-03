@@ -1,0 +1,39 @@
+# Packaging for the `arx` CLI so it can be installed as a standalone tool:
+#
+#     uv tool install "git+https://github.com/emerose/skills#subdirectory=skills/archivist"
+#     arx --help
+#
+# This is OPTIONAL. The skill itself runs the very same code with no install via
+# the PEP 723 self-contained script:  `uv run skills/archivist/scripts/arx.py`.
+# The modules under scripts/ are flat top-level modules; `uv tool install` puts
+# them in an isolated per-tool venv, so the generic names never collide.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "archivist"
+version = "0.1.0"
+description = "A libkit-backed archivist for a tree of scientific experiments"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Sam Quigley", email = "quigley@emerose.com" }]
+dependencies = [
+    "libkit>=0.2.2",
+    "openpyxl>=3.1",
+    "platformdirs>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/emerose/skills"
+Repository = "https://github.com/emerose/skills"
+
+[project.scripts]
+arx = "arx:main"
+
+# Map scripts/ to the wheel root so arx.py + its sibling modules install as
+# importable top-level modules (matching how `uv run scripts/arx.py` runs them).
+[tool.hatch.build.targets.wheel]
+sources = ["scripts"]
+only-include = ["scripts"]
+exclude = ["**/__pycache__", "**/*.pyc"]

@@ -24,6 +24,19 @@ Because libkit embeds every document, an embedding backend is required: set
 local embeddings. See [`skills/bibliographer/SKILL.md`](skills/bibliographer/SKILL.md)
 and [`.env.example`](.env.example) for the available keys.
 
+### [archivist](skills/archivist/)
+
+Organize, index, and search a tree of scientific experiments kept as one folder
+per experiment — raw lab/CRO measurements, cleaned data, protocols, reports,
+analysis notebooks, and internal summaries. Indexes every file for full-text +
+semantic search inside a **libkit** store (narrative files embedded whole, tabular
+files as schema/preview cards, binaries as descriptors), catalogs each experiment
+with its CRO study IDs / assays / ASOs / models, cross-references related studies,
+reads exact values out of source spreadsheets, and keeps internal README/summary
+write-ups current as the underlying data changes. Driven by a bundled `arx` CLI;
+uses the same embedding backend as bibliographer. See
+[`skills/archivist/SKILL.md`](skills/archivist/SKILL.md).
+
 ## Install
 
 ### As a Claude Code plugin (recommended)
