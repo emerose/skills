@@ -21,8 +21,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+import _experiment
 import _files
-import _meta
 
 _CRUFT = {".DS_Store", "Thumbs.db"}
 
@@ -34,6 +34,8 @@ def structural_flags(home: Path, exp_dir: Path, exp_rec: dict[str, Any],
 
     if not (exp_dir / "README.md").is_file():
         flags.append("missing:readme")
+    if not (exp_dir / _experiment.SIDECAR_NAME).is_file():
+        flags.append("missing:experiment-yml")
 
     # file records whose on-disk file is gone
     for fr in file_records:
@@ -58,9 +60,10 @@ def structural_flags(home: Path, exp_dir: Path, exp_rec: dict[str, Any],
             or exp_rec.get("cro_study_ids")):
         flags.append("thin-metadata")
 
-    # layout: stray files at the experiment root (only README.* belongs there)
+    # layout: stray files at the experiment root (only README.* + experiment.yml belong)
     for child in sorted(exp_dir.iterdir()):
         if child.is_file() and child.name not in _CRUFT \
+                and child.name != _experiment.SIDECAR_NAME \
                 and not child.name.lower().startswith("readme") \
                 and not child.name.startswith("."):
             flags.append(f"layout:root-file:{child.name}")
@@ -112,24 +115,27 @@ def _zip_real_members(path: Path) -> list[str]:
         return []
 
 
-def staleness(text: str, home: Path) -> dict[str, list[str]] | None:
-    """Compare a generated doc's dependency block against the files on disk now.
+def staleness(exp_dir: Path, sidecar: dict[str, Any]) -> dict[str, Any]:
+    """Compare an experiment's recorded provenance fingerprint to the evidence on
+    disk now (see :func:`_experiment.compute_fingerprint` for the exact algorithm).
 
-    Returns ``{"missing": [...], "changed": [...]}`` (paths), or ``None`` if the doc
-    has no dependency block (so staleness can't be judged this way — fall back to the
-    semantic pass). An empty dict-of-lists means the doc is up to date.
+    Returns ``{"state": ...}`` where state is:
+      * ``"no-provenance"`` — the sidecar has never been stamped (can't judge by
+        fingerprint; needs a semantic review).
+      * ``"up-to-date"`` — recorded fingerprint matches the current evidence.
+      * ``"stale"`` — they differ; also returns ``recorded``/``current`` fingerprints,
+        the input counts, and ``reviewed_at`` so the mismatch is fully explainable.
     """
-    deps = _meta.parse_deps_block(text)
-    if deps is None:
-        return None
-    missing, changed = [], []
-    for d in deps:
-        p = home / d["path"]
-        if not p.exists():
-            missing.append(d["path"])
-        elif d.get("sha256") and _files.sha256_file(p) != d["sha256"]:
-            changed.append(d["path"])
-    return {"missing": sorted(missing), "changed": sorted(changed)}
+    prov = (sidecar or {}).get("provenance") or {}
+    recorded = prov.get("data_fingerprint")
+    if not recorded:
+        return {"state": "no-provenance"}
+    current, n_inputs, _ = _experiment.compute_fingerprint(exp_dir)
+    if current == recorded:
+        return {"state": "up-to-date", "fingerprint": current, "n_inputs": n_inputs}
+    return {"state": "stale", "recorded": recorded, "current": current,
+            "recorded_inputs": prov.get("n_inputs"), "current_inputs": n_inputs,
+            "reviewed_at": prov.get("reviewed_at")}
 
 
 def _relhome(home: Path, p: Path) -> str:

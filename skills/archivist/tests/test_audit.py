@@ -3,7 +3,6 @@
 import zipfile
 
 import _audit
-import _meta
 
 
 def _exp(tmp_path):
@@ -71,20 +70,18 @@ def test_duplicate_path_not_flagged_unindexed(tmp_path):
     assert not any(f.startswith("unindexed") for f in flags)   # dup path counts as indexed
 
 
-def test_staleness_via_deps_block(tmp_path):
-    home = tmp_path
-    (home / "K1-1" ).mkdir()
-    src = home / "K1-1" / "kd.csv"
-    src.write_text("a,b\n1,2\n")
-    import _files
-    sha = _files.sha256_file(src)
-    text_ok = _meta.set_deps_block("# README\n", [{"path": "K1-1/kd.csv", "sha256": sha}])
-    assert _audit.staleness(text_ok, home) == {"missing": [], "changed": []}
-    # change the file -> stale
-    src.write_text("a,b\n9,9\n")
-    assert _audit.staleness(text_ok, home)["changed"] == ["K1-1/kd.csv"]
-    # missing file -> stale
-    text_missing = _meta.set_deps_block("# README\n", [{"path": "K1-1/gone.csv", "sha256": "z"}])
-    assert _audit.staleness(text_missing, home)["missing"] == ["K1-1/gone.csv"]
-    # no deps block -> None (can't judge this way)
-    assert _audit.staleness("# README\n\nno deps\n", home) is None
+def test_staleness_via_fingerprint(tmp_path):
+    import _experiment
+    exp = _exp(tmp_path)
+    (exp / "data" / "kd.csv").write_text("a,b\n1,2\n")
+    # no provenance recorded yet
+    assert _audit.staleness(exp, {"exp_id": "K1-1"})["state"] == "no-provenance"
+    # stamp it -> up to date
+    sidecar = _experiment.stamp_provenance({"exp_id": "K1-1"}, exp, today="2026-06-03")
+    assert _audit.staleness(exp, sidecar)["state"] == "up-to-date"
+    # change an evidence file -> stale, with both fingerprints reported
+    (exp / "data" / "kd.csv").write_text("a,b\n9,9\n")
+    st = _audit.staleness(exp, sidecar)
+    assert st["state"] == "stale"
+    assert st["recorded"] != st["current"]
+    assert st["reviewed_at"] == "2026-06-03"

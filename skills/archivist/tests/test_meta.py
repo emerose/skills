@@ -90,30 +90,13 @@ def test_file_card_with_schema_and_preview():
     assert "animal_id,weight" in card
 
 
-def test_deps_block_roundtrip():
-    deps = [{"path": "K1-1/raw/a.csv", "sha256": "aa"},
-            {"path": "K1-1/reports/r.pdf", "sha256": "bb"}]
-    block = _meta.render_deps_block(deps)
-    parsed = _meta.parse_deps_block(f"# README\n\nsome text\n\n{block}\n")
-    assert parsed == sorted(deps, key=lambda d: d["path"])  # json sort_keys orders them
-    assert _meta.parse_deps_block("# no deps here") is None
-
-
-def test_set_deps_block_replaces_not_appends():
-    text = "# README\n\nbody\n"
-    once = _meta.set_deps_block(text, [{"path": "a", "sha256": "1"}])
-    twice = _meta.set_deps_block(once, [{"path": "a", "sha256": "2"}])
-    assert twice.count("archivist:deps") == 1            # replaced, not duplicated
-    assert _meta.parse_deps_block(twice)[0]["sha256"] == "2"
-
-
-def test_managed_block_insert_replace_preserve():
-    text = "# README\n\n## Synopsis\n\nHuman prose here.\n"
-    t1 = _meta.set_managed_block(text, "files", "## Files on disk\n\n- a.csv")
-    assert "Human prose here." in t1                     # narrative preserved
-    assert _meta.get_managed_block(t1, "files") == "## Files on disk\n\n- a.csv"
-    t2 = _meta.set_managed_block(t1, "files", "## Files on disk\n\n- a.csv\n- b.csv")
-    assert t2.count("archivist:begin:files") == 1        # replaced in place
-    assert "b.csv" in _meta.get_managed_block(t2, "files")
-    assert "Human prose here." in t2
-    assert _meta.get_managed_block(text, "files") is None
+def test_catalog_markdown_escapes_pipes():
+    # a stray pipe in any field must not corrupt the table (the K1-211101 bug)
+    exps = [{"exp_id": "K1-1", "name": "A | B", "cro": "X", "status": "complete",
+             "cro_study_ids": ["Title | Relationship"], "assays": ["qPCR"], "asos": ["ASO-1"]}]
+    import re
+    md = _meta.catalog_markdown(exps)
+    row = [ln for ln in md.splitlines() if ln.startswith("| K1-1 ")][0]
+    delimiters = re.findall(r"(?<!\\)\|", row)       # pipes NOT escaped = column delimiters
+    assert len(delimiters) == 8                      # 7 columns -> exactly 8 delimiters
+    assert "A \\| B" in row and "Title \\| Relationship" in row   # data pipes escaped
