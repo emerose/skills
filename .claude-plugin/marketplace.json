@@ -20,6 +20,19 @@
       "repository": "https://github.com/emerose/skills",
       "category": "research",
       "tags": ["bibliography", "research", "pdf", "citations", "academic", "rag", "libkit"]
+    },
+    {
+      "name": "archivist",
+      "source": "./",
+      "description": "Organize, index, and search a tree of scientific experiments (raw lab/CRO data, protocols, reports, notebooks, and internal summaries) kept as one folder per experiment: full-text + semantic search inside a libkit store, an experiment catalog with CRO study IDs / assays / ASOs / models, cross-referenced related studies, exact-value reads from source spreadsheets, and provenance-tracked internal summaries kept current as data changes. Built on libkit.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Sam Quigley",
+        "email": "quigley@emerose.com"
+      },
+      "repository": "https://github.com/emerose/skills",
+      "category": "research",
+      "tags": ["science", "lab-data", "experiments", "cro", "research", "rag", "libkit"]
     }
   ]
 }
