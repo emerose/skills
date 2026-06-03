@@ -36,7 +36,7 @@ numbers," "show me everything we ran with ASO 154," "is this summary still true.
 
 ## The store: libkit (no separate database)
 
-libkit (≥ 0.2.2) **is** the store — there is no separate archivist database. The
+libkit (≥ 0.2.3) **is** the store — there is no separate archivist database. The
 managed folder holds a libkit library under `<home>/.archivist/catalog.duckdb`
 (gitignored), which indexes every file and tracks all metadata. Three *kinds* of
 libkit document live there, distinguished by the `kind` metadata key:
@@ -217,7 +217,7 @@ fixes upstream to libkit by PR, and verify changes. Archivist-specific notes:
 - **libkit is the upstream** for store/embedding/cache fixes — issue + PR there, not a
   local workaround (this is how bibliographer drove several libkit features).
 - **Run the tests**: `uv run --with pytest --with openpyxl pytest skills/archivist/tests/ -q`
-  runs the pure helpers in well under a second; add `--with "libkit>=0.2.2" --with
+  runs the pure helpers in well under a second; add `--with "libkit>=0.2.3" --with
   platformdirs` to include the store integration test (fake embedder + Markdown
   loader — no model or keys). Add a test when you add behavior.
 - **Never hand-edit `.archivist/catalog.duckdb` or move files manually** — go through

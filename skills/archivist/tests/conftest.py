@@ -6,7 +6,7 @@ Run the suite with uv (it pulls test-time deps without a virtualenv):
     uv run --with pytest --with openpyxl pytest skills/archivist/tests/ -q
 
     # including the store integration test:
-    uv run --with pytest --with openpyxl --with "libkit>=0.2.2" \
+    uv run --with pytest --with openpyxl --with "libkit>=0.2.3" \
             --with platformdirs \
             pytest skills/archivist/tests/ -q
 """

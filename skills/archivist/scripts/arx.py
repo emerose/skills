@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["libkit>=0.2.2", "openpyxl>=3.1", "platformdirs>=4.0"]
+# dependencies = ["libkit>=0.2.3", "openpyxl>=3.1", "platformdirs>=4.0"]
 # ///
 """arx - a libkit-backed archivist for a tree of scientific experiments.
 

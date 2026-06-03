@@ -68,18 +68,9 @@ class ArchivistStore:
         """
         from libkit import Library
         from libkit.errors import EmbedderMismatch
-        from libkit.loaders import default_loaders
-        from libkit.loaders.markdown import MarkdownLoader
 
         store_dir = home / STORE_DIRNAME
         store_dir.mkdir(parents=True, exist_ok=True)
-        # libkit's standard map covers md/pdf/office but not plain text; register
-        # .txt/.text so lab notes and data-quality .txt files get embedded too.
-        # WORKAROUND for libkit #43 (default_loaders omits .txt) — forward-compatible
-        # via setdefault; remove once libkit ships the fix and the pin bumps.
-        loaders = default_loaders()
-        for ext in (".txt", ".text"):
-            loaders.setdefault(ext, MarkdownLoader())
         embedding = embedding or os.environ.get("ARCHIVIST_EMBEDDING", "remote")
         model = model or os.environ.get("ARCHIVIST_EMBED_MODEL", "qwen3_600m")
         allow_mismatch = os.environ.get("ARCHIVIST_ALLOW_EMBEDDER_MISMATCH", "").lower() in (
@@ -90,7 +81,6 @@ class ArchivistStore:
                 store_dir / DB_FILENAME,
                 embedding=embedding,
                 model=model,
-                loaders=loaders,
                 allow_embedder_mismatch=allow_mismatch,
             )
         except EmbedderMismatch as e:
