@@ -1,0 +1,25 @@
+{
+  "name": "emerose-skills",
+  "owner": {
+    "name": "Sam Quigley",
+    "email": "quigley@emerose.com"
+  },
+  "metadata": {
+    "description": "Agent Skills by emerose, distributed as Claude Code plugins."
+  },
+  "plugins": [
+    {
+      "name": "bibliographer",
+      "source": "./",
+      "description": "Manage a personal collection of academic articles: add papers from a DOI/arXiv/PMID/PMCID/S2 id or a PDF (auto-fetching metadata from Crossref, arXiv, PubMed, Semantic Scholar, and Unpaywall), file PDFs into a human-readable author tree, bulk-import a folder, recover metadata for unverified scans, search inside the papers, browse via a generated HTML viewer, and audit the library. Built on libkit.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Sam Quigley",
+        "email": "quigley@emerose.com"
+      },
+      "repository": "https://github.com/emerose/skills",
+      "category": "research",
+      "tags": ["bibliography", "research", "pdf", "citations", "academic", "rag", "libkit"]
+    }
+  ]
+}

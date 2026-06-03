@@ -1,0 +1,13 @@
+{
+  "name": "bibliographer",
+  "version": "0.1.0",
+  "description": "A libkit-backed bibliographer for a personal collection of academic articles: add/import papers from DOI, arXiv, PMID/PMCID, Semantic Scholar id, or PDF; auto-fetch metadata; file PDFs into a human-readable author tree; full-text + semantic search; HTML viewer; audit.",
+  "author": {
+    "name": "Sam Quigley",
+    "email": "quigley@emerose.com"
+  },
+  "homepage": "https://github.com/emerose/skills",
+  "repository": "https://github.com/emerose/skills",
+  "license": "MIT",
+  "keywords": ["bibliography", "research", "pdf", "citations", "academic", "rag", "libkit"]
+}

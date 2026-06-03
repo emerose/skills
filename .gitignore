@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.uv/
+
+# Local libraries / databases produced by the skills (never commit a user's collection)
+*.duckdb
+*.duckdb.wal
+
+# Skill-creator eval/run artifacts
+skills/*-workspace/
+**/evals/runs/
+
+# Secrets / local config (API keys: Semantic Scholar, Datalab, DeepInfra, ...)
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# uv project lockfile — scripts use PEP 723 inline deps and `uv tool install`
+# resolves fresh, so a committed lock would only go stale.
+uv.lock
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local Claude Code settings (keep shared config, ignore machine-local)
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+*.swp
