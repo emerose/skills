@@ -172,8 +172,18 @@ async def _index_experiment(store: ArchivistStore, exp_dir: Path,
         cls = f["classification"]
         try:
             if cls == "narrative" and size <= MAX_EMBED_BYTES:
-                rec["indexed_as"] = _meta.INDEXED_CONTENT
-                await store.add_file(rec, ingest_path=abs_path)
+                try:
+                    rec["indexed_as"] = _meta.INDEXED_CONTENT
+                    await store.add_file(rec, ingest_path=abs_path)
+                except Exception as e:
+                    # Parse/loader failure: don't drop the file — catalogue it as a
+                    # descriptor so it's still discoverable, and note why.
+                    if verbose:
+                        print(f"  ! {rel}: {type(e).__name__}: {e} (catalogued as descriptor)",
+                              file=sys.stderr)
+                    rec["indexed_as"] = _meta.INDEXED_DESCRIPTOR
+                    rec["note"] = f"content not embedded ({type(e).__name__}); catalogued only"
+                    await store.add_file(rec, card_markdown=_meta.file_card_markdown(rec))
             elif cls == "tabular":
                 schema, preview = _files.schema_and_preview(abs_path)
                 rec["indexed_as"] = _meta.INDEXED_SCHEMA
@@ -631,9 +641,11 @@ async def _maybe_pr(store: ArchivistStore, paths, title: str, body: str,
 
 def _changed_paths(home: Path) -> list[str]:
     import subprocess
-    out = subprocess.run(["git", "-C", str(home), "status", "--porcelain"],
+    # -z gives NUL-separated, UNquoted paths (paths here contain spaces), so we can
+    # hand them straight to `git add --` without quoting/escaping surprises.
+    out = subprocess.run(["git", "-C", str(home), "status", "--porcelain", "-z"],
                          capture_output=True, text=True).stdout
-    return [line[3:] for line in out.splitlines() if line.strip()]
+    return [entry[3:] for entry in out.split("\0") if entry.strip()]
 
 
 # --------------------------------------------------------------------------- #

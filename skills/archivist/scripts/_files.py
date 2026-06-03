@@ -37,6 +37,10 @@ def sha256_file(path: Path) -> str:
 def _is_ignored(rel_parts: tuple[str, ...], filename: str) -> bool:
     if filename in IGNORE_FILE_NAMES:
         return True
+    if filename.startswith("~$") or filename.startswith("._"):
+        return True  # Office lock/temp files and macOS AppleDouble files
+    if filename.endswith((".tmp", ".crdownload")):
+        return True
     for part in rel_parts:
         if part in IGNORE_DIR_NAMES or part in IGNORE_PATH_PARTS:
             return True

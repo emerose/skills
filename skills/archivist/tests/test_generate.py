@@ -13,9 +13,19 @@ FILES = [
 
 def test_files_on_disk_table_grouped():
     t = _generate.files_on_disk_table(FILES)
-    assert "`K1-1/data/kd.csv`" in t
+    assert "`kd.csv`" in t                       # basenames, grouped by role
+    assert "**data** (1)" in t
     # readme sorts before data before raw before report
     assert t.index("README.md") < t.index("kd.csv") < t.index("plate.eds") < t.index("report.pdf")
+
+
+def test_files_on_disk_table_summarizes_large_roles():
+    many = [{"path": f"K1-1/raw/m{i:03d}.csv", "role": "raw", "file_type": "csv"}
+            for i in range(50)]
+    t = _generate.files_on_disk_table(many, list_threshold=12)
+    assert "**raw** (50)" in t
+    assert "50×csv" in t                          # summarised, not 50 rows
+    assert "e.g." in t and t.count("`") <= 8      # only a few examples shown
 
 
 def test_deps_exclude_readme_use_stored_sha():

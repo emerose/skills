@@ -55,7 +55,7 @@ def store(tmp_path):
         db_path=tmp_path / ".archivist" / "catalog.duckdb",
         embedder=_FakeEmbedder(),
         chunker=_FakeChunker(),
-        loaders={".md": MarkdownLoader()},
+        loaders={".md": MarkdownLoader(), ".txt": MarkdownLoader()},
         cache_enabled=False,
     )
     return ArchivistStore(tmp_path, Library(cfg))
@@ -112,6 +112,19 @@ def test_add_file_narrative_ingests_real_file(store, tmp_path):
         await store.add_file(rec, ingest_path=f)
         hits = await store.query("residual expression", limit=5)
         assert any("residual" in h.chunk.text for h in hits)
+    _run(store, go)
+
+
+def test_txt_narrative_indexes_and_is_queryable(store, tmp_path):
+    async def go():
+        f = tmp_path / "DATA_QUALITY_NOTES.txt"
+        f.write_text("Wells B3 and C4 were excluded due to bubble artifacts.\n")
+        rec = {"exp_id": "K1-1", "path": "K1-1/DATA_QUALITY_NOTES.txt",
+               "filename": "DATA_QUALITY_NOTES.txt", "role": "raw", "file_type": "txt",
+               "sha256": "t", "indexed_as": _meta.INDEXED_CONTENT}
+        await store.add_file(rec, ingest_path=f)          # .txt must not error
+        hits = await store.query("bubble artifacts excluded wells", limit=5)
+        assert any("bubble" in h.chunk.text for h in hits)
     _run(store, go)
 
 

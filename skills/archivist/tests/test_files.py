@@ -14,6 +14,8 @@ def _make_experiment(root):
     (root / "reports" / "report.pdf").write_bytes(b"%PDF-1.4 fake")
     # cruft that must be ignored
     (root / ".DS_Store").write_bytes(b"junk")
+    (root / "~$report.docx").write_bytes(b"lockfile")     # Office temp/lock file
+    (root / "._hidden.csv").write_bytes(b"appledouble")   # macOS AppleDouble
     venv = root / "analysis" / ".venv" / "lib"
     venv.mkdir(parents=True)
     (venv / "thing.py").write_text("x = 1\n")
