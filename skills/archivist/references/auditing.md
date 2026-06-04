@@ -45,15 +45,62 @@ Hashing tells you an input *changed*, not whether the *prose is still true*. For
 that, read the data. `arx audit --json` emits, per experiment, its `source_files`.
 Fan out one agent per experiment:
 
-> Read this experiment's `README.md` and its `source_files`. Does every claim, number,
-> and caveat in the README still match the data? List specific contradictions (claim
-> vs. what the data shows), missing caveats, and stale numbers. Don't rewrite — report.
+> Read this experiment's `README.md` and its `source_files` (and any other files it
+> cites — e.g. CRO TC decks/minutes under `Shared/`). For each specific claim, number,
+> and caveat, decide whether the data **contradicts** it or merely differs in
+> **framing/labeling**. Report only genuine contradictions, stale numbers, and missing
+> major caveats — classify each as `contradiction` vs `imprecision`. Also return the
+> exact list of files you actually relied on. Don't rewrite; report.
 
-Collect the contradictions; for each confirmed one, edit the README prose (preserving
-the human caveats that still hold), run `arx review <exp>` to re-stamp provenance, and
-open a PR with `arx pr`. This is the same technique bibliographer uses to verify a
-paper's content against its metadata, and it's the **authoritative** check — the
-fingerprint is a change signal, not proof of (in)correctness.
+The verdict is a **pointer to where to look**, not the truth — always re-verify against
+the primary data before changing prose (the agent can over-read; see the discipline
+below). For each confirmed contradiction, correct the README, run `arx review <exp>`
+(declaring every file you relied on as an input — see below), and open a one-experiment
+PR with `arx pr`. This is the **authoritative** content check — the fingerprint is a
+change signal, not proof of (in)correctness.
+
+## 4. Correction discipline (learned doing real reviews)
+
+Crispness without nitpicking — fix what's wrong, clarify what's merely loosely stated,
+leave what's defensible:
+
+- **Re-verify against the primary data, not the audit verdict.** Open the actual
+  CSV/deck and check the file, column, and value. (A flag of "only 3 plates" turned out
+  to be "6 cell plates → 3 qPCR plates" — both true at different layers.)
+- **Separate a contradiction from a framing/labeling nuance.** Fix claims the data
+  *contradicts* or that *overstate certainty*. Don't flip a number to a different but
+  equally-defensible one, or "correct" a labeling choice the CRO itself used (e.g.
+  "22 hits" where the 22nd is carried as a control → clarify, don't just assert 21 is
+  "right" and 22 "wrong").
+- **Read for internal consistency first.** READMEs often contradict *themselves*
+  ("8,000 selected" vs "Exp 4 used 6,000 and 8,000"; "22 hits" while listing one of
+  them as a control) — that alone often pinpoints the error before you touch the data.
+- **For "passed / accepted / robust" claims the data seems to undercut, find the
+  rationale before declaring the prose wrong.** Check the CRO decision docs (TC
+  decks/minutes). Often the shortfall was known and explicitly accepted — state it
+  honestly *with the source* (e.g. "positive control 53%, below the >60% criterion, but
+  CRL deemed it consistent per TC07") rather than either parroting "all passed" or
+  flatly calling it a failure.
+- **Distinguish "passed a threshold" from "was selected" from "ranked top."** Don't
+  conflate "164 exceeded 50% KD" with "22 were carried forward" with "the 5 highest-KD."
+- **Check sibling/related experiments for the established convention** when a
+  count/structure is ambiguous (same CRO/SOW/phase often share a plate-replication
+  scheme).
+- **Preserve hard-won caveats**; prefer an honest hedge over a clean falsehood.
+- **One experiment per PR**, and cite the exact evidence (file + column + value) in the
+  PR body so the correction is independently checkable.
+
+## 5. Provenance: list everything you relied on
+
+When you verify or correct a README, **declare every file you consulted as a provenance
+input** so the prose's evidentiary basis is recorded and drift-tracked — not just the
+in-folder data. In-folder data files are auto-included by `arx review`; add external
+ones explicitly:
+
+    arx review <exp> --input "Shared/CRL/SOW1/TC Meetings/TC07 - CRL Kicho.pptx"
+
+If a corrected claim cites a TC deck or minutes, that file belongs in `inputs`. (The
+semantic-pass agent's "files relied on" list, above, is exactly this set.)
 
 ## Cadence
 
