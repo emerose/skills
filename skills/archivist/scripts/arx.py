@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["libkit>=0.2.2", "openpyxl>=3.1", "platformdirs>=4.0"]
+# dependencies = ["libkit>=0.2.3", "openpyxl>=3.1", "platformdirs>=4.0", "pyyaml>=6.0"]
 # ///
 """arx - a libkit-backed archivist for a tree of scientific experiments.
 
@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any, NoReturn
@@ -34,6 +33,7 @@ from typing import Any, NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _audit  # noqa: E402
+import _experiment  # noqa: E402
 import _extract  # noqa: E402
 import _files  # noqa: E402
 import _generate  # noqa: E402
@@ -172,8 +172,18 @@ async def _index_experiment(store: ArchivistStore, exp_dir: Path,
         cls = f["classification"]
         try:
             if cls == "narrative" and size <= MAX_EMBED_BYTES:
-                rec["indexed_as"] = _meta.INDEXED_CONTENT
-                await store.add_file(rec, ingest_path=abs_path)
+                try:
+                    rec["indexed_as"] = _meta.INDEXED_CONTENT
+                    await store.add_file(rec, ingest_path=abs_path)
+                except Exception as e:
+                    # Parse/loader failure: don't drop the file — catalogue it as a
+                    # descriptor so it's still discoverable, and note why.
+                    if verbose:
+                        print(f"  ! {rel}: {type(e).__name__}: {e} (catalogued as descriptor)",
+                              file=sys.stderr)
+                    rec["indexed_as"] = _meta.INDEXED_DESCRIPTOR
+                    rec["note"] = f"content not embedded ({type(e).__name__}); catalogued only"
+                    await store.add_file(rec, card_markdown=_meta.file_card_markdown(rec))
             elif cls == "tabular":
                 schema, preview = _files.schema_and_preview(abs_path)
                 rec["indexed_as"] = _meta.INDEXED_SCHEMA
@@ -199,29 +209,21 @@ async def _index_experiment(store: ArchivistStore, exp_dir: Path,
         "name": parsed["name"],
         "title": parsed["name"],
         "folder": store.relpath(exp_dir),
-        "cro_study_ids": [parsed["cro_study_id_guess"]] if parsed.get("cro_study_id_guess") else [],
         "file_counts": counts,
     }
-    # Enrich from the experiment's README (the richest metadata source) + folder name.
-    readme = exp_dir / "README.md"
-    if readme.is_file():
+    # Structured metadata comes ONLY from the schema'd experiment.yml sidecar — never
+    # scraped from README prose. A missing/invalid sidecar leaves metadata minimal
+    # (and `check`/`audit` flag it); a bad sidecar surfaces a clear error, not silence.
+    sidecar = exp_dir / _experiment.SIDECAR_NAME
+    if sidecar.is_file():
         try:
-            extracted = _extract.extract_from_readme(
-                readme.read_text(encoding="utf-8", errors="replace"), exp_id=parsed["exp_id"])
-        except Exception:
-            extracted = {}
-        # union study ids (folder guess + README), extracted scalars win otherwise
-        ids = list(dict.fromkeys((exp_rec["cro_study_ids"]) + (extracted.get("cro_study_ids") or [])))
-        exp_rec.update(extracted)
-        if ids:
-            exp_rec["cro_study_ids"] = ids
-        exp_rec.setdefault("name", parsed["name"])
-    # Status from the folder-name suffix, e.g. "… (Failed)" / "… (Terminated)" / DRAFT.
-    if not exp_rec.get("status"):
-        for status, pats in _extract.STATUS_HINTS.items():
-            if any(re.search(p, parsed["name"], re.IGNORECASE) for p in pats):
-                exp_rec["status"] = status
-                break
+            meta = _experiment.read_sidecar(sidecar)
+            meta.pop("exp_id", None)        # folder is authoritative for the id
+            exp_rec.update(meta)
+            exp_rec.setdefault("name", parsed["name"])
+        except _experiment.SidecarError as e:
+            print(f"  ! {parsed['exp_id']}: {e}", file=sys.stderr)
+            exp_rec["metadata_error"] = str(e)
     await store.upsert_experiment(exp_rec)
     summary = {"exp_id": parsed["exp_id"], **counts}
     if not verbose:
@@ -269,9 +271,13 @@ async def cmd_show(store: ArchivistStore, args: argparse.Namespace) -> None:
         v = rec.get(key)
         if v:
             print(f"  {label}: {', '.join(v) if isinstance(v, list) else v}")
-    print(f"  Files ({len(files)}):")
-    for fr in sorted(files, key=lambda r: (r.get("role", ""), r.get("path", ""))):
-        print(f"    [{fr.get('role','?'):8}] {fr.get('path')}")
+    for label, key in (("Assays", "assays"), ("ASOs", "asos"), ("Model", "model")):
+        v = rec.get(key)
+        if v:
+            print(f"  {label}: {', '.join(v) if isinstance(v, list) else v}")
+    print(f"\n  Files ({len(files)}):")
+    for line in _generate.files_on_disk_table(files).splitlines():
+        print(f"  {line}")
 
 
 async def cmd_search(store: ArchivistStore, args: argparse.Namespace) -> None:
@@ -389,7 +395,8 @@ async def cmd_entity(store: ArchivistStore, args: argparse.Namespace) -> None:
 
 
 async def cmd_new(store: ArchivistStore, args: argparse.Namespace) -> None:
-    """Scaffold a new experiment folder (subdirs + README template) and index it."""
+    """Scaffold a new experiment folder: subdirs + a prose README + a starter
+    experiment.yml (the structured metadata), then index it."""
     parsed = _meta.parse_experiment_dirname(f"{args.exp_id} - {args.name}")
     if not parsed:
         die(f"invalid experiment id/name (expected K1-YYMMXX): {args.exp_id!r}")
@@ -398,16 +405,21 @@ async def cmd_new(store: ArchivistStore, args: argparse.Namespace) -> None:
         die(f"folder already exists: {folder}")
     for sub in ("raw", "data", "protocol", "reports", "analysis"):
         (folder / sub).mkdir(parents=True, exist_ok=True)
-    rec = {"exp_id": args.exp_id, "name": args.name,
-           "cro": args.cro, "cro_study_ids": [args.study_id] if args.study_id else [],
-           "model": args.model}
-    (folder / "README.md").write_text(_meta.readme_template(rec), encoding="utf-8")
+    (folder / "README.md").write_text(
+        _meta.readme_template({"exp_id": args.exp_id, "name": args.name}), encoding="utf-8")
+    meta = _experiment.validate({
+        "exp_id": args.exp_id, "name": args.name, "status": "planned",
+        "cro": args.cro, "model": args.model,
+        "cro_study_ids": [args.study_id] if args.study_id else [],
+    })
+    (folder / _experiment.SIDECAR_NAME).write_text(_experiment.dump_sidecar(meta), encoding="utf-8")
     await _index_experiment(store, folder.resolve(), parsed, verbose=not args.json)
     if args.json:
         emit_json({"created": store.relpath(folder), "exp_id": args.exp_id})
     else:
-        print(f"created {store.relpath(folder)} (raw/ data/ protocol/ reports/ analysis/ + README.md)")
-        print(f"indexed as {args.exp_id}; fill in README.md, then `arx index {args.exp_id}`")
+        print(f"created {store.relpath(folder)} (raw/ data/ protocol/ reports/ analysis/ "
+              f"+ README.md + experiment.yml)")
+        print(f"indexed as {args.exp_id}; write README.md prose + fill experiment.yml")
 
 
 async def cmd_intake(store: ArchivistStore, args: argparse.Namespace) -> None:
@@ -515,24 +527,28 @@ async def cmd_check(store: ArchivistStore, args: argparse.Namespace) -> None:
 
 
 async def cmd_audit(store: ArchivistStore, args: argparse.Namespace) -> None:
-    """Staleness of generated docs (via their dependency blocks) + a worklist for
-    the parallel-agent semantic pass."""
+    """Provenance staleness (experiment.yml fingerprint vs the evidence on disk) +
+    a worklist for the parallel-agent semantic pass."""
     report = []
     async for exp_dir, exp_id in _experiment_dirs(store, args.experiment):
-        readme = exp_dir / "README.md"
+        sidecar_path = exp_dir / _experiment.SIDECAR_NAME
         files = await store.files(exp_id)
-        entry: dict[str, Any] = {"exp_id": exp_id, "readme": store.relpath(readme) if readme.exists() else None}
-        if readme.exists():
-            stale = _audit.staleness(readme.read_text(encoding="utf-8", errors="replace"), store.home)
-            if stale is None:
-                entry["staleness"] = "no-deps-block (needs semantic review)"
-            elif stale["missing"] or stale["changed"]:
-                entry["staleness"] = "STALE"
-                entry["changed_inputs"] = stale["changed"]
-                entry["missing_inputs"] = stale["missing"]
-            else:
-                entry["staleness"] = "up-to-date"
-        # source files an agent should read to verify the summary semantically
+        entry: dict[str, Any] = {"exp_id": exp_id}
+        if not sidecar_path.is_file():
+            entry["staleness"] = "no-experiment-yml"
+        else:
+            try:
+                sidecar = _experiment.read_sidecar(sidecar_path)
+                st = _experiment.staleness(store.home, exp_dir, sidecar)
+                entry["staleness"] = st["state"]
+                if st["state"] == "stale":
+                    for k in ("changed", "missing", "added", "artifact_changed", "reviewed_at"):
+                        if st.get(k):
+                            entry[k] = st[k]
+            except _experiment.SidecarError as e:
+                entry["staleness"] = "invalid-experiment-yml"
+                entry["error"] = str(e)
+        # source files an agent should read to verify the prose semantically
         entry["source_files"] = [fr["path"] for fr in files
                                  if fr.get("role") in ("data", "report", "raw", "analysis")]
         report.append(entry)
@@ -540,69 +556,115 @@ async def cmd_audit(store: ArchivistStore, args: argparse.Namespace) -> None:
         emit_json(report)
         return
     for e in report:
-        tag = e.get("staleness", "no-readme")
-        print(f"{e['exp_id']}: {tag}")
-        for p in e.get("changed_inputs", []):
-            print(f"    changed: {p}")
-        for p in e.get("missing_inputs", []):
-            print(f"    missing: {p}")
+        print(f"{e['exp_id']}: {e['staleness']}")
+        if e.get("error"):
+            print(f"    {e['error']}")
+        if e.get("staleness") == "stale":
+            if e.get("artifact_changed"):
+                print("    README edited since last review")
+            for p in e.get("changed", []):
+                print(f"    changed: {p}")
+            for p in e.get("missing", []):
+                print(f"    missing: {p}")
+            for p in e.get("added", []):
+                print(f"    added (unrecorded): {p}")
+            print(f"    last reviewed {e.get('reviewed_at')}")
     print("\nFor the semantic pass, run `arx audit --json` and fan out an agent per "
-          "experiment to read its source_files and verify the README's claims.")
+          "experiment to read its source_files and verify the README prose.")
 
 
-async def cmd_readme(store: ArchivistStore, args: argparse.Namespace) -> None:
-    """(Re)generate an experiment README's managed blocks (Files-on-disk + deps),
-    preserving all narrative. With --pr, open a pull request for the change."""
+async def cmd_meta(store: ArchivistStore, args: argparse.Namespace) -> None:
+    """Show an experiment's structured metadata (from experiment.yml), or with
+    --suggest, print a *draft* sidecar derived heuristically from the README for an
+    agent/human to review and write. The tool never writes the sidecar from prose."""
     found = _find_experiment_dir(store.home, args.experiment)
     if not found:
         die(f"no experiment matching {args.experiment!r}")
     exp_dir, parsed = found
-    exp_id = parsed["exp_id"]
-    rec = await store.get_experiment(exp_id) or {"exp_id": exp_id, "name": parsed["name"]}
-    files = await store.files(exp_id)
-    readme = exp_dir / "README.md"
-    existing = readme.read_text(encoding="utf-8", errors="replace") if readme.exists() else None
-    new_text = _generate.refresh_readme(existing, rec, files)
-    if new_text == existing:
-        print(f"{exp_id}: README already up to date")
+    sidecar = exp_dir / _experiment.SIDECAR_NAME
+
+    if args.suggest:
+        readme = exp_dir / "README.md"
+        draft: dict[str, Any] = {"exp_id": parsed["exp_id"], "name": parsed["name"]}
+        if readme.is_file():
+            guess = _extract.extract_from_readme(
+                readme.read_text(encoding="utf-8", errors="replace"), exp_id=parsed["exp_id"])
+            for k in ("title", "cro", "cro_study_ids", "status", "model", "assays", "asos", "related"):
+                if guess.get(k):
+                    draft[k] = guess[k]
+        try:
+            draft = _experiment.validate(draft)
+        except _experiment.SidecarError:
+            pass  # a draft is allowed to be imperfect; the reviewer fixes it
+        print(f"# SUGGESTED draft for {sidecar} — REVIEW before saving; not authoritative.")
+        print(_experiment.dump_sidecar(draft))
         return
-    readme.write_text(new_text, encoding="utf-8")
-    rel = store.relpath(readme)
-    print(f"{'updated' if existing else 'created'} {rel} (managed Files-on-disk + deps blocks)")
-    if args.pr:
-        await _maybe_pr(store, [rel], f"Update README for {exp_id}",
-                        f"Refresh archivist-managed sections of {exp_id}'s README.", args)
+
+    if not sidecar.is_file():
+        die(f"no {_experiment.SIDECAR_NAME} for {parsed['exp_id']} — create one "
+            f"(see `arx meta {parsed['exp_id']} --suggest` for a draft)")
+    try:
+        meta = _experiment.read_sidecar(sidecar)
+    except _experiment.SidecarError as e:
+        die(str(e))
+    emit_json(meta)
 
 
-async def cmd_summary(store: ArchivistStore, args: argparse.Namespace) -> None:
-    """(Re)generate the top-level scientific summary (SUMMARY.md): the experiment
-    index + dependency block. Narrative synthesis is preserved. --pr opens a PR."""
-    exps = await store.experiments()
-    readme_deps = []
-    for child in sorted(store.home.iterdir()):
-        if child.is_dir() and _meta.parse_experiment_dirname(child.name):
-            rd = child / "README.md"
-            if rd.is_file():
-                readme_deps.append({"path": store.relpath(rd), "sha256": _files.sha256_file(rd)})
-    summary_path = store.home / "SUMMARY.md"
-    existing = summary_path.read_text(encoding="utf-8", errors="replace") if summary_path.exists() else None
-    # preserve narrative: refresh managed block + deps on the existing doc if present
-    base = existing if existing is not None else None
-    new_text = _generate.top_summary(exps, readme_deps)
-    if base is not None:
-        new_text = _meta.set_managed_block(
-            base, "experiment-index",
-            _meta.get_managed_block(new_text, "experiment-index") or "")
-        new_text = _meta.set_deps_block(new_text, readme_deps)
-    if new_text == existing:
-        print("SUMMARY.md already up to date")
+async def cmd_fingerprint(store: ArchivistStore, args: argparse.Namespace) -> None:
+    """Show the input set `review` would record for an experiment's README right now —
+    the in-folder data files (+ any externally-declared inputs), each with its current
+    sha256. Lets you see exactly what provenance will track."""
+    found = _find_experiment_dir(store.home, args.experiment)
+    if not found:
+        die(f"no experiment matching {args.experiment!r}")
+    exp_dir, parsed = found
+    sidecar = exp_dir / _experiment.SIDECAR_NAME
+    declared = []
+    if sidecar.is_file():
+        meta = _experiment.read_sidecar(sidecar)
+        exp_rel = exp_dir.resolve().relative_to(store.home.resolve()).as_posix()
+        entry = _experiment._provenance_entry(meta, _experiment.DEFAULT_ARTIFACT) or {}
+        declared = [i["path"] for i in (entry.get("inputs") or [])
+                    if not i["path"].startswith(exp_rel + "/")]
+    inputs, missing = _experiment.resolve_inputs(store.home, exp_dir, declared)
+    if args.json:
+        emit_json({"exp_id": parsed["exp_id"], "inputs": inputs, "missing": missing})
         return
-    summary_path.write_text(new_text, encoding="utf-8")
-    rel = store.relpath(summary_path)
-    print(f"{'updated' if existing else 'created'} {rel} ({len(exps)} experiments indexed)")
-    if args.pr:
-        await _maybe_pr(store, [rel], "Update scientific summary",
-                        "Refresh the top-level experiment index + dependency block.", args)
+    for i in inputs:
+        print(f"  {i['sha256']}  {i['path']}")
+    print(f"({len(inputs)} input files" + (f", {len(missing)} declared-but-missing" if missing else "") + ")")
+    for m in missing:
+        print(f"  ! missing: {m}", file=sys.stderr)
+
+
+async def cmd_review(store: ArchivistStore, args: argparse.Namespace) -> None:
+    """Mark an experiment's README as verified against its data: record an explicit
+    input list (with each file's sha256) + the README's sha + a review date in
+    experiment.yml. In-folder data files are included automatically; declare any
+    external dependency (e.g. CRO slides under Shared/) with --input <repo-rel path>
+    (repeatable; preserved across re-reviews). `audit` then reports per-file drift."""
+    found = _find_experiment_dir(store.home, args.experiment)
+    if not found:
+        die(f"no experiment matching {args.experiment!r}")
+    exp_dir, parsed = found
+    sidecar = exp_dir / _experiment.SIDECAR_NAME
+    if not sidecar.is_file():
+        die(f"no {_experiment.SIDECAR_NAME} for {parsed['exp_id']} — create one first")
+    try:
+        meta = _experiment.read_sidecar(sidecar)
+    except _experiment.SidecarError as e:
+        die(str(e))
+    updated, missing = _experiment.review(store.home, exp_dir, meta, today=args.date,
+                                          extra_inputs=args.input or [])
+    sidecar.write_text(_experiment.dump_sidecar(updated), encoding="utf-8")
+    entry = _experiment._provenance_entry(updated, _experiment.DEFAULT_ARTIFACT)
+    if args.json:
+        emit_json({"exp_id": parsed["exp_id"], "provenance": entry, "missing": missing})
+    else:
+        print(f"stamped {parsed['exp_id']}: README verified against {len(entry['inputs'])} "
+              f"input files (reviewed {entry['reviewed_at']})")
+        for m in missing:
+            print(f"  ! declared input not found on disk: {m}", file=sys.stderr)
 
 
 async def cmd_pr(store: ArchivistStore, args: argparse.Namespace) -> None:
@@ -631,9 +693,11 @@ async def _maybe_pr(store: ArchivistStore, paths, title: str, body: str,
 
 def _changed_paths(home: Path) -> list[str]:
     import subprocess
-    out = subprocess.run(["git", "-C", str(home), "status", "--porcelain"],
+    # -z gives NUL-separated, UNquoted paths (paths here contain spaces), so we can
+    # hand them straight to `git add --` without quoting/escaping surprises.
+    out = subprocess.run(["git", "-C", str(home), "status", "--porcelain", "-z"],
                          capture_output=True, text=True).stdout
-    return [line[3:] for line in out.splitlines() if line.strip()]
+    return [entry[3:] for entry in out.split("\0") if entry.strip()]
 
 
 # --------------------------------------------------------------------------- #
@@ -655,8 +719,9 @@ COMMANDS = {
     "catalog": cmd_catalog,
     "check": cmd_check,
     "audit": cmd_audit,
-    "readme": cmd_readme,
-    "summary": cmd_summary,
+    "meta": cmd_meta,
+    "fingerprint": cmd_fingerprint,
+    "review": cmd_review,
     "pr": cmd_pr,
 }
 
@@ -709,11 +774,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("experiment", nargs="?", help="limit to one experiment (default: all)")
     sp = add("audit", "staleness of generated docs + a worklist for the semantic pass")
     sp.add_argument("experiment", nargs="?", help="limit to one experiment (default: all)")
-    sp = add("readme", "(re)generate an experiment README's managed blocks")
+    sp = add("meta", "show an experiment's structured metadata (experiment.yml)")
     sp.add_argument("experiment")
-    sp.add_argument("--pr", action="store_true", help="open a pull request for the change")
-    sp = add("summary", "(re)generate the top-level scientific summary (SUMMARY.md)")
-    sp.add_argument("--pr", action="store_true", help="open a pull request for the change")
+    sp.add_argument("--suggest", action="store_true",
+                    help="print a heuristic draft sidecar from the README to review (not authoritative)")
+    sp = add("fingerprint", "show the input files (+ sha256) review would record for an experiment")
+    sp.add_argument("experiment")
+    sp = add("review", "record provenance after verifying the README vs its data (explicit input list)")
+    sp.add_argument("experiment")
+    sp.add_argument("--input", action="append", metavar="REPO_REL_PATH",
+                    help="declare an external dependency (repeatable; e.g. a Shared/ CRO file)")
+    sp.add_argument("--date", help="review date YYYY-MM-DD (default: today)")
     sp = add("pr", "package working-tree changes into a branch + pull request")
     sp.add_argument("title")
     sp.add_argument("paths", nargs="*", help="paths to include (default: all changes)")

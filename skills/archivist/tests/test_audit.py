@@ -3,7 +3,6 @@
 import zipfile
 
 import _audit
-import _meta
 
 
 def _exp(tmp_path):
@@ -56,20 +55,18 @@ def test_structural_flags(tmp_path):
     assert any("layout:root-file:stray.txt" == f for f in flags)
 
 
-def test_staleness_via_deps_block(tmp_path):
+def test_duplicate_path_not_flagged_unindexed(tmp_path):
+    exp = _exp(tmp_path)
+    (exp / "protocol").mkdir()
+    (exp / "protocol" / "a.md").write_text("dup")
+    (exp / "reports").mkdir()
+    (exp / "reports" / "b.md").write_text("dup")        # both on disk
     home = tmp_path
-    (home / "K1-1" ).mkdir()
-    src = home / "K1-1" / "kd.csv"
-    src.write_text("a,b\n1,2\n")
-    import _files
-    sha = _files.sha256_file(src)
-    text_ok = _meta.set_deps_block("# README\n", [{"path": "K1-1/kd.csv", "sha256": sha}])
-    assert _audit.staleness(text_ok, home) == {"missing": [], "changed": []}
-    # change the file -> stale
-    src.write_text("a,b\n9,9\n")
-    assert _audit.staleness(text_ok, home)["changed"] == ["K1-1/kd.csv"]
-    # missing file -> stale
-    text_missing = _meta.set_deps_block("# README\n", [{"path": "K1-1/gone.csv", "sha256": "z"}])
-    assert _audit.staleness(text_missing, home)["missing"] == ["K1-1/gone.csv"]
-    # no deps block -> None (can't judge this way)
-    assert _audit.staleness("# README\n\nno deps\n", home) is None
+    rel = lambda p: str(p.resolve().relative_to(home.resolve()))
+    # one record with the second path tracked as a duplicate
+    recs = [{"path": rel(exp / "protocol" / "a.md"), "role": "protocol", "cro": "X",
+             "other_paths": [rel(exp / "reports" / "b.md")]}]
+    flags = _audit.structural_flags(home, exp, {"exp_id": "K1-1", "cro": "X"}, recs)
+    assert not any(f.startswith("unindexed") for f in flags)   # dup path counts as indexed
+
+

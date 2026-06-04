@@ -116,22 +116,51 @@ def find_related(text: str, *, exclude: str | None = None) -> list[str]:
 # --------------------------------------------------------------------------- #
 # README parsing
 # --------------------------------------------------------------------------- #
-_TABLE_ROW_RE = re.compile(r"^\|\s*\*{0,2}([^|*]+?)\*{0,2}\s*\|\s*(.+?)\s*\|\s*$", re.MULTILINE)
+# Only genuine 2-column rows: the value cell must not itself contain a `|`. This
+# deliberately ignores 3+-column tables (Related-Studies, Files-on-disk, etc.), whose
+# rows would otherwise be mis-parsed as label/value pairs with pipe-laden values.
+_TABLE_ROW_RE = re.compile(r"^\|\s*\*{0,2}([^|*]+?)\*{0,2}\s*\|\s*([^|]+?)\s*\|\s*$", re.MULTILINE)
 
 
 def parse_md_table_fields(text: str) -> dict[str, str]:
-    """Pull ``| **Label** | value |`` rows from a Markdown table into a dict
-    keyed by lowercased label. Skips separator rows and empty values."""
+    """Pull ``| **Label** | value |`` rows from a two-column Markdown table into a
+    dict keyed by lowercased label. Skips separator rows, empty values, and any row
+    that isn't a clean 2-column property row (so a wider table's headers/cells don't
+    pollute the field map)."""
     out: dict[str, str] = {}
     for label, value in _TABLE_ROW_RE.findall(text):
         label = label.strip().lower()
         value = value.strip().strip("*").strip()
         if not label or not value or set(value) <= {"-", " ", ":"}:
             continue
-        if label in ("field", "parameter", "value", "details"):
+        if label in ("field", "parameter", "property", "value", "details"):
             continue
         out.setdefault(label, value)
     return out
+
+
+def _external_study_id(fields: dict[str, str]) -> str | None:
+    """Pick the experiment's *external* study id from parsed table fields.
+
+    Matches varied labels by meaning (external/CRO study id), never the internal
+    id, and rejects values that are clearly parse garbage (containing ``|`` from a
+    mis-read multi-column row, or newlines). Returns the highest-priority clean
+    value, or ``None``."""
+    best: tuple[int, str] | None = None
+    for label, value in fields.items():
+        if "internal" in label or "|" in value or "\n" in value:
+            continue
+        if re.search(r"external", label) and "id" in label:
+            rank = 0
+        elif label in ("cro study id", "cro id", "external / cro study id"):
+            rank = 1
+        elif label in ("study id", "external study id"):
+            rank = 2
+        else:
+            continue
+        if best is None or rank < best[0]:
+            best = (rank, value.strip())
+    return best[1] if best else None
 
 
 def _section(text: str, *titles: str) -> str | None:
@@ -178,13 +207,13 @@ def extract_from_readme(text: str, *, exp_id: str | None = None) -> dict[str, An
             t = re.sub(r"^K1-[A-Za-z0-9]+\s*[:\-–—]\s*", "", t)  # drop id prefix
             out["title"] = t
 
-    # Own study IDs come ONLY from the IDs table — authoritative for THIS
-    # experiment. We deliberately do NOT scan the prose: a planning/design doc
-    # references other studies' ids, and those are not this experiment's.
-    for key in ("external id", "external / cro study id", "cro study id", "study id"):
-        if key in fields:
-            out["cro_study_ids"] = find_study_ids(fields[key]) or [fields[key].strip()]
-            break
+    # Own study ID comes ONLY from the IDs table — authoritative for THIS
+    # experiment. We deliberately do NOT scan the prose (a planning doc references
+    # other studies' ids). Labels vary ("External Study ID", "Study ID (External)",
+    # "External ID", "CRO Study ID"), so match by meaning; never the internal id.
+    ext_val = _external_study_id(fields)
+    if ext_val:
+        out["cro_study_ids"] = find_study_ids(ext_val) or [ext_val]
     # Secondary (still authoritative for THIS experiment): a study-id-shaped token
     # in the title, e.g. "Rat IT PK/PD Screening Study (25P-KSO-001)".
     if "cro_study_ids" not in out and out.get("title"):

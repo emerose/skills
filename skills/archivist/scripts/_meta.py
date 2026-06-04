@@ -264,144 +264,47 @@ def file_card_markdown(rec: dict[str, Any], *, schema: dict[str, Any] | None = N
     return "\n".join(lines).rstrip() + "\n"
 
 
-# --------------------------------------------------------------------------- #
-# dependency blocks (explicit provenance for generated docs)
-# --------------------------------------------------------------------------- #
-_DEPS_BEGIN = "<!-- archivist:deps"
-_DEPS_END = "-->"
-
-
-def render_deps_block(deps: list[dict[str, str]]) -> str:
-    """Render an explicit dependency block to embed in a generated README/summary.
-
-    ``deps`` is a list of ``{"path": ..., "sha256": ...}`` captured at generation
-    time. The block is a single HTML comment so it's invisible in rendered
-    Markdown but trivially machine-parseable by ``audit`` to detect staleness.
-    """
-    import json
-
-    ordered = sorted(({"path": d["path"], "sha256": d.get("sha256", "")} for d in deps),
-                     key=lambda d: d["path"])
-    payload = json.dumps(ordered, ensure_ascii=False, sort_keys=True)
-    return f"{_DEPS_BEGIN} {payload} {_DEPS_END}"
-
-
 def readme_template(rec: dict[str, Any]) -> str:
-    """A README.md skeleton for a newly scaffolded experiment, following the
-    convention these folders use (study IDs, synopsis, findings, files, related).
-    Interpretive sections are left as prompts for the author/agent to fill."""
+    """A pure-prose README.md skeleton for a newly scaffolded experiment. Archivist
+    never edits READMEs after this; all structured metadata lives in experiment.yml,
+    so this is only section prompts for the human/agent to fill."""
     exp_id = rec.get("exp_id", "")
     name = rec.get("name") or rec.get("title") or ""
-    lines = [
-        f"# {exp_id}: {name}".strip(),
-        "",
-        "## Study IDs & Dates",
-        "",
-        "| Field | Value |",
-        "|-------|-------|",
-        f"| **Internal ID** | {exp_id} |",
-        f"| **External ID** | {', '.join(rec.get('cro_study_ids') or []) or 'TBD'} |",
-        f"| **CRO** | {rec.get('cro') or 'TBD'} |",
-        f"| **Species / model** | {rec.get('model') or 'TBD'} |",
-        f"| **Status** | {rec.get('status') or 'active'} |",
-        "",
-        "## Synopsis",
-        "",
-        "_One paragraph: goal, design, and what this experiment was for._",
-        "",
-        "## Key findings",
-        "",
-        "_The main results and any caveats. Be specific; preserve hard-won caveats._",
-        "",
-        "## Related experiments",
-        "",
-        "_Predecessors, follow-ons, repeats (by K1- id)._",
-        "",
-    ]
-    return "\n".join(lines)
+    return "\n".join([
+        f"# {exp_id}: {name}".strip(), "",
+        "## Synopsis", "",
+        "_One paragraph: goal, design, and what this experiment was for._", "",
+        "## Key findings", "",
+        "_The main results and any caveats. Be specific; preserve hard-won caveats._", "",
+        "## Related experiments", "",
+        "_Predecessors, follow-ons, repeats (by K1- id)._", "",
+    ])
+
+
+def _cell(value: Any) -> str:
+    """Render a value for a Markdown table cell: collapse newlines and escape any
+    ``|`` so a stray pipe in the data can never corrupt the table."""
+    if isinstance(value, (list, tuple)):
+        value = ", ".join(str(v) for v in value)
+    return str(value or "").replace("\n", " ").replace("|", "\\|").strip()
 
 
 def catalog_markdown(experiments: list[dict[str, Any]]) -> str:
     """A deterministic Markdown index of all experiments (the human-readable half
     of the catalog export). Sorted by exp_id; no timestamps, so re-export is a
-    no-op diff unless the data changed."""
+    no-op diff unless the data changed. Every cell is pipe-escaped."""
     rows = ["# Experiment catalog", "",
             f"_{len(experiments)} experiments._", "",
             "| ID | Name | CRO | Study IDs | Assays | ASOs | Status |",
             "|----|------|-----|-----------|--------|------|--------|"]
     for e in sorted(experiments, key=lambda r: r.get("exp_id") or ""):
         rows.append("| {id} | {name} | {cro} | {ids} | {assays} | {asos} | {status} |".format(
-            id=e.get("exp_id", ""),
-            name=(e.get("name") or e.get("title") or "").replace("|", "/"),
-            cro=e.get("cro") or "",
-            ids=", ".join(e.get("cro_study_ids") or []),
-            assays=", ".join(sorted(e.get("assays") or [])),
-            asos=", ".join(sorted(e.get("asos") or [])),
-            status=e.get("status") or "",
+            id=_cell(e.get("exp_id")),
+            name=_cell(e.get("name") or e.get("title")),
+            cro=_cell(e.get("cro")),
+            ids=_cell(e.get("cro_study_ids")),
+            assays=_cell(sorted(e.get("assays") or [])),
+            asos=_cell(sorted(e.get("asos") or [])),
+            status=_cell(e.get("status")),
         ))
     return "\n".join(rows) + "\n"
-
-
-def parse_deps_block(text: str) -> list[dict[str, str]] | None:
-    """Extract the dependency list from a generated doc, or ``None`` if absent."""
-    import json
-
-    start = text.find(_DEPS_BEGIN)
-    if start == -1:
-        return None
-    end = text.find(_DEPS_END, start)
-    if end == -1:
-        return None
-    payload = text[start + len(_DEPS_BEGIN):end].strip()
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, list) else None
-
-
-def set_deps_block(text: str, deps: list[dict[str, str]]) -> str:
-    """Replace the doc's dependency block (or append one) with ``deps``."""
-    block = render_deps_block(deps)
-    start = text.find(_DEPS_BEGIN)
-    if start != -1:
-        end = text.find(_DEPS_END, start)
-        if end != -1:
-            return text[:start] + block + text[end + len(_DEPS_END):]
-    return text.rstrip() + "\n\n" + block + "\n"
-
-
-# --------------------------------------------------------------------------- #
-# managed blocks: archivist-owned regions inside an otherwise human-authored doc
-# --------------------------------------------------------------------------- #
-def _managed_markers(name: str) -> tuple[str, str]:
-    return f"<!-- archivist:begin:{name} -->", f"<!-- archivist:end:{name} -->"
-
-
-def set_managed_block(text: str, name: str, body: str) -> str:
-    """Insert or replace the named archivist-managed region in ``text``.
-
-    The region is delimited by ``<!-- archivist:begin:NAME -->`` / ``end`` comments;
-    everything outside every managed region is human/agent-authored narrative and is
-    preserved verbatim. A new region is appended at the end of the document.
-    """
-    begin, end = _managed_markers(name)
-    block = f"{begin}\n{body.rstrip()}\n{end}"
-    si = text.find(begin)
-    if si != -1:
-        ei = text.find(end, si)
-        if ei != -1:
-            return text[:si] + block + text[ei + len(end):]
-    return text.rstrip() + "\n\n" + block + "\n"
-
-
-def get_managed_block(text: str, name: str) -> str | None:
-    """Return the body of the named managed region, or ``None`` if absent."""
-    begin, end = _managed_markers(name)
-    si = text.find(begin)
-    if si == -1:
-        return None
-    ei = text.find(end, si)
-    if ei == -1:
-        return None
-    return text[si + len(begin):ei].strip("\n")

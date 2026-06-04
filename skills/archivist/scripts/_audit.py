@@ -21,8 +21,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+import _experiment
 import _files
-import _meta
 
 _CRUFT = {".DS_Store", "Thumbs.db"}
 
@@ -34,6 +34,8 @@ def structural_flags(home: Path, exp_dir: Path, exp_rec: dict[str, Any],
 
     if not (exp_dir / "README.md").is_file():
         flags.append("missing:readme")
+    if not (exp_dir / _experiment.SIDECAR_NAME).is_file():
+        flags.append("missing:experiment-yml")
 
     # file records whose on-disk file is gone
     for fr in file_records:
@@ -41,8 +43,13 @@ def structural_flags(home: Path, exp_dir: Path, exp_rec: dict[str, Any],
         if p and not (home / p).exists():
             flags.append(f"file-missing:{p}")
 
-    # on-disk indexable files not represented in the index (drift -> reindex)
-    indexed = {fr.get("path") for fr in file_records}
+    # on-disk indexable files not represented in the index (drift -> reindex).
+    # A file is "indexed" if it's a primary path OR a tracked duplicate (other_paths).
+    indexed: set[str] = set()
+    for fr in file_records:
+        if fr.get("path"):
+            indexed.add(fr["path"])
+        indexed.update(fr.get("other_paths") or [])
     on_disk = {_relhome(home, f["abs_path"]) for f in _files.iter_experiment_files(exp_dir)}
     missing_from_index = sorted(on_disk - indexed)
     if missing_from_index:
@@ -53,9 +60,10 @@ def structural_flags(home: Path, exp_dir: Path, exp_rec: dict[str, Any],
             or exp_rec.get("cro_study_ids")):
         flags.append("thin-metadata")
 
-    # layout: stray files at the experiment root (only README.* belongs there)
+    # layout: stray files at the experiment root (only README.* + experiment.yml belong)
     for child in sorted(exp_dir.iterdir()):
         if child.is_file() and child.name not in _CRUFT \
+                and child.name != _experiment.SIDECAR_NAME \
                 and not child.name.lower().startswith("readme") \
                 and not child.name.startswith("."):
             flags.append(f"layout:root-file:{child.name}")
@@ -105,26 +113,6 @@ def _zip_real_members(path: Path) -> list[str]:
                     and not Path(n).name.startswith("._")]
     except (zipfile.BadZipFile, OSError):
         return []
-
-
-def staleness(text: str, home: Path) -> dict[str, list[str]] | None:
-    """Compare a generated doc's dependency block against the files on disk now.
-
-    Returns ``{"missing": [...], "changed": [...]}`` (paths), or ``None`` if the doc
-    has no dependency block (so staleness can't be judged this way — fall back to the
-    semantic pass). An empty dict-of-lists means the doc is up to date.
-    """
-    deps = _meta.parse_deps_block(text)
-    if deps is None:
-        return None
-    missing, changed = [], []
-    for d in deps:
-        p = home / d["path"]
-        if not p.exists():
-            missing.append(d["path"])
-        elif d.get("sha256") and _files.sha256_file(p) != d["sha256"]:
-            changed.append(d["path"])
-    return {"missing": sorted(missing), "changed": sorted(changed)}
 
 
 def _relhome(home: Path, p: Path) -> str:

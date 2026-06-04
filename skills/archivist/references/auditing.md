@@ -22,34 +22,38 @@ Deterministic, instant, no embeddings. Flags, per experiment:
 
 Run `arx check --json` to get a worklist you can drive fixes from.
 
-## 2. Staleness — `arx audit`
+## 2. Staleness — `arx review` + `arx audit`
 
-Every generated doc (a README's managed sections, `SUMMARY.md`) carries an explicit
-dependency block listing the evidence files it was built from with their `sha256` at
-generation time. `arx audit` re-hashes those against disk:
+Each `experiment.yml` records, under `provenance`, an **explicit list of the input
+files** the README was verified against — each with its `sha256` at review time, plus
+the README's own `sha256` and the `reviewed_at` date — written by **`arx review
+<exp>`** once you've confirmed the prose matches the data. Inputs are the experiment's
+in-folder data files plus any external dependency declared with `--input` (e.g. CRO
+slides under `Shared/`). `arx audit` re-hashes them and compares:
 
-- `up-to-date` — all dependencies unchanged.
-- `STALE` — an input changed (`changed_inputs`) or went missing (`missing_inputs`).
-  Regenerate the mechanical parts with `arx readme <exp>`, then review/refresh the
-  narrative (next section).
-- `no-deps-block` — a human README archivist hasn't managed yet; staleness can't be
-  judged by hashing, so it always warrants a semantic look.
+- `up-to-date` — every input and the README unchanged since the last review.
+- `stale` — the report names each input that **changed** / went **missing** / was
+  **added** (new in-folder data not yet recorded), and flags if the README itself was
+  edited since review. Run `arx fingerprint <exp>` to see the current input set +
+  hashes, re-verify the prose, then `arx review <exp>` to re-stamp.
+- `no-provenance` — never reviewed; warrants a semantic look.
+- `no-/invalid-experiment-yml` — create or fix the sidecar (`arx meta <exp> --suggest`).
 
 ## 3. Semantic — the parallel-agent pass (authoritative for content)
 
 Hashing tells you an input *changed*, not whether the *prose is still true*. For
-that, read the data. `arx audit --json` emits, per experiment, the README path and
-its `source_files`. Fan out one agent per experiment:
+that, read the data. `arx audit --json` emits, per experiment, its `source_files`.
+Fan out one agent per experiment:
 
-> Read `<readme>` and its `source_files`. Does every claim, number, and caveat in
-> the README still match the data? List specific contradictions (claim vs. what the
-> data shows), missing caveats, and stale numbers. Don't rewrite — report.
+> Read this experiment's `README.md` and its `source_files`. Does every claim, number,
+> and caveat in the README still match the data? List specific contradictions (claim
+> vs. what the data shows), missing caveats, and stale numbers. Don't rewrite — report.
 
-Collect the contradictions, then for each confirmed one regenerate/edit the README
-(preserving the human caveats that still hold) and open a PR with `arx readme <exp>
---pr` or `arx pr`. This is the same technique bibliographer uses to verify a paper's
-content against its metadata, and it's the **authoritative** check — a high or low
-hash/overlap score is a hint, not proof.
+Collect the contradictions; for each confirmed one, edit the README prose (preserving
+the human caveats that still hold), run `arx review <exp>` to re-stamp provenance, and
+open a PR with `arx pr`. This is the same technique bibliographer uses to verify a
+paper's content against its metadata, and it's the **authoritative** check — the
+fingerprint is a change signal, not proof of (in)correctness.
 
 ## Cadence
 

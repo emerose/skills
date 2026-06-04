@@ -36,14 +36,15 @@ numbers," "show me everything we ran with ASO 154," "is this summary still true.
 
 ## The store: libkit (no separate database)
 
-libkit (≥ 0.2.2) **is** the store — there is no separate archivist database. The
+libkit (≥ 0.2.3) **is** the store — there is no separate archivist database. The
 managed folder holds a libkit library under `<home>/.archivist/catalog.duckdb`
 (gitignored), which indexes every file and tracks all metadata. Three *kinds* of
 libkit document live there, distinguished by the `kind` metadata key:
 
-- **`experiment`** — a generated card per experiment folder (keyed by its internal
-  id, e.g. `K1-230901`): CRO study IDs, CRO, status, species/model, assays, ASOs,
-  related experiments. Embedded, so an experiment is searchable as a unit.
+- **`experiment`** — a card per experiment folder (keyed by its internal id, e.g.
+  `K1-230901`). Its structured fields (CRO, study IDs, status, species/model, assays,
+  ASOs, related) come **only from that experiment's `experiment.yml` sidecar** (see
+  below) — never scraped from prose. Embedded, so an experiment is searchable as a unit.
 - **`file`** — one per real file (keyed by relative path). *Narrative* files
   (README/protocol/report/analysis) are ingested whole so their text is embedded;
   *tabular* files (csv/xlsx/pzfx) get a generated **schema + preview** card so they
@@ -53,6 +54,36 @@ libkit document live there, distinguished by the `kind` metadata key:
 - **`entity`** — only *curated* notes about an ASO/CRO/assay/model that a query
   can't reconstruct (aliases, selection rationale, caveats). Purely-derivable entity
   facts are answered by a **live query**, not stored — see *Entities* below.
+
+## Structured metadata lives in `experiment.yml` (not in the prose)
+
+Each experiment folder has a tracked, schema'd **`experiment.yml`** sidecar next to
+its `README.md`. It is the *single source of truth* for structured metadata, and the
+tool reads it deterministically (validated YAML — a stray pipe or odd layout can't
+corrupt anything). The **`README.md` stays purely human/agent prose; archivist never
+writes to it.** Don't mechanically parse READMEs for metadata — populate the sidecar.
+
+```yaml
+exp_id: K1-230901
+cro: Charles River
+cro_study_ids: ["C0790222"]
+status: complete            # planned|active|complete|terminated|failed|superseded|draft
+model: Sprague-Dawley rats
+assays: [QuantiGene, Luminex, LC-MS/MS]
+asos: [ASO-154]
+related: [K1-230402, K1-241101]
+provenance:                 # written by `arx review`, read by `arx audit`
+  - artifact: README.md
+    artifact_sha256: sha256-of-README-at-review
+    reviewed_at: 2026-06-03
+    inputs:                 # the exact files the prose was verified against, each versioned
+      - { path: "K1-230901 - Rat IT Dose-Response (C0790222)/data/quantigene_expression.csv", sha256: … }
+      - { path: "Shared/CRL/SOW2/…/report.pptx", sha256: … }   # inputs may live outside the folder
+```
+
+Populate it yourself or start from `arx meta <exp> --suggest` (a heuristic *draft*
+from the README that you review — never authoritative). Unknown fields, wrong types,
+or bad status values raise a clear error rather than silently vanishing.
 
 ## Setup: keys and the embedding backend
 
@@ -98,10 +129,11 @@ arx read "K1-230901/data/quantigene_expression.csv"   # dump a csv/tsv/xlsx to p
 arx entity list                              # derived registry of ASOs / assays / CROs
 arx entity show "ASO-154"                    # every experiment involving ASO 154
 arx catalog                                  # export CATALOG.md + .archivist/catalog.json
-arx check                                    # structural integrity (missing/unindexed/layout/redundant zips)
-arx audit                                    # staleness of generated docs + a semantic-pass worklist
-arx readme K1-230901                          # refresh an experiment README's managed blocks
-arx summary                                  # refresh the top-level SUMMARY.md
+arx meta K1-230901                            # show the experiment.yml metadata (--suggest for a draft)
+arx review K1-230901                          # stamp provenance after verifying the README vs the data
+arx fingerprint K1-230901 --manifest          # the evidence fingerprint + exactly what's hashed
+arx check                                    # structural integrity (missing sidecar/unindexed/layout/redundant zips)
+arx audit                                    # provenance staleness + a semantic-pass worklist
 arx pr "title" path…                         # package working-tree changes into a review PR
 ```
 
@@ -126,12 +158,11 @@ arx intake K1-260601 ~/Downloads/C9999001_delivery --commit   # copy in + reinde
 `intake` flags destination collisions, skips OS cruft, and preserves any existing
 `raw/Run 2/…` substructure in the source. Review the dry-run before committing.
 
-**How `index` enriches an experiment:** it reads the folder's `README.md` and
-extracts — conservatively — the CRO, external study IDs, assays, ASOs, species/model,
-status, and related experiments (controlled vocabularies + tight patterns; *own*
-study IDs and lifecycle status come only from the README's table/title or the folder
-name, never scraped from prose). Those populate the experiment card and the derived
-entity registry. Re-running `index` after the README or files change refreshes it.
+**How `index` enriches an experiment:** it reads the folder's `experiment.yml`
+(validated YAML) for the structured fields, indexes every file, and indexes the
+README prose for search. It does **not** parse prose for metadata — if a sidecar is
+missing or invalid, the experiment is indexed with minimal metadata and `check`/`audit`
+flag it. Re-running `index` after the sidecar or files change refreshes the card.
 
 **Two kinds of search, and the difference matters:**
 
@@ -155,47 +186,48 @@ query over experiment metadata and is therefore **always current, never stale**.
 Only *curated, non-derivable* notes about an entity (why an ASO was selected, a
 CRO's quirks, an alias) are stored as `kind=entity` documents and embedded.
 
-## Generating & maintaining the write-ups
+## Keeping write-ups current (provenance + staleness)
 
-`arx readme <exp>` and `arx summary` keep the **mechanical** parts of an experiment
-README and the top-level `SUMMARY.md` current — they (re)write only the
-archivist-**managed regions** (the Files-on-disk table, the experiment index) and the
-**dependency block**, and leave all human/agent narrative (synopsis, key findings,
-caveats) untouched. The interpretive prose is yours to write; archivist never
-flattens it.
+Archivist writes no prose. What it *does* maintain is the link between a README's
+narrative and the data it describes, via `experiment.yml`'s `provenance` block — an
+**explicit, versioned list of the input files** the prose was verified against (not an
+opaque hash), so review and drift are inspectable file by file:
 
-Each generated doc carries an explicit **dependency block** — an
-`<!-- archivist:deps … -->` comment listing the evidence files it was built from with
-each file's `sha256` at generation time. This drives staleness detection:
-
-- **`arx check`** — deterministic structural integrity: missing/relocated files,
-  on-disk files not yet indexed, layout drift, thin metadata, and **redundant
-  archives** (a zip whose members are already extracted in-folder — the `raw.zip`
-  case). Reports a worklist; never mutates.
-- **`arx audit`** — re-hashes each doc's dependency block to flag it `STALE` when an
-  input changed or went missing (or `no-deps-block` when it can't judge that way),
-  and `--json` emits a per-experiment worklist (`source_files`) for the **semantic
-  pass**: fan out an agent per experiment to read the data and verify the README's
-  claims. This is the authoritative content check — see
-  [references/auditing.md](references/auditing.md).
+- **`arx review <exp>`** — run after you've verified the README still matches the data.
+  It records, per artifact (the README), each input file with its `sha256`, plus the
+  README's own `sha256` and the date. Inputs = the experiment's in-folder data files
+  (everything except a root `README.*` and the sidecar) **plus** any external
+  dependency you declare with `--input <repo-relative path>` (repeatable; e.g. CRO
+  slides under `Shared/`). External inputs are preserved across re-reviews.
+- **`arx audit`** — re-hashes every recorded input and the README and reports
+  `up-to-date`, `stale` (naming each input that **changed** / went **missing** /
+  was **added**, and whether the README itself was edited since review),
+  `no-provenance` (never reviewed), or `no-/invalid-experiment-yml`. `--json` adds a
+  per-experiment `source_files` worklist for the **semantic pass**: fan out an agent
+  per experiment to read the data and verify the prose — the authoritative content
+  check (see [references/auditing.md](references/auditing.md)).
+- **`arx fingerprint <exp>`** — prints the input files (+ each current `sha256`) that
+  `review` would record right now, so you can see exactly what provenance tracks.
+- **`arx check`** — structural integrity: missing `README.md`/`experiment.yml`,
+  on-disk files not indexed, layout drift, thin metadata, and **redundant archives**
+  (a zip whose members are already extracted in-folder — the `raw.zip` case). Reports
+  a worklist; never mutates.
 
 ## Changes land as reviewable PRs
 
-Archivist treats the data folder as a git repo with a **private GitHub remote**, and
-never writes content silently to `main`. `readme`/`summary` regenerate files in the
-working tree; `arx pr "title" <paths>` (or `arx readme … --pr` / `arx summary --pr`)
-branches, commits, pushes, and opens a **pull request for the user to review and
-merge** (`--dry-run` shows the git/gh steps first). The libkit store (`.archivist/`)
-is gitignored.
+Archivist treats the data folder as a git repo with a **private GitHub remote** and
+never writes silently to `main`. Edits (a new/updated `experiment.yml`, a regenerated
+`CATALOG.md`) are made in the working tree; `arx pr "title" <paths>` branches, commits,
+pushes, and opens a **pull request for you to review and merge** (`--dry-run` shows the
+git/gh steps first). The libkit store (`.archivist/`) is gitignored.
 
 ## Command reference
 
 `init` · `index`/`reindex` · `list` · `show` · `search` · `query` · `file` · `read` ·
-`entity` (registry + curated notes) · `new` (scaffold) · `intake` (file a delivery) ·
-`catalog` (export) · `readme`/`summary` (generate, preserving narrative) · `check`
-(structural) · `audit` (staleness + semantic worklist) · `pr` (open a review PR). All
-of `list`/`search`/`show`/`query`/`check`/`audit`/`catalog`/`index`/`intake` take
-`--json` for machine-readable output.
+`entity` · `new` (scaffold) · `intake` (file a delivery) · `meta` (show/suggest
+`experiment.yml`) · `review` (stamp provenance) · `fingerprint` · `catalog` (export) ·
+`check` (structural) · `audit` (staleness + semantic worklist) · `pr` (review PR). Most
+read commands take `--json`.
 
 ## Good habits
 
@@ -217,7 +249,7 @@ fixes upstream to libkit by PR, and verify changes. Archivist-specific notes:
 - **libkit is the upstream** for store/embedding/cache fixes — issue + PR there, not a
   local workaround (this is how bibliographer drove several libkit features).
 - **Run the tests**: `uv run --with pytest --with openpyxl pytest skills/archivist/tests/ -q`
-  runs the pure helpers in well under a second; add `--with "libkit>=0.2.2" --with
+  runs the pure helpers in well under a second; add `--with "libkit>=0.2.3" --with
   platformdirs` to include the store integration test (fake embedder + Markdown
   loader — no model or keys). Add a test when you add behavior.
 - **Never hand-edit `.archivist/catalog.duckdb` or move files manually** — go through

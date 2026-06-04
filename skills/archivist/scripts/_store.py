@@ -117,7 +117,11 @@ class ArchivistStore:
         return _meta.document_to_record(docs[0]) if docs else None
 
     async def get_file(self, path: str) -> dict[str, Any] | None:
+        """Find a file record by its primary ``path`` or any of its ``other_paths``
+        (a byte-identical duplicate copy filed elsewhere)."""
         docs = await self.lib.list_documents(filters={"kind": "file", "path": path})
+        if not docs:
+            docs = await self.lib.list_documents(filters={"kind": "file", "other_paths": path})
         return _meta.document_to_record(docs[0]) if docs else None
 
     async def get_entity(self, entity_id: str) -> dict[str, Any] | None:
@@ -191,12 +195,43 @@ class ArchivistStore:
             assert card_markdown is not None  # guaranteed by the xor check above
             result = await self._ingest_card(card_markdown, rec)
 
+        # Reconcile whatever record this path previously pointed at, if its content
+        # changed (different document_id now).
         if existing and existing.get("document_id") and existing["document_id"] != result.document_id:
-            await self.lib.delete(existing["document_id"])
+            if existing.get("path") == rec["path"]:
+                await self.lib.delete(existing["document_id"])      # primary path, new content
+            else:
+                await self._set_other_paths(existing["document_id"], drop=rec["path"])  # was a dup
+
         if result.already_existed:
-            # byte-identical content already stored: refresh our metadata onto it.
-            await self._merge_metadata(result.document_id, _meta.record_to_metadata(rec))
+            # Byte-identical content is already stored under some path. libkit keys
+            # documents by content hash, so we DON'T re-ingest; instead we make sure
+            # this path is represented. If it's the primary path, refresh metadata;
+            # if it's a new location of the same bytes (a duplicate copy filed
+            # elsewhere), record it in other_paths rather than clobbering the record.
+            doc = await self.lib.get_document(result.document_id)
+            meta = dict(doc.metadata or {})
+            primary = meta.get("path")
+            if rec["path"] == primary:
+                await self._merge_metadata(result.document_id, _meta.record_to_metadata(rec))
+            elif rec["path"] not in (meta.get("other_paths") or []):
+                await self._set_other_paths(result.document_id, add=rec["path"])
         return await self._record_for_id(result.document_id)
+
+    async def _set_other_paths(self, document_id: str, *, add: str | None = None,
+                               drop: str | None = None) -> None:
+        """Add/remove a duplicate-copy path on a file record's ``other_paths`` list
+        (the primary ``path`` never appears in it)."""
+        doc = await self.lib.get_document(document_id)
+        meta = dict(doc.metadata or {})
+        others = set(meta.get("other_paths") or [])
+        if add:
+            others.add(add)
+        if drop:
+            others.discard(drop)
+        others.discard(meta.get("path"))
+        await self._merge_metadata(document_id,
+                                   {"other_paths": sorted(others), "updated_at": _now_iso()})
 
     async def upsert_entity(self, rec: dict[str, Any]) -> dict[str, Any]:
         """Store a *curated* entity note, keyed by ``entity_id``.

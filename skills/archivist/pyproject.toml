@@ -19,9 +19,10 @@ requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "Sam Quigley", email = "quigley@emerose.com" }]
 dependencies = [
-    "libkit>=0.2.2",
+    "libkit>=0.2.3",
     "openpyxl>=3.1",
     "platformdirs>=4.0",
+    "pyyaml>=6.0",
 ]
 
 [project.urls]
