@@ -539,13 +539,12 @@ async def cmd_audit(store: ArchivistStore, args: argparse.Namespace) -> None:
         else:
             try:
                 sidecar = _experiment.read_sidecar(sidecar_path)
-                st = _audit.staleness(exp_dir, sidecar)
+                st = _experiment.staleness(store.home, exp_dir, sidecar)
                 entry["staleness"] = st["state"]
                 if st["state"] == "stale":
-                    entry["recorded_fingerprint"] = st["recorded"]
-                    entry["current_fingerprint"] = st["current"]
-                    entry["inputs"] = f"{st.get('recorded_inputs')} → {st['current_inputs']}"
-                    entry["reviewed_at"] = st.get("reviewed_at")
+                    for k in ("changed", "missing", "added", "artifact_changed", "reviewed_at"):
+                        if st.get(k):
+                            entry[k] = st[k]
             except _experiment.SidecarError as e:
                 entry["staleness"] = "invalid-experiment-yml"
                 entry["error"] = str(e)
@@ -561,9 +560,15 @@ async def cmd_audit(store: ArchivistStore, args: argparse.Namespace) -> None:
         if e.get("error"):
             print(f"    {e['error']}")
         if e.get("staleness") == "stale":
-            print(f"    inputs {e['inputs']}; last reviewed {e.get('reviewed_at')}")
-            print(f"    recorded {e['recorded_fingerprint']}\n    current  {e['current_fingerprint']}")
-            print(f"    (run `arx fingerprint {e['exp_id']} --manifest` to see exactly what changed)")
+            if e.get("artifact_changed"):
+                print("    README edited since last review")
+            for p in e.get("changed", []):
+                print(f"    changed: {p}")
+            for p in e.get("missing", []):
+                print(f"    missing: {p}")
+            for p in e.get("added", []):
+                print(f"    added (unrecorded): {p}")
+            print(f"    last reviewed {e.get('reviewed_at')}")
     print("\nFor the semantic pass, run `arx audit --json` and fan out an agent per "
           "experiment to read its source_files and verify the README prose.")
 
@@ -606,28 +611,38 @@ async def cmd_meta(store: ArchivistStore, args: argparse.Namespace) -> None:
 
 
 async def cmd_fingerprint(store: ArchivistStore, args: argparse.Namespace) -> None:
-    """Print the provenance fingerprint of an experiment's evidence files (and, with
-    --manifest, the exact `<sha256>  <path>` lines it is computed from — so a stale
-    result is always fully explainable)."""
+    """Show the input set `review` would record for an experiment's README right now —
+    the in-folder data files (+ any externally-declared inputs), each with its current
+    sha256. Lets you see exactly what provenance will track."""
     found = _find_experiment_dir(store.home, args.experiment)
     if not found:
         die(f"no experiment matching {args.experiment!r}")
     exp_dir, parsed = found
-    fingerprint, n_inputs, manifest = _experiment.compute_fingerprint(exp_dir)
+    sidecar = exp_dir / _experiment.SIDECAR_NAME
+    declared = []
+    if sidecar.is_file():
+        meta = _experiment.read_sidecar(sidecar)
+        exp_rel = exp_dir.resolve().relative_to(store.home.resolve()).as_posix()
+        entry = _experiment._provenance_entry(meta, _experiment.DEFAULT_ARTIFACT) or {}
+        declared = [i["path"] for i in (entry.get("inputs") or [])
+                    if not i["path"].startswith(exp_rel + "/")]
+    inputs, missing = _experiment.resolve_inputs(store.home, exp_dir, declared)
     if args.json:
-        emit_json({"exp_id": parsed["exp_id"], "data_fingerprint": fingerprint,
-                   "n_inputs": n_inputs, "manifest": manifest if args.manifest else None})
+        emit_json({"exp_id": parsed["exp_id"], "inputs": inputs, "missing": missing})
         return
-    if args.manifest:
-        print(manifest, end="")
-    print(f"{fingerprint}  ({n_inputs} evidence files)")
+    for i in inputs:
+        print(f"  {i['sha256']}  {i['path']}")
+    print(f"({len(inputs)} input files" + (f", {len(missing)} declared-but-missing" if missing else "") + ")")
+    for m in missing:
+        print(f"  ! missing: {m}", file=sys.stderr)
 
 
 async def cmd_review(store: ArchivistStore, args: argparse.Namespace) -> None:
-    """Mark an experiment's README as verified against the current data: stamp
-    experiment.yml's provenance with the current fingerprint + a review date. Run
-    this after confirming the prose still matches the evidence; `audit` then reports
-    the experiment stale only once that evidence changes again."""
+    """Mark an experiment's README as verified against its data: record an explicit
+    input list (with each file's sha256) + the README's sha + a review date in
+    experiment.yml. In-folder data files are included automatically; declare any
+    external dependency (e.g. CRO slides under Shared/) with --input <repo-rel path>
+    (repeatable; preserved across re-reviews). `audit` then reports per-file drift."""
     found = _find_experiment_dir(store.home, args.experiment)
     if not found:
         die(f"no experiment matching {args.experiment!r}")
@@ -639,14 +654,17 @@ async def cmd_review(store: ArchivistStore, args: argparse.Namespace) -> None:
         meta = _experiment.read_sidecar(sidecar)
     except _experiment.SidecarError as e:
         die(str(e))
-    stamped = _experiment.stamp_provenance(meta, exp_dir, today=args.date)
-    sidecar.write_text(_experiment.dump_sidecar(stamped), encoding="utf-8")
-    prov = stamped["provenance"]
+    updated, missing = _experiment.review(store.home, exp_dir, meta, today=args.date,
+                                          extra_inputs=args.input or [])
+    sidecar.write_text(_experiment.dump_sidecar(updated), encoding="utf-8")
+    entry = _experiment._provenance_entry(updated, _experiment.DEFAULT_ARTIFACT)
     if args.json:
-        emit_json({"exp_id": parsed["exp_id"], **prov})
+        emit_json({"exp_id": parsed["exp_id"], "provenance": entry, "missing": missing})
     else:
-        print(f"stamped {parsed['exp_id']}: {prov['data_fingerprint']} "
-              f"({prov['n_inputs']} files, reviewed {prov['reviewed_at']})")
+        print(f"stamped {parsed['exp_id']}: README verified against {len(entry['inputs'])} "
+              f"input files (reviewed {entry['reviewed_at']})")
+        for m in missing:
+            print(f"  ! declared input not found on disk: {m}", file=sys.stderr)
 
 
 async def cmd_pr(store: ArchivistStore, args: argparse.Namespace) -> None:
@@ -760,11 +778,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("experiment")
     sp.add_argument("--suggest", action="store_true",
                     help="print a heuristic draft sidecar from the README to review (not authoritative)")
-    sp = add("fingerprint", "print an experiment's provenance fingerprint of its evidence files")
+    sp = add("fingerprint", "show the input files (+ sha256) review would record for an experiment")
     sp.add_argument("experiment")
-    sp.add_argument("--manifest", action="store_true", help="also print the sha256/path lines hashed")
-    sp = add("review", "stamp experiment.yml provenance after verifying the README vs the data")
+    sp = add("review", "record provenance after verifying the README vs its data (explicit input list)")
     sp.add_argument("experiment")
+    sp.add_argument("--input", action="append", metavar="REPO_REL_PATH",
+                    help="declare an external dependency (repeatable; e.g. a Shared/ CRO file)")
     sp.add_argument("--date", help="review date YYYY-MM-DD (default: today)")
     sp = add("pr", "package working-tree changes into a branch + pull request")
     sp.add_argument("title")

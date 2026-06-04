@@ -24,17 +24,18 @@ Run `arx check --json` to get a worklist you can drive fixes from.
 
 ## 2. Staleness — `arx review` + `arx audit`
 
-Each `experiment.yml` records, under `provenance`, a `data_fingerprint` over the
-experiment's evidence files (see `scripts/_experiment.py` for the exact, reproducible
-algorithm) plus the `reviewed_at` date — written by **`arx review <exp>`** once you've
-confirmed the README prose matches the data. `arx audit` recomputes the fingerprint
-and compares:
+Each `experiment.yml` records, under `provenance`, an **explicit list of the input
+files** the README was verified against — each with its `sha256` at review time, plus
+the README's own `sha256` and the `reviewed_at` date — written by **`arx review
+<exp>`** once you've confirmed the prose matches the data. Inputs are the experiment's
+in-folder data files plus any external dependency declared with `--input` (e.g. CRO
+slides under `Shared/`). `arx audit` re-hashes them and compares:
 
-- `up-to-date` — evidence unchanged since the last review.
-- `stale` — the fingerprint differs; the report shows the recorded vs current
-  fingerprint, the input-count delta, and the last review date. Run `arx fingerprint
-  <exp> --manifest` to see exactly which files/hashes feed it, re-verify the prose,
-  then `arx review <exp>` to re-stamp.
+- `up-to-date` — every input and the README unchanged since the last review.
+- `stale` — the report names each input that **changed** / went **missing** / was
+  **added** (new in-folder data not yet recorded), and flags if the README itself was
+  edited since review. Run `arx fingerprint <exp>` to see the current input set +
+  hashes, re-verify the prose, then `arx review <exp>` to re-stamp.
 - `no-provenance` — never reviewed; warrants a semantic look.
 - `no-/invalid-experiment-yml` — create or fix the sidecar (`arx meta <exp> --suggest`).
 

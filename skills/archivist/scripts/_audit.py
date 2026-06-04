@@ -115,29 +115,6 @@ def _zip_real_members(path: Path) -> list[str]:
         return []
 
 
-def staleness(exp_dir: Path, sidecar: dict[str, Any]) -> dict[str, Any]:
-    """Compare an experiment's recorded provenance fingerprint to the evidence on
-    disk now (see :func:`_experiment.compute_fingerprint` for the exact algorithm).
-
-    Returns ``{"state": ...}`` where state is:
-      * ``"no-provenance"`` — the sidecar has never been stamped (can't judge by
-        fingerprint; needs a semantic review).
-      * ``"up-to-date"`` — recorded fingerprint matches the current evidence.
-      * ``"stale"`` — they differ; also returns ``recorded``/``current`` fingerprints,
-        the input counts, and ``reviewed_at`` so the mismatch is fully explainable.
-    """
-    prov = (sidecar or {}).get("provenance") or {}
-    recorded = prov.get("data_fingerprint")
-    if not recorded:
-        return {"state": "no-provenance"}
-    current, n_inputs, _ = _experiment.compute_fingerprint(exp_dir)
-    if current == recorded:
-        return {"state": "up-to-date", "fingerprint": current, "n_inputs": n_inputs}
-    return {"state": "stale", "recorded": recorded, "current": current,
-            "recorded_inputs": prov.get("n_inputs"), "current_inputs": n_inputs,
-            "reviewed_at": prov.get("reviewed_at")}
-
-
 def _relhome(home: Path, p: Path) -> str:
     try:
         return str(p.resolve().relative_to(home.resolve()))

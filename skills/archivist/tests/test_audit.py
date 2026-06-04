@@ -70,18 +70,3 @@ def test_duplicate_path_not_flagged_unindexed(tmp_path):
     assert not any(f.startswith("unindexed") for f in flags)   # dup path counts as indexed
 
 
-def test_staleness_via_fingerprint(tmp_path):
-    import _experiment
-    exp = _exp(tmp_path)
-    (exp / "data" / "kd.csv").write_text("a,b\n1,2\n")
-    # no provenance recorded yet
-    assert _audit.staleness(exp, {"exp_id": "K1-1"})["state"] == "no-provenance"
-    # stamp it -> up to date
-    sidecar = _experiment.stamp_provenance({"exp_id": "K1-1"}, exp, today="2026-06-03")
-    assert _audit.staleness(exp, sidecar)["state"] == "up-to-date"
-    # change an evidence file -> stale, with both fingerprints reported
-    (exp / "data" / "kd.csv").write_text("a,b\n9,9\n")
-    st = _audit.staleness(exp, sidecar)
-    assert st["state"] == "stale"
-    assert st["recorded"] != st["current"]
-    assert st["reviewed_at"] == "2026-06-03"

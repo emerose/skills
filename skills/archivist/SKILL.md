@@ -73,9 +73,12 @@ assays: [QuantiGene, Luminex, LC-MS/MS]
 asos: [ASO-154]
 related: [K1-230402, K1-241101]
 provenance:                 # written by `arx review`, read by `arx audit`
-  reviewed_at: 2026-06-03
-  data_fingerprint: sha256:…
-  n_inputs: 246
+  - artifact: README.md
+    artifact_sha256: sha256-of-README-at-review
+    reviewed_at: 2026-06-03
+    inputs:                 # the exact files the prose was verified against, each versioned
+      - { path: "K1-230901 - Rat IT Dose-Response (C0790222)/data/quantigene_expression.csv", sha256: … }
+      - { path: "Shared/CRL/SOW2/…/report.pptx", sha256: … }   # inputs may live outside the folder
 ```
 
 Populate it yourself or start from `arx meta <exp> --suggest` (a heuristic *draft*
@@ -186,21 +189,25 @@ CRO's quirks, an alias) are stored as `kind=entity` documents and embedded.
 ## Keeping write-ups current (provenance + staleness)
 
 Archivist writes no prose. What it *does* maintain is the link between a README's
-narrative and the data it describes, via `experiment.yml`'s `provenance` block:
+narrative and the data it describes, via `experiment.yml`'s `provenance` block — an
+**explicit, versioned list of the input files** the prose was verified against (not an
+opaque hash), so review and drift are inspectable file by file:
 
-- **`arx review <exp>`** — run after you've verified the README still matches the
-  data. It stamps `provenance` with today's date and a **`data_fingerprint`** over the
-  experiment's evidence files (everything except the README and the sidecar).
-- **`arx audit`** — recomputes the fingerprint and reports `up-to-date`, `stale` (with
-  both fingerprints, the input-count delta, and the last review date), `no-provenance`
-  (never reviewed), or `no-/invalid-experiment-yml`. `--json` adds a per-experiment
-  `source_files` worklist for the **semantic pass**: fan out an agent per experiment
-  to read the data and verify the prose. That's the authoritative content check — see
-  [references/auditing.md](references/auditing.md).
-- **`arx fingerprint <exp> --manifest`** — prints the exact `sha256  path` lines the
-  fingerprint hashes, so a stale result is never mysterious. The algorithm is fully
-  specified in `scripts/_experiment.py` (sorted, experiment-relative POSIX paths, UTF-8,
-  `sha256sum`-style manifest, then sha256 of that) and reproducible by hand.
+- **`arx review <exp>`** — run after you've verified the README still matches the data.
+  It records, per artifact (the README), each input file with its `sha256`, plus the
+  README's own `sha256` and the date. Inputs = the experiment's in-folder data files
+  (everything except a root `README.*` and the sidecar) **plus** any external
+  dependency you declare with `--input <repo-relative path>` (repeatable; e.g. CRO
+  slides under `Shared/`). External inputs are preserved across re-reviews.
+- **`arx audit`** — re-hashes every recorded input and the README and reports
+  `up-to-date`, `stale` (naming each input that **changed** / went **missing** /
+  was **added**, and whether the README itself was edited since review),
+  `no-provenance` (never reviewed), or `no-/invalid-experiment-yml`. `--json` adds a
+  per-experiment `source_files` worklist for the **semantic pass**: fan out an agent
+  per experiment to read the data and verify the prose — the authoritative content
+  check (see [references/auditing.md](references/auditing.md)).
+- **`arx fingerprint <exp>`** — prints the input files (+ each current `sha256`) that
+  `review` would record right now, so you can see exactly what provenance tracks.
 - **`arx check`** — structural integrity: missing `README.md`/`experiment.yml`,
   on-disk files not indexed, layout drift, thin metadata, and **redundant archives**
   (a zip whose members are already extracted in-folder — the `raw.zip` case). Reports

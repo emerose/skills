@@ -9,37 +9,41 @@ human-editable and agent-populated. The tool reads metadata ONLY from here.
 
 Stdlib + PyYAML only (no libkit), so it unit-tests in isolation.
 
-## Provenance fingerprint (the staleness signal)
+## Provenance (the staleness signal) — an explicit input list, not a fingerprint
 
-``provenance.data_fingerprint`` answers "has the evidence changed since the prose was
-last verified?" It MUST be computed by one unambiguous, reproducible algorithm —
-otherwise it produces mysterious staleness. The algorithm (`compute_fingerprint`):
+Each derived artifact (today: ``README.md``) records the exact files it was verified
+against, with each file's version (sha256) at review time. No opaque roll-up — the
+list IS the record, so a reviewer sees precisely what was checked, and ``audit``
+reports drift per file. ``provenance`` is a list of entries, one per artifact:
 
-1. **Evidence set** = every file under the experiment directory that
-   :func:`_files.iter_experiment_files` yields (its ignore rules + the 0-byte skip
-   apply), EXCEPT the experiment-root ``README.md`` (the prose being verified) and
-   ``experiment.yml`` (this sidecar). Nothing else is excluded or added.
-2. For each evidence file, take ``rel`` = its path relative to the experiment
-   directory in POSIX form (``/`` separators, no leading ``./``), and ``digest`` =
-   lowercase hex SHA-256 of the file's exact bytes.
-3. Sort the ``(rel, digest)`` pairs by ``rel`` in Unicode code-point order
-   (Python's default ``sorted`` on ``str``).
-4. **Manifest** = for each pair, the line ``f"{digest}  {rel}\\n"`` (digest, exactly
-   two spaces, rel, one newline), concatenated. This is GNU ``sha256sum`` output
-   format with sorted, experiment-relative POSIX paths.
-5. **Fingerprint** = ``"sha256:" + sha256(manifest.encode("utf-8")).hexdigest()``.
+```yaml
+provenance:
+  - artifact: README.md            # experiment-relative
+    artifact_sha256: <sha of README.md at review>
+    reviewed_at: 2026-06-04
+    inputs:                        # the files the prose depends on
+      - { path: "<repo-root-relative path>", sha256: <sha at review> }
+```
 
-It is therefore: order-independent (sorted), location-independent (paths relative to
-the experiment), encoding-explicit (UTF-8), and free of timestamps/locale. You can
-reproduce it by hand: ``sha256sum`` each evidence file, rewrite paths relative to the
-experiment with ``/``, sort by path, then ``sha256sum`` that manifest. ``arx
-fingerprint <exp> --manifest`` prints the exact manifest so a mismatch is never a
-mystery.
+* **Paths**: an input ``path`` is relative to the data-folder root, so a dependency
+  can live anywhere (in the experiment's ``data/``/``raw/``/``reports/``/``analysis/``
+  OR elsewhere, e.g. CRO slides under ``Shared/``). The ``artifact`` path is relative
+  to the experiment folder.
+* **No globs/directories** — inputs are individual files, deliberately, for clarity.
+* **``review``** resolves the input set = the experiment's in-folder data files (every
+  indexed file except a root ``README.*`` and ``experiment.yml``) PLUS any
+  externally-declared inputs already listed (or passed via ``--input``), hashes each,
+  and records them with ``artifact_sha256`` + ``reviewed_at``.
+* **``audit``** re-hashes each listed input and the artifact and reports, per path,
+  what ``changed`` / went ``missing`` / was ``added`` (a new in-folder data file not
+  yet in the list), plus whether the artifact itself was edited since review. Nothing
+  to squint at — every difference names a file.
+
+A file/dir of hundreds of inputs is fine: clarity beats a compact opaque hash.
 """
 
 from __future__ import annotations
 
-import hashlib
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -47,6 +51,7 @@ from typing import Any
 import _files
 
 SIDECAR_NAME = "experiment.yml"
+DEFAULT_ARTIFACT = "README.md"
 
 # Recommended lifecycle statuses; common synonyms normalise to these. Unknown
 # values raise a clear error (never silently accepted) listing the allowed set.
@@ -74,31 +79,108 @@ class SidecarError(ValueError):
 
 
 # --------------------------------------------------------------------------- #
-# fingerprint
+# provenance: explicit per-artifact input lists
 # --------------------------------------------------------------------------- #
-def evidence_files(exp_dir: Path) -> list[tuple[str, Path]]:
-    """``(rel_posix, abs_path)`` for each evidence file under ``exp_dir`` — every
-    indexable file except the root ``README.md`` and ``experiment.yml``."""
-    exp_dir = exp_dir.resolve()
-    out: list[tuple[str, Path]] = []
+def _repo_rel(home: Path, abs_path: Path) -> str:
+    return abs_path.resolve().relative_to(home.resolve()).as_posix()
+
+
+def in_folder_data_files(home: Path, exp_dir: Path) -> list[str]:
+    """Repo-root-relative paths of the experiment's in-folder *data* files — every
+    indexed file under ``exp_dir`` except a root ``README.*`` render and the
+    ``experiment.yml`` sidecar (those are prose/metadata, not evidence)."""
+    out = []
     for f in _files.iter_experiment_files(exp_dir):
-        rel_parts: tuple[str, ...] = f["rel_parts"]
-        name: str = f["filename"]
-        if not rel_parts and (name.lower() == "readme.md" or name == SIDECAR_NAME):
-            continue
-        rel = f["abs_path"].relative_to(exp_dir).as_posix()
-        out.append((rel, f["abs_path"]))
-    return out
+        if not f["rel_parts"]:  # at the experiment root
+            low = f["filename"].lower()
+            if low == SIDECAR_NAME or low.startswith("readme."):
+                continue
+        out.append(_repo_rel(home, f["abs_path"]))
+    return sorted(out)
 
 
-def compute_fingerprint(exp_dir: Path) -> tuple[str, int, str]:
-    """Return ``(fingerprint, n_inputs, manifest)`` per the algorithm in the module
-    docstring. ``manifest`` is the exact text that gets hashed (for transparency)."""
-    entries = [(rel, _files.sha256_file(abs_path)) for rel, abs_path in evidence_files(exp_dir)]
-    entries.sort(key=lambda e: e[0])  # Unicode code-point order on the POSIX rel path
-    manifest = "".join(f"{digest}  {rel}\n" for rel, digest in entries)
-    fingerprint = "sha256:" + hashlib.sha256(manifest.encode("utf-8")).hexdigest()
-    return fingerprint, len(entries), manifest
+def resolve_inputs(home: Path, exp_dir: Path,
+                   declared: list[str] | None = None) -> tuple[list[dict[str, str]], list[str]]:
+    """Build the input list: the experiment's in-folder data files plus any
+    ``declared`` external paths (repo-root-relative). Returns ``(inputs, missing)``
+    where ``inputs`` is ``[{path, sha256}]`` sorted by path and ``missing`` lists any
+    declared path that doesn't exist on disk."""
+    paths = set(in_folder_data_files(home, exp_dir)) | set(declared or [])
+    inputs, missing = [], []
+    for p in sorted(paths):
+        ap = home / p
+        if ap.is_file():
+            inputs.append({"path": p, "sha256": _files.sha256_file(ap)})
+        else:
+            missing.append(p)
+    return inputs, missing
+
+
+def _provenance_entry(sidecar: dict[str, Any], artifact: str) -> dict[str, Any] | None:
+    for e in sidecar.get("provenance") or []:
+        if isinstance(e, dict) and e.get("artifact") == artifact:
+            return e
+    return None
+
+
+def review(home: Path, exp_dir: Path, sidecar: dict[str, Any], *, today: str | None = None,
+           extra_inputs: list[str] | None = None,
+           artifact: str = DEFAULT_ARTIFACT) -> tuple[dict[str, Any], list[str]]:
+    """Record provenance for ``artifact``: resolve its input set (in-folder data +
+    any previously-declared externals + ``extra_inputs``), hash each, and stamp
+    ``artifact_sha256`` + ``reviewed_at``. Returns ``(updated_sidecar, missing)``.
+
+    Externally-declared inputs (paths outside the experiment folder) are carried over
+    from the existing entry so they survive re-reviews; in-folder data files are
+    always (re)discovered."""
+    exp_rel = exp_dir.resolve().relative_to(home.resolve()).as_posix()
+    prev = _provenance_entry(sidecar, artifact) or {}
+    prev_external = [i["path"] for i in (prev.get("inputs") or [])
+                     if isinstance(i, dict) and not i["path"].startswith(exp_rel + "/")]
+    declared = sorted(set(prev_external) | set(extra_inputs or []))
+    inputs, missing = resolve_inputs(home, exp_dir, declared)
+
+    art_abs = exp_dir / artifact
+    entry = {
+        "artifact": artifact,
+        "artifact_sha256": _files.sha256_file(art_abs) if art_abs.is_file() else None,
+        "reviewed_at": today or date.today().isoformat(),
+        "inputs": inputs,
+    }
+    others = [e for e in (sidecar.get("provenance") or [])
+              if not (isinstance(e, dict) and e.get("artifact") == artifact)]
+    out = dict(sidecar)
+    out["provenance"] = others + [entry]
+    return out, missing
+
+
+def staleness(home: Path, exp_dir: Path, sidecar: dict[str, Any],
+              *, artifact: str = DEFAULT_ARTIFACT) -> dict[str, Any]:
+    """Compare an artifact's recorded provenance to the files on disk now. Returns a
+    dict with ``state`` one of ``no-provenance`` | ``up-to-date`` | ``stale``; when
+    stale, also ``changed`` / ``missing`` / ``added`` input paths and
+    ``artifact_changed``."""
+    entry = _provenance_entry(sidecar, artifact)
+    if not entry or not entry.get("inputs"):
+        return {"state": "no-provenance"}
+    recorded = {i["path"]: i.get("sha256") for i in entry["inputs"] if isinstance(i, dict)}
+    changed, missing = [], []
+    for p, sha in recorded.items():
+        ap = home / p
+        if not ap.is_file():
+            missing.append(p)
+        elif _files.sha256_file(ap) != sha:
+            changed.append(p)
+    # new in-folder data files not yet recorded (data added since review)
+    added = sorted(set(in_folder_data_files(home, exp_dir)) - set(recorded))
+    art_abs = exp_dir / artifact
+    art_now = _files.sha256_file(art_abs) if art_abs.is_file() else None
+    artifact_changed = art_now != entry.get("artifact_sha256")
+    if not (changed or missing or added or artifact_changed):
+        return {"state": "up-to-date", "n_inputs": len(recorded)}
+    return {"state": "stale", "changed": sorted(changed), "missing": sorted(missing),
+            "added": added, "artifact_changed": artifact_changed,
+            "reviewed_at": entry.get("reviewed_at")}
 
 
 # --------------------------------------------------------------------------- #
@@ -146,11 +228,21 @@ def validate(data: Any) -> dict[str, Any]:
                                f"(synonyms: {', '.join(sorted(_STATUS_SYNONYMS))})")
         out["status"] = s
     prov = data.get("provenance")
-    if prov is not None:
-        if not isinstance(prov, dict):
-            raise SidecarError("field 'provenance' must be a mapping")
-        out["provenance"] = {k: prov[k] for k in ("reviewed_at", "data_fingerprint", "n_inputs")
-                             if k in prov}
+    if isinstance(prov, list):
+        entries = []
+        for e in prov:
+            if not isinstance(e, dict) or not e.get("artifact"):
+                raise SidecarError("each 'provenance' entry must be a mapping with an 'artifact'")
+            entry = {"artifact": str(e["artifact"]),
+                     "artifact_sha256": e.get("artifact_sha256"),
+                     "reviewed_at": e.get("reviewed_at"),
+                     "inputs": [{"path": str(i["path"]), "sha256": i.get("sha256")}
+                                for i in (e.get("inputs") or []) if isinstance(i, dict) and i.get("path")]}
+            entries.append(entry)
+        if entries:
+            out["provenance"] = entries
+    # a legacy mapping-shaped provenance (old data_fingerprint form) is simply
+    # dropped: the experiment then reads as needing a re-review under the new model.
     return out
 
 
@@ -181,20 +273,3 @@ def dump_sidecar(data: dict[str, Any]) -> str:
             "# Machine-read for the catalog/search; edit freely or regenerate.\n"
             "# The README.md is yours — archivist never writes prose.\n"
             + body)
-
-
-def stamp_provenance(data: dict[str, Any], exp_dir: Path, *, today: str | None = None) -> dict[str, Any]:
-    """Set ``provenance`` to the current evidence fingerprint + a review date.
-
-    ``today`` is taken from the caller (YYYY-MM-DD); if omitted, today's date is used.
-    Returns a new dict; also returns the manifest via :func:`compute_fingerprint` if
-    the caller wants to stash it. (Stamp this when the prose has been verified
-    against the current data.)"""
-    fingerprint, n_inputs, _ = compute_fingerprint(exp_dir)
-    out = dict(data)
-    out["provenance"] = {
-        "reviewed_at": today or date.today().isoformat(),
-        "data_fingerprint": fingerprint,
-        "n_inputs": n_inputs,
-    }
-    return out
