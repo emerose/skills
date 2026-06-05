@@ -45,7 +45,9 @@ carry no shared key). When you do split, say why in the extraction recipe.
 `qpcr` · `ddpcr` (droplet/digital PCR) · `quantigene` (bead-based bDNA mRNA) ·
 `crc` (concentration-response) · `ec50` · `protein` (capillary/Simple Western, e.g.
 Jess) · `viability` · `cytokine` · `immunotox` · `mea` · `pk` · `biodist` · `tox` ·
-`histo` · `neuro` · `survival` (in-vivo animal survival) · `seq` (sequencing/variants) ·
+`bw` (body weight) · `hematology` · `chemistry` (clinical chemistry) ·
+`clinical` (clinical observations) · `histo` · `neuro` ·
+`survival` (in-vivo animal survival) · `seq` (sequencing/variants) ·
 `design` (ASO design tables) · `sample` (sample/tissue inventory & QC) ·
 `summary` (cross-assay per-subject rollup tables)
 
