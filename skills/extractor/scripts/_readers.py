@@ -1,0 +1,125 @@
+"""Shared, deterministic readers for CRO source files → tidy rows.
+
+Each reader returns (header: list[str], rows: list[list]) so a recipe can write a
+CSV and the extractor can record provenance. Readers are pure functions of the
+source bytes — re-running on the same input yields identical output (diffable).
+
+Formats: .xlsx (openpyxl) and GraphPad Prism .pzfx (XML) cover the large majority
+of measurement data. Add new readers here so recipes stay thin.
+"""
+from __future__ import annotations
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+# --------------------------------------------------------------------------- #
+# xlsx
+# --------------------------------------------------------------------------- #
+def _fmt(v) -> str:
+    """Stable cell → string. Integers stay integers; floats keep their value;
+    None/blank → ''. (Faithful to the cell value, no rounding.)"""
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+def read_xlsx_sheet(path: Path, sheet: str | None = None,
+                    drop_blank_rows: bool = True) -> tuple[list[str], list[list[str]]]:
+    """Dump one worksheet faithfully: row 1 is the header, the rest are data.
+    `drop_blank_rows` removes rows where every cell is blank (trailing padding /
+    spacer rows) — it never drops a row that carries any value."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, data_only=True)
+    ws = wb[sheet] if sheet else wb.active
+    if ws is None:
+        wb.close()
+        raise ValueError(f"no worksheet {sheet!r} in {path}")
+    rows = [[_fmt(c) for c in r] for r in ws.iter_rows(values_only=True)]
+    wb.close()
+    if not rows:
+        return [], []
+    header, data = rows[0], rows[1:]
+    if drop_blank_rows:
+        data = [r for r in data if any(c != "" for c in r)]
+    return header, data
+
+# --------------------------------------------------------------------------- #
+# GraphPad Prism .pzfx
+# --------------------------------------------------------------------------- #
+def _tag(t: str) -> str:
+    return t.split("}")[-1]
+
+def _direct_title(col: ET.Element) -> str:
+    """The column's own <Title> (direct child), not a nested one."""
+    for ch in col:
+        if _tag(ch.tag) == "Title":
+            return "".join(ch.itertext()).strip()
+    return ""
+
+def _subcolumns(col: ET.Element) -> list[list[str]]:
+    out = []
+    for sc in col:
+        if _tag(sc.tag) == "Subcolumn":
+            out.append([(d.text or "").strip() for d in sc if _tag(d.tag) == "d"])
+    return out
+
+def read_pzfx_structured(path: Path):
+    """Structured view of each table: (table_title, x_values, [(y_title, [subcolumns])]).
+    `x_values` is the first X-family subcolumn; each Y column keeps its subcolumns
+    (replicates) intact — the basis for a tidy long-format reshape."""
+    root = ET.parse(path).getroot()
+    out = []
+    for t in [el for el in root.iter() if _tag(el.tag) == "Table"]:
+        xvals: list[str] = []
+        ycols: list[tuple[str, list[list[str]]]] = []
+        for col in t:
+            k = _tag(col.tag)
+            if k in ("XColumn", "XAdvancedColumn"):
+                if not xvals:
+                    subs = _subcolumns(col)
+                    if subs:
+                        xvals = subs[0]
+            elif k == "YColumn":
+                ycols.append((_direct_title(col), _subcolumns(col)))
+        out.append((_direct_title(t), xvals, ycols))
+    return out
+
+
+def read_pzfx(path: Path) -> list[tuple[str, list[str], list[list[str]]]]:
+    """Return one (table_title, header, rows) per data table, flattened wide:
+    leading '' index column (0..n-1), then each X-family subcolumn as `_<k>`,
+    then each Y column's subcolumns as `<col title>_<g>` where g is a running
+    index across all Y subcolumns in the table. Mirrors the conventional
+    pandas-style pzfx dump so the layout is recognizable and value-faithful."""
+    root = ET.parse(path).getroot()
+    tables = [el for el in root.iter() if _tag(el.tag) == "Table"]
+    results = []
+    for t in tables:
+        title = _direct_title(t)
+        xcols, ycols = [], []
+        for col in t:
+            k = _tag(col.tag)
+            if k in ("XColumn", "XAdvancedColumn"):
+                xcols.append(col)
+            elif k == "YColumn":
+                ycols.append(col)
+        cols: list[tuple[str, list[str]]] = []          # (name, values)
+        for xc in xcols:
+            for sub in _subcolumns(xc):
+                cols.append((f"_{len(cols)}", sub))
+        g = 0
+        for yc in ycols:
+            ytitle = _direct_title(yc)
+            for sub in _subcolumns(yc):
+                cols.append((f"{ytitle}_{g}", sub))
+                g += 1
+        nrows = max((len(v) for _, v in cols), default=0)
+        header = [""] + [name for name, _ in cols]
+        rows = []
+        for i in range(nrows):
+            row = [str(i)]
+            for _, vals in cols:
+                row.append(vals[i] if i < len(vals) else "")
+            rows.append(row)
+        results.append((title, header, rows))
+    return results
