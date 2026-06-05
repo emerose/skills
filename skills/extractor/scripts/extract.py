@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["openpyxl>=3.1", "pyyaml>=6.0", "xlrd>=2.0"]
+# dependencies = ["openpyxl>=3.1", "pyyaml>=6.0", "xlrd>=2.0", "python-docx>=1.1"]
 # ///
 """Run an experiment's data/extract.py to (re)generate its data/*.csv from raw/,
 recording per-file provenance in experiment.yml.
@@ -58,6 +58,12 @@ class Extraction:
 
     def pzfx(self, src: str):
         return R.read_pzfx_structured(self.exp / src)
+
+    def docx_tables(self, src: str):
+        """All tables in a .docx report, in document order (each a list of rows of
+        cell strings). For CRO deliverables that ship only as a Word report; select
+        the table(s) you need by index and emit with x.table(..., sources=[src])."""
+        return R.read_docx_tables(self.exp / src)
 
     def _input(self, src: str) -> tuple[str, str]:
         p = self.exp / src

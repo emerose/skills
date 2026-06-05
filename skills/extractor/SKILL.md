@@ -60,7 +60,9 @@ audit.py   "<exp>"            # re-extract and check data/ against raw/
 cellcov.py "<exp>"            # full cell-coverage: is every legacy-file value covered?
 ```
 
-Run with `uv run scripts/extract.py …` (PEP 723 deps: openpyxl, pyyaml).
+Run with `uv run scripts/extract.py …` (PEP 723 deps: openpyxl, pyyaml, xlrd, python-docx).
+Readers: `.xlsx`/`.xls` (`x.xlsx`), GraphPad `.pzfx` (`x.pzfx`), and Word report tables
+(`x.docx_tables` — for CRO studies delivered only as a `.docx`/report, no spreadsheet).
 
 `cellcov.py` is the migration/deletion check: it re-runs the recipe in-memory and, for
 each legacy `data/*.csv` the recipe does NOT produce, counts cells (integers AND text,
