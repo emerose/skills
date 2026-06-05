@@ -157,11 +157,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func setIcon(_ symbol: String, _ tip: String, tint: NSColor? = nil) {
         guard let b = statusItem.button else { return }
-        let img = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
-        img?.isTemplate = true
-        b.image = img
+        let base = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
+        if let tint = tint, #available(macOS 12.0, *),
+           let colored = base?.withSymbolConfiguration(.init(paletteColors: [tint])) {
+            colored.isTemplate = false        // non-template so the menu bar keeps the color
+            b.image = colored
+            b.contentTintColor = nil
+        } else {
+            base?.isTemplate = true           // healthy: monochrome, adapts to menu-bar appearance
+            b.image = base
+            b.contentTintColor = tint          // pre-12 fallback
+        }
         b.toolTip = tip
-        b.contentTintColor = tint   // nil = default monochrome; a color tints the symbol
     }
 
     @objc func syncNow() { runSync() }
@@ -183,18 +190,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch state {
         case .upToDate:           icon = "checkmark.circle";        status = "In sync · \(now)"
         case .synced(let n):      icon = "checkmark.circle";        status = "Synced \(n) commit\(n==1 ? "" : "s") · \(now)"; log = "OK: fast-forwarded \(n) commit(s)"
-        case .pausedDirty(let n): icon = "exclamationmark.triangle"; tint = .systemOrange; status = "Paused: \(n) local change\(n==1 ? "" : "s") · \(now)"; log = "PAUSE: \(n) local change(s)"; key = "dirty"
+        case .pausedDirty(let n): icon = "exclamationmark.triangle.fill"; tint = .systemOrange; status = "Paused: \(n) local change\(n==1 ? "" : "s") · \(now)"; log = "PAUSE: \(n) local change(s)"; key = "dirty"
                                   alert = "\(n) uncommitted change\(n==1 ? "" : "s") in the folder — auto-sync paused so nothing is lost. Commit or stash them."
-        case .pausedBranch(let b):icon = "exclamationmark.triangle"; tint = .systemOrange; status = "Paused: on \(b) · \(now)"; log = "PAUSE: on \(b)"; key = "branch:\(b)"
+        case .pausedBranch(let b):icon = "exclamationmark.triangle.fill"; tint = .systemOrange; status = "Paused: on \(b) · \(now)"; log = "PAUSE: on \(b)"; key = "branch:\(b)"
                                   alert = "Folder is on '\(b)', not \(cfg?.branch ?? "the tracked branch") — auto-sync paused."
-        case .pausedAhead(let n): icon = "exclamationmark.triangle"; tint = .systemOrange; status = "Paused: \(n) unpushed · \(now)"; log = "PAUSE: \(n) ahead"; key = "ahead"
+        case .pausedAhead(let n): icon = "exclamationmark.triangle.fill"; tint = .systemOrange; status = "Paused: \(n) unpushed · \(now)"; log = "PAUSE: \(n) ahead"; key = "ahead"
                                   alert = "Local branch has \(n) unpushed commit\(n==1 ? "" : "s") — auto-sync paused. Push or open a PR."
-        case .blocked:            icon = "lock";                    tint = .systemRed; status = "Needs Full Disk Access · \(now)"; log = "BLOCKED: no access to folder"; key = "blocked"; showFDA = true
+        case .blocked:            icon = "lock.fill";               tint = .systemRed; status = "Needs Full Disk Access · \(now)"; log = "BLOCKED: no access to folder"; key = "blocked"; showFDA = true
                                   alert = "\(APP_NAME) can't read the folder. If it's a background process, grant Full Disk Access; a menu-bar app usually needs none."
         case .offline:            icon = "bolt.horizontal.circle";  status = "Folder unavailable · \(now)"
         case .notConfigured:      icon = "gearshape";               tint = .systemOrange; status = "Not configured · \(now)"; log = "NOT CONFIGURED: missing config.json"; key = "noconfig"
                                   alert = "\(APP_NAME) has no config — set repo in ~/Library/Application Support/\(APP_NAME)/config.json"
-        case .error(let m):       icon = "xmark.octagon";           tint = .systemRed; status = "Error · \(now)"; log = "ERROR: \(m)"; key = "error"; alert = "\(APP_NAME) error: \(m)"
+        case .error(let m):       icon = "xmark.octagon.fill";      tint = .systemRed; status = "Error · \(now)"; log = "ERROR: \(m)"; key = "error"; alert = "\(APP_NAME) error: \(m)"
         }
         setIcon(icon, "\(APP_NAME) — \(status)", tint: tint)
         statusLine.title = status
