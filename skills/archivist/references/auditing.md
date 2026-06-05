@@ -102,6 +102,24 @@ ones explicitly:
 If a corrected claim cites a TC deck or minutes, that file belongs in `inputs`. (The
 semantic-pass agent's "files relied on" list, above, is exactly this set.)
 
+**Gitignored ≠ excluded from provenance.** Whether a file lives in git and whether it's a
+declared provenance input are *independent* — provenance records a path + sha256, which
+needs no bytes in git. So a bulky source file kept out of git (over the 100 MB limit,
+Attic-only, LFS-excluded) must still be declared an input when the prose rests on it;
+don't let a size-based `.gitignore` silently drop it from the evidentiary record. `arx
+review` auto-includes in-folder data files regardless of `.gitignore`, so a re-`review`
+folds them back in (this is what an `audit` `added:` flag for such a file is telling you).
+Caveat: `audit` can only re-hash an input where its bytes physically exist (the working
+copy / Attic) — a bare clone missing the file reports it `missing`, not drifted. That's
+fine for a Drive-backed repo; know it before trusting `audit` in CI.
+
+**Re-stamp after a batch of cross-referencing fixes.** When one experiment declares
+another's file as an input (e.g. a study citing a sibling's README as precedent) and both
+are corrected in the same batch, the input sha can be captured *before* the sibling's fix
+lands — so `audit` flags it `changed` afterward even though nothing is actually wrong.
+After merging a batch where fixes reference each other, run `arx audit` and re-`review`
+any experiment whose flagged drift is just a stale cross-reference sha.
+
 ## Cadence
 
 Run `arx check` after every `intake` or big change, and a full `arx audit` (plus the
