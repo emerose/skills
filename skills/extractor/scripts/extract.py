@@ -153,7 +153,10 @@ def _write_provenance(sidecar: Path, entries: list[dict]) -> None:
     for e in entries:
         by_art[e["artifact"]] = e
     doc["data_provenance"] = [by_art[k] for k in sorted(by_art)]
-    sidecar.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    # width high so long paths (with spaces) aren't line-wrapped/folded
+    sidecar.write_text(
+        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, width=4096),
+        encoding="utf-8")
 
 
 if __name__ == "__main__":
