@@ -71,7 +71,8 @@ SCHEMA: dict[str, str] = {
     "cro_study_ids": _LIST, "assays": _LIST, "asos": _LIST, "related": _LIST,
 }
 _FIELD_ORDER = ["exp_id", "name", "title", "cro", "cro_study_ids", "status",
-                "model", "species", "assays", "asos", "related", "provenance"]
+                "model", "species", "assays", "asos", "related", "provenance",
+                "data_provenance"]  # written by the extractor skill; preserved verbatim
 
 
 class SidecarError(ValueError):
@@ -203,10 +204,12 @@ def validate(data: Any) -> dict[str, Any]:
     status)."""
     if not isinstance(data, dict):
         raise SidecarError("experiment.yml must contain a YAML mapping")
-    unknown = set(data) - set(SCHEMA) - {"provenance"}
+    # `provenance` is managed here; `data_provenance` is written by the companion
+    # extractor skill — archivist doesn't manage it but must tolerate + preserve it.
+    unknown = set(data) - set(SCHEMA) - {"provenance", "data_provenance"}
     if unknown:
         raise SidecarError(f"unknown field(s): {', '.join(sorted(unknown))}; "
-                           f"allowed: {', '.join(sorted(SCHEMA))}")
+                           f"allowed: {', '.join(sorted(SCHEMA) + ['provenance', 'data_provenance'])}")
     out: dict[str, Any] = {}
     for field, kind in SCHEMA.items():
         if field not in data or data[field] is None:
@@ -243,6 +246,9 @@ def validate(data: Any) -> dict[str, Any]:
             out["provenance"] = entries
     # a legacy mapping-shaped provenance (old data_fingerprint form) is simply
     # dropped: the experiment then reads as needing a re-review under the new model.
+    # Preserve the extractor's data_provenance opaquely (archivist never edits it).
+    if data.get("data_provenance") is not None:
+        out["data_provenance"] = data["data_provenance"]
     return out
 
 
