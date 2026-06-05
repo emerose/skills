@@ -42,9 +42,12 @@ carry no shared key). When you do split, say why in the extraction recipe.
 
 ## Controlled assay vocabulary (extend as needed)
 
-`qpcr` · `crc` (concentration-response) · `ec50` · `viability` · `cytokine` ·
-`immunotox` · `mea` · `pk` · `biodist` · `tox` · `histo` · `neuro` · `seq`
-(sequencing/variants) · `design` (ASO design tables)
+`qpcr` · `ddpcr` (droplet/digital PCR) · `quantigene` (bead-based bDNA mRNA) ·
+`crc` (concentration-response) · `ec50` · `protein` (capillary/Simple Western, e.g.
+Jess) · `viability` · `cytokine` · `immunotox` · `mea` · `pk` · `biodist` · `tox` ·
+`histo` · `neuro` · `survival` (in-vivo animal survival) · `seq` (sequencing/variants) ·
+`design` (ASO design tables) · `sample` (sample/tissue inventory & QC) ·
+`summary` (cross-assay per-subject rollup tables)
 
 ## Content descriptors (common)
 
