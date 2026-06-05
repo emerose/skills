@@ -8,17 +8,35 @@ Formats: .xlsx (openpyxl) and GraphPad Prism .pzfx (XML) cover the large majorit
 of measurement data. Add new readers here so recipes stay thin.
 """
 from __future__ import annotations
+import datetime as _dt
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+
+def _fmt_dt(d) -> str:
+    """A date/datetime cell → faithful ISO string. A datetime whose time part is
+    midnight is a *date* cell (Excel stores dates as datetimes at 00:00:00) and is
+    rendered date-only ('2023-05-19'); a real time component is kept
+    ('2023-05-19 14:30:00'). Matches how dates are normally written by hand, so a
+    faithful extraction is byte-comparable to hand-curated date columns."""
+    if isinstance(d, _dt.datetime):
+        if (d.hour, d.minute, d.second, d.microsecond) == (0, 0, 0, 0):
+            return d.date().isoformat()
+        return d.isoformat(sep=" ")
+    return d.isoformat()  # datetime.date / datetime.time
+
 
 # --------------------------------------------------------------------------- #
 # xlsx
 # --------------------------------------------------------------------------- #
 def _fmt(v) -> str:
     """Stable cell → string. Integers stay integers; floats keep their value;
-    None/blank → ''. (Faithful to the cell value, no rounding.)"""
+    date/datetime cells render as clean ISO dates; None/blank → ''. (Faithful to
+    the cell value, no rounding.)"""
     if v is None:
         return ""
+    if isinstance(v, (_dt.datetime, _dt.date, _dt.time)):
+        return _fmt_dt(v)
     if isinstance(v, float) and v.is_integer():
         return str(int(v))
     return str(v)
@@ -47,7 +65,7 @@ def _read_xls_rows(path: Path, sheet: str | None) -> list[list[str]]:
         if c.ctype == xlrd.XL_CELL_NUMBER:
             return str(int(c.value)) if float(c.value).is_integer() else str(c.value)
         if c.ctype == xlrd.XL_CELL_DATE:
-            return xlrd.xldate.xldate_as_datetime(c.value, wb.datemode).isoformat()
+            return _fmt_dt(xlrd.xldate.xldate_as_datetime(c.value, wb.datemode))
         return str(c.value)
 
     return [[cell(ws.cell(r, col)) for col in range(ws.ncols)] for r in range(ws.nrows)]
