@@ -78,9 +78,15 @@ def main() -> int:
     recorded, recorded_recipe = {}, {}
     if sidecar.is_file():
         doc = yaml.safe_load(sidecar.read_text(encoding="utf-8")) or {}
-        for e in (doc.get("data_provenance") or []):
-            recorded[e.get("artifact")] = {i["path"]: i["sha256"] for i in e.get("inputs", [])}
-            recorded_recipe[e.get("artifact")] = (e.get("recipe") or {}).get("sha256")
+        # unified provenance: data-file artifacts (the recipe is recorded as an input)
+        for e in (doc.get("provenance") or []):
+            art = e.get("artifact", "")
+            if not art.startswith("data/"):
+                continue
+            ins = {i["path"]: i.get("sha256") for i in e.get("inputs", [])
+                   if isinstance(i, dict) and i.get("path")}
+            recorded[art] = ins
+            recorded_recipe[art] = next((s for p, s in ins.items() if p.endswith("extract.py")), None)
     inputs_ok = True
     for o in o1:
         for path, sha in o["inputs"]:
