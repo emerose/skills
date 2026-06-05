@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["openpyxl>=3.1", "pyyaml>=6.0"]
+# dependencies = ["openpyxl>=3.1", "pyyaml>=6.0", "xlrd>=2.0"]
 # ///
 """Audit an experiment's data/ against a fresh extraction from raw/.
 
