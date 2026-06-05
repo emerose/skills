@@ -25,8 +25,8 @@ audits that grounding. It is the `raw → data` stage of the provenance pipeline
 ## Model: generic engine + per-experiment recipe
 
 - **The skill is generic.** `scripts/_readers.py` holds the shared, deterministic
-  format readers (`.xlsx`, `.pzfx`); `scripts/extract.py` is the runner; nothing here
-  knows about any specific experiment.
+  format readers (`.xlsx`, `.xls`, GraphPad `.pzfx`); `scripts/extract.py` is the
+  runner; nothing here knows about any specific experiment.
 - **Each experiment owns `data/extract.py`** — a recipe defining `build(x)` that uses
   the helpers on `x`. All experiment-specific layout, column mapping, and tweaks live
   there, so the skill never accumulates idiosyncrasies.
@@ -44,6 +44,12 @@ def build(x):
 
 `x` helpers: `sheet(out, src, sheet=…)`, `crc_long(out, src)`, `table(out, header, rows, sources)`,
 and the raw readers `xlsx(src, sheet=…)` / `pzfx(src)` for custom recipes.
+
+**Before writing a recipe, read [`references/recipes.md`](references/recipes.md)** — the
+authoring playbook with the per-experiment workflow, bespoke patterns (multi-sheet
+merges, banner/multi-row headers, pzfx row-titles & analyte-in-subcolumn, in-vivo long
+tables, derived values in `analysis/`), how to read the audit, the faithful-superset +
+legacy rules, and how to orchestrate a multi-experiment wave.
 
 ## Commands
 

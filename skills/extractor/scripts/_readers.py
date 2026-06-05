@@ -23,11 +23,7 @@ def _fmt(v) -> str:
         return str(int(v))
     return str(v)
 
-def read_xlsx_sheet(path: Path, sheet: str | None = None,
-                    drop_blank_rows: bool = True) -> tuple[list[str], list[list[str]]]:
-    """Dump one worksheet faithfully: row 1 is the header, the rest are data.
-    `drop_blank_rows` removes rows where every cell is blank (trailing padding /
-    spacer rows) — it never drops a row that carries any value."""
+def _read_xlsx_rows(path: Path, sheet: str | None) -> list[list[str]]:
     import openpyxl
     wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb[sheet] if sheet else wb.active
@@ -36,6 +32,35 @@ def read_xlsx_sheet(path: Path, sheet: str | None = None,
         raise ValueError(f"no worksheet {sheet!r} in {path}")
     rows = [[_fmt(c) for c in r] for r in ws.iter_rows(values_only=True)]
     wb.close()
+    return rows
+
+
+def _read_xls_rows(path: Path, sheet: str | None) -> list[list[str]]:
+    """Legacy .xls via xlrd (openpyxl can't read .xls)."""
+    import xlrd
+    wb = xlrd.open_workbook(str(path))
+    ws = wb.sheet_by_name(sheet) if sheet else wb.sheet_by_index(0)
+
+    def cell(c) -> str:
+        if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+            return ""
+        if c.ctype == xlrd.XL_CELL_NUMBER:
+            return str(int(c.value)) if float(c.value).is_integer() else str(c.value)
+        if c.ctype == xlrd.XL_CELL_DATE:
+            return xlrd.xldate.xldate_as_datetime(c.value, wb.datemode).isoformat()
+        return str(c.value)
+
+    return [[cell(ws.cell(r, col)) for col in range(ws.ncols)] for r in range(ws.nrows)]
+
+
+def read_xlsx_sheet(path: Path, sheet: str | None = None,
+                    drop_blank_rows: bool = True) -> tuple[list[str], list[list[str]]]:
+    """Dump one spreadsheet worksheet faithfully (`.xlsx` via openpyxl, `.xls` via
+    xlrd): row 1 is the header, the rest are data. `drop_blank_rows` removes rows
+    where every cell is blank (trailing padding / spacer rows) — it never drops a
+    row that carries any value."""
+    suffix = Path(path).suffix.lower()
+    rows = _read_xls_rows(path, sheet) if suffix == ".xls" else _read_xlsx_rows(path, sheet)
     if not rows:
         return [], []
     header, data = rows[0], rows[1:]
