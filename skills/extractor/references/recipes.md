@@ -109,6 +109,35 @@ declarations** — no imports, file I/O, or git; just calls on `x`. Run via
   later by the dedicated migration pass (which also fixes references). Hiding legacy
   in a subfolder is not a fix — it just dodges the check.
 
+### Migration / deletion: information-coverage, not byte-coverage
+
+When deciding whether a legacy file is safe to delete, the bar is **information
+coverage**: every value it holds must be recoverable from the kept (recipe-produced)
+files — *modulo shape*. The float-only `lost` count in the audit is necessary but not
+sufficient; run a full cell-coverage check (every cell incl. integers AND text,
+numbers normalized to float, text casefolded, dates compared by value) before deleting.
+Three things that look like "loss" but are not, and must NOT drive you to denormalize
+the tidy files:
+
+- **Date formatting.** Excel date cells come through as dates (`2023-05-19`), not
+  `2023-05-19 00:00:00` — the engine renders a midnight datetime date-only (see
+  `_readers._fmt_dt`). Hand-curated legacy date columns are then byte-comparable.
+- **Tidy reshape.** Legacy `neocortex-l` becomes `tissue=Neocortex` + `hemisphere=Left`;
+  a constant experiment-level column (e.g. `ASO-154` on every row) is dropped as
+  redundant (it's the `exp_id`). The *information* is present; the literal combined
+  string is not. This is correct — do not re-add denormalized columns to satisfy a
+  byte check.
+- **GraphPad RowTitle indices.** `read_pzfx_structured` omits the leading unlabeled
+  row-title column by design; stray values like `0` or `11` in a legacy pzfx-derived
+  CSV are these indices, not measurements.
+
+**Some legacy files are primary, not derived.** If a value is *nowhere in `raw/`* —
+e.g. a hand-entered QC `Pass`/`Fail` verdict, a study-design group→treatment map, or an
+animal-accession ID series not in any CRO file — it cannot be re-extracted. Such a file
+**is** source data: keep it (optionally record it in `experiment.yml` provenance as a
+curated input with no raw source), never delete it. Only delete legacy files whose every
+value is genuinely recoverable from the extraction.
+
 ## Reading the audit
 
 `audit.py "<exp>"` re-extracts and reports:
