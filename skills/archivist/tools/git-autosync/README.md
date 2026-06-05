@@ -25,8 +25,9 @@ On launch, every N seconds, and via **Sync Now**:
     pushes)
 - Folder not mounted/reachable → quietly waits; gitignored data is never touched.
 
-The menu bar shows live state (✓ in sync, ⚠ paused, lock = no access, ✕ error) and
-offers **Sync Now · Open Log · Open Folder · Quit**.
+The menu bar shows live state — ✓ in sync (calm/monochrome), ⚠ **orange** when
+paused, 🔒/✕ **red** when blocked or errored — and offers **Sync Now · Open Log ·
+Open Folder · Quit**. The colored icon persists until the issue is resolved.
 
 ## Why a menu-bar app (and the no-Full-Disk-Access payoff)
 
@@ -81,4 +82,9 @@ cat "$HOME/Library/Logs/<Name>.status"   # one line: current state
 - **Ad-hoc signed.** No paid Apple ID needed; rebuilding changes the signature,
   which is harmless here since no Full Disk Access is tied to it.
 - **Notifications** use `UNUserNotificationCenter`; on first launch macOS asks to
-  allow notifications for the app. If denied, the menu-bar icon still shows state.
+  allow notifications for the app. If denied, the (colored) menu-bar icon still
+  shows state.
+- **Persistent notifications.** Whether a notification auto-dismisses (Banner) or
+  stays until you dismiss it (Alert) is a per-app macOS setting, not something an
+  app can force. For sticky ones: System Settings → Notifications → `<Name>` →
+  **Alerts**. The app posts them time-sensitive as a best effort regardless.
