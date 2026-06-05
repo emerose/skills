@@ -57,9 +57,17 @@ legacy rules, and how to orchestrate a multi-experiment wave.
 extract.py "<exp>"            # dry run → previews in data/_preview/, repo untouched
 extract.py "<exp>" --commit   # write data/*.csv + record provenance in experiment.yml
 audit.py   "<exp>"            # re-extract and check data/ against raw/
+cellcov.py "<exp>"            # full cell-coverage: is every legacy-file value covered?
 ```
 
 Run with `uv run scripts/extract.py …` (PEP 723 deps: openpyxl, pyyaml).
+
+`cellcov.py` is the migration/deletion check: it re-runs the recipe in-memory and, for
+each legacy `data/*.csv` the recipe does NOT produce, counts cells (integers AND text,
+not just measurements) whose value is absent from the produced output. `CLEAN` (exit 0)
+means every legacy value is recoverable and the file is safe to delete; uncovered cells
+(exit non-zero) are either real loss or shape/redundancy artifacts to confirm by hand
+(see `references/recipes.md`).
 
 ## Output: naming & shape
 
