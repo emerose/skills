@@ -63,17 +63,22 @@ Full convention + controlled assay vocabulary: `references/naming.md`.
 
 ## Provenance & audit
 
-`--commit` records, per output, the raw inputs it came from (path + sha256) under
-`data_provenance` in `experiment.yml`. `audit.py` then re-runs the recipe and checks:
+`--commit` records, per output, the raw inputs **and the recipe** (`data/extract.py`)
+it came from (path + sha256) under `data_provenance` in `experiment.yml` — so a data
+file depends on both its raw sources and the recipe that produced it. `audit.py` then
+re-runs the recipe and checks:
 
 1. **Determinism** — two runs are byte-identical.
 2. **Grounding** — raw inputs exist; recorded input sha256s still match.
 3. **data/ ↔ recipe** — every output is present in `data/` and byte-identical
    (i.e. `data/` *is* `extract(raw)`); files the recipe doesn't produce are flagged
    (legacy / hand-curated / non-conforming).
-4. **Reconciliation** — no measurement value in `data/` is missing from the
-   extraction (lost data is a finding); faithful extras are reported.
-5. **Naming** — files follow the convention.
+4. **Recipe** — the recorded recipe sha still matches the current `data/extract.py`
+   (else the data may be stale w.r.t. its recipe).
+5. **Reconciliation** — no measurement value in any pre-existing `data/` file is
+   missing from the extraction, checked **per file** so redundant copies across
+   legacy files don't inflate it (lost data is a finding); faithful extras reported.
+6. **Naming** — files follow the convention.
 
 A faithful extraction is a strict, grounded superset of any prior hand-curated
 `data/`; the audit surfaces where the old files dropped or reshaped real data.

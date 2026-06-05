@@ -128,11 +128,18 @@ def main() -> None:
     out_dir = (exp / "data") if args.commit else Path(args.preview or exp / "data" / "_preview")
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"{'COMMIT' if args.commit else 'DRY-RUN'} → {out_dir}\n")
+    # the recipe that produced these files is itself a dependency
+    try:
+        recipe_rel = str(script.resolve().relative_to(repo))
+    except ValueError:
+        recipe_rel = script.name
+    recipe = {"path": recipe_rel, "sha256": _sha256(script.read_bytes())}
     prov = []
     for o in x.outputs:
         data = _rows_to_bytes(o["header"], o["rows"])
         (out_dir / o["name"]).write_bytes(data)
         prov.append({"artifact": f"data/{o['name']}", "sha256": _sha256(data),
+                     "recipe": recipe,
                      "inputs": [{"path": p, "sha256": s} for p, s in o["inputs"]]})
         print(f"  {o['name']:28} {len(o['rows']):>5} rows x {len(o['header']):>2} cols   "
               f"← {', '.join(Path(p).name for p, _ in o['inputs'])}")
