@@ -114,10 +114,19 @@ declarations** — no imports, file I/O, or git; just calls on `x`. Run via
 When deciding whether a legacy file is safe to delete, the bar is **information
 coverage**: every value it holds must be recoverable from the kept (recipe-produced)
 files — *modulo shape*. The float-only `lost` count in the audit is necessary but not
-sufficient; run a full cell-coverage check (every cell incl. integers AND text,
-numbers normalized to float, text casefolded, dates compared by value) before deleting.
-Three things that look like "loss" but are not, and must NOT drive you to denormalize
-the tidy files:
+sufficient; run the full cell-coverage check before deleting:
+
+```
+scripts/cellcov.py "<exp>"   # every cell incl. integers AND text, numbers→float,
+                             # text casefolded, comma-decimals + dates by value
+```
+
+It re-runs the recipe in-memory and, per legacy `data/*.csv` the recipe does NOT
+produce, counts cells whose normalized value is absent from the produced output.
+`CLEAN` (exit 0) ⇒ every value is covered and the file is safe to delete; any uncovered
+count (exit non-zero) is either real loss (fix the recipe) or one of the three
+shape/redundancy artifacts below — confirm by hand, do **not** denormalize the tidy
+files to make the count zero:
 
 - **Date formatting.** Excel date cells come through as dates (`2023-05-19`), not
   `2023-05-19 00:00:00` — the engine renders a midnight datetime date-only (see
