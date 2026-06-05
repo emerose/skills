@@ -159,9 +159,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let b = statusItem.button else { return }
         let base = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
         if let tint = tint, #available(macOS 12.0, *),
-           let colored = base?.withSymbolConfiguration(.init(paletteColors: [tint, .white])) {
-            // two colors: shape gets `tint`, the inner glyph (e.g. the "!") gets white,
-            // so the symbol detail stays visible instead of filling solid.
+           let colored = base?.withSymbolConfiguration(.init(paletteColors: [.white, tint])) {
+            // palette layer order for these .fill symbols: layer 1 = the inner glyph
+            // (the "!"/"x"), layer 2 = the surrounding shape. So [white, tint] = white
+            // glyph on a `tint`-colored shape — the recognizable colored warning.
             colored.isTemplate = false        // non-template so the menu bar keeps the color
             b.image = colored
             b.contentTintColor = nil
