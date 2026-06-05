@@ -45,8 +45,15 @@ declarations** — no imports, file I/O, or git; just calls on `x`. Run via
   (handles `.xlsx` and `.xls`).
 - `x.pzfx(src) -> [(table_title, x_values, [(y_title, [subcolumns])])]` — structured
   pzfx. **Note: it does NOT expose the `RowTitlesColumn`** (see pzfx section).
+- `x.docx_tables(src) -> [table, …]` where each table is `[row, …]` and each row is
+  `[cell_text, …]`, in document order. For CRO studies whose only machine-readable
+  source is a Word **report** (no spreadsheet): select the table(s) by index and emit
+  with `x.table(out, header, rows, sources=[src])`. Inspect first by printing each
+  table's index, dims, and header row; merged cells repeat their text.
 
-`src` paths are relative to the experiment dir (e.g. `"raw/Foo.xlsx"`).
+`src` paths are relative to the experiment dir (e.g. `"raw/Foo.xlsx"`). The source need
+not be under `raw/` — e.g. a report under `reports/` is a valid input when that is the
+only source (provenance records whatever path you read).
 
 ## Recipe patterns (seen in real data)
 

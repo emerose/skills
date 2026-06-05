@@ -59,7 +59,9 @@ extract.py "<exp>" --commit   # write data/*.csv + record provenance in experime
 audit.py   "<exp>"            # re-extract and check data/ against raw/
 ```
 
-Run with `uv run scripts/extract.py …` (PEP 723 deps: openpyxl, pyyaml).
+Run with `uv run scripts/extract.py …` (PEP 723 deps: openpyxl, pyyaml, xlrd, python-docx).
+Readers: `.xlsx`/`.xls` (`x.xlsx`), GraphPad `.pzfx` (`x.pzfx`), and Word report tables
+(`x.docx_tables` — for CRO studies delivered only as a `.docx`/report, no spreadsheet).
 
 ## Output: naming & shape
 

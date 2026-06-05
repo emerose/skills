@@ -166,3 +166,25 @@ def read_pzfx(path: Path) -> list[tuple[str, list[str], list[list[str]]]]:
             rows.append(row)
         results.append((title, header, rows))
     return results
+
+
+# --------------------------------------------------------------------------- #
+# Word .docx (CRO study reports whose tables are the only machine-readable source)
+# --------------------------------------------------------------------------- #
+def read_docx_tables(path: Path) -> list[list[list[str]]]:
+    """Return every table in a .docx as a list of tables, each a list of rows, each
+    row a list of cell strings (text only; whitespace collapsed). Deterministic.
+
+    Some CRO deliverables ship only as a Word report (no spreadsheet); its tables are
+    then the raw source. Tables are returned in document order so a recipe can select
+    by index. Merged cells repeat their text across the spanned grid positions (the
+    python-docx default), which keeps every row the table's full width."""
+    import docx  # provided via the engine's deps
+    doc = docx.Document(str(path))
+    out: list[list[list[str]]] = []
+    for t in doc.tables:
+        rows = []
+        for row in t.rows:
+            rows.append([" ".join(str(c.text).split()) for c in row.cells])
+        out.append(rows)
+    return out
