@@ -1,7 +1,7 @@
 #!/bin/bash
-# Remove a drive-sync instance. Usage: ./uninstall.sh [--name NAME] [--keep-logs]
+# Remove a git-autosync instance. Usage: ./uninstall.sh [--name NAME] [--keep-logs]
 set -euo pipefail
-NAME="DriveSync" KEEP_LOGS=0
+NAME="GitSync" KEEP_LOGS=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name) NAME="$2"; shift 2 ;;
@@ -10,7 +10,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-BUNDLE_ID="local.drivesync.$(echo "$NAME" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:].-')"
+BUNDLE_ID="local.gitautosync.$(echo "$NAME" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:].-')"
 UID_="$(id -u)"
 APP="$HOME/Applications/$NAME.app"
 BIN="$APP/Contents/MacOS/$NAME"

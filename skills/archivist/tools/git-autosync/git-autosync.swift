@@ -1,10 +1,14 @@
-// drive-sync — a tiny macOS menu-bar app that keeps a git working tree (typically
-// one living inside a cloud-sync folder like Google Drive / iCloud / Dropbox) in
-// sync with its upstream branch: fast-forward when it's cleanly on the tracked
-// branch, otherwise PAUSE and alert — never discarding local work.
+// git-autosync — a tiny macOS menu-bar app that keeps a local git working tree
+// fast-forwarded to its upstream branch: when the checkout is cleanly on the
+// tracked branch it `git merge --ff-only`s; on ANY local work it PAUSES and
+// alerts instead of touching anything. It is generic — it works for any local
+// git checkout. The motivating case is a checkout that lives inside a cloud-sync
+// folder (Google Drive ~/Library/CloudStorage, iCloud, Dropbox), where the
+// working copy is browsed/consumed directly and so silently drifts behind the
+// remote until pulled.
 //
-// It is config-driven; NOTHING here is host-specific. Configuration is read at
-// launch from JSON at either $DRIVESYNC_CONFIG or
+// Config-driven; NOTHING here is host-specific. Configuration is read at launch
+// from JSON at either $GITAUTOSYNC_CONFIG or
 //   ~/Library/Application Support/<AppName>/config.json
 // where <AppName> is the bundle's CFBundleName. Keys (only `repo` is required):
 //   { "repo": "/abs/path/to/working/tree",
@@ -14,13 +18,14 @@
 // Why a GUI menu-bar app (not a background launchd script): a background launchd
 // agent is denied access to provider-backed folders (~/Library/CloudStorage, …)
 // by macOS TCC, so it would need Full Disk Access. A normal Aqua-session app has
-// that access natively — so installed as a login/menu-bar item this needs NO
-// Full Disk Access grant.
+// that access natively — so for a checkout in such a folder this needs NO Full
+// Disk Access grant. (For a plain local checkout the access question is moot; the
+// menu-bar UI still gives live status + on-demand sync.)
 
 import Cocoa
 import UserNotifications
 
-let APP_NAME = (Bundle.main.infoDictionary?["CFBundleName"] as? String) ?? "DriveSync"
+let APP_NAME = (Bundle.main.infoDictionary?["CFBundleName"] as? String) ?? "GitSync"
 let LOG    = NSHomeDirectory() + "/Library/Logs/\(APP_NAME).log"
 let STATUS = NSHomeDirectory() + "/Library/Logs/\(APP_NAME).status"
 let FDA_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
@@ -34,7 +39,7 @@ struct Config {
     var path: String
 
     static func load() -> Config? {
-        let path = ProcessInfo.processInfo.environment["DRIVESYNC_CONFIG"]
+        let path = ProcessInfo.processInfo.environment["GITAUTOSYNC_CONFIG"]
             ?? NSHomeDirectory() + "/Library/Application Support/\(APP_NAME)/config.json"
         guard let data = FileManager.default.contents(atPath: path),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

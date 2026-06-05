@@ -1,12 +1,16 @@
-# drive-sync — keep a Drive-hosted git checkout in sync
+# git-autosync — keep a git checkout fast-forwarded to its upstream
 
-A tiny macOS **menu-bar app** that keeps a git working tree — typically one living
-*inside* a cloud-sync folder (Google Drive `~/Library/CloudStorage/…`, iCloud,
-Dropbox) — current with its upstream branch.
+A tiny macOS **menu-bar app** that keeps a local git working tree current with its
+upstream branch: when the checkout is cleanly on the tracked branch it
+`git merge --ff-only`s; on **any local work it pauses and alerts** instead of
+touching anything.
 
-When a repo lives in such a folder, merges happen on the remote (PRs) but the local
-checkout only updates when someone runs `git pull`, so the folder people *browse in
-Drive* silently drifts behind the canonical git state. This app closes that gap.
+It's a **generic git tool** — it works for any local checkout. The motivating case
+is a checkout that lives inside a **cloud-sync folder** (Google Drive
+`~/Library/CloudStorage/…`, iCloud, Dropbox): there the working copy is browsed and
+consumed *directly* (people/tools read the folder, not the git remote), so when
+merges land on the remote the folder silently drifts behind the canonical state
+until someone pulls. This app closes that gap automatically.
 
 ## Behavior
 
@@ -17,21 +21,21 @@ On launch, every N seconds, and via **Sync Now**:
   condition), never discarding anything:
   - uncommitted edits / untracked files
   - on a different branch (do feature work elsewhere)
-  - local commits not yet pushed
-- Cloud folder not mounted → quietly waits; bulk gitignored data is never touched.
+  - local commits not yet pushed (it only fast-forwards *from* upstream; it never
+    pushes)
+- Folder not mounted/reachable → quietly waits; gitignored data is never touched.
 
 The menu bar shows live state (✓ in sync, ⚠ paused, lock = no access, ✕ error) and
 offers **Sync Now · Open Log · Open Folder · Quit**.
 
-## Why a menu-bar app (and why it needs no Full Disk Access)
+## Why a menu-bar app (and the no-Full-Disk-Access payoff)
 
 A *background* launchd agent is denied access to provider-backed folders
 (`~/Library/CloudStorage`, …) by macOS TCC — it would need **Full Disk Access**,
 and you can only grant that to a binary (e.g. all of `/bin/zsh`), which is far too
-broad. A normal **Aqua-session** app has that access natively, so installed as a
-login/menu-bar item this needs **no Full Disk Access grant at all**. (If you ever
-see the `lock` state, the app surfaces a "Grant Full Disk Access…" menu item, but
-under the menu-bar install you shouldn't need it.)
+broad. A normal **Aqua-session** app has that access natively, so for a checkout in
+such a folder this needs **no Full Disk Access grant**. (For a plain local checkout
+the access question never arises; you still get the live status + on-demand sync.)
 
 ## Install
 
@@ -41,18 +45,19 @@ Requires macOS 11+ and the Xcode Command Line Tools (`xcode-select --install`, f
 
 ```sh
 ./install.sh --repo "/absolute/path/to/your/working/tree"
-# options: --name DriveSync  --remote origin  --branch main  --interval 900
+# options: --name GitSync  --remote origin  --branch main  --interval 900
 ```
 
-Run it once per repo you want synced, giving each a distinct `--name` (the name is
-the menu-bar app, its bundle id, and its log/status filenames). The installer
-compiles the Swift source, assembles + ad-hoc-signs a `.app` in `~/Applications`,
-writes config, and installs a login `LaunchAgent`. It's re-runnable.
+Run it once per repo you want kept in sync, giving each a distinct `--name` (the
+name is the menu-bar app, its bundle id, and its log/status filenames). The
+installer compiles the Swift source, assembles + ad-hoc-signs a `.app` in
+`~/Applications`, writes config, and installs a login `LaunchAgent`. It's
+re-runnable.
 
 ## Configuration
 
 The installer writes `~/Library/Application Support/<Name>/config.json`; the app
-reads it at launch (or `$DRIVESYNC_CONFIG` if set). Only `repo` is required:
+reads it at launch (or `$GITAUTOSYNC_CONFIG` if set). Only `repo` is required:
 
 ```json
 { "repo": "/abs/path/to/working/tree",
