@@ -21,7 +21,7 @@ Exit 0 if clean, 1 if findings. Usage:
     audit.py "<exp dir>" [--script PATH]
 """
 from __future__ import annotations
-import argparse, csv, collections, re, sys
+import argparse, csv, collections, math, re, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -39,6 +39,8 @@ def _meas(rows_iter) -> collections.Counter:
             try:
                 v = float(s)
             except ValueError:
+                continue
+            if not math.isfinite(v):     # skip NaN/inf sentinels (e.g. below-detection)
                 continue
             if v != int(v):
                 c[round(v, 4)] += 1
@@ -73,11 +75,12 @@ def main() -> int:
     # 2. grounding (inputs exist; provenance sha match if recorded)
     import yaml
     sidecar = exp / "experiment.yml"
-    recorded = {}
+    recorded, recorded_recipe = {}, {}
     if sidecar.is_file():
         doc = yaml.safe_load(sidecar.read_text(encoding="utf-8")) or {}
         for e in (doc.get("data_provenance") or []):
             recorded[e.get("artifact")] = {i["path"]: i["sha256"] for i in e.get("inputs", [])}
+            recorded_recipe[e.get("artifact")] = (e.get("recipe") or {}).get("sha256")
     inputs_ok = True
     for o in o1:
         for path, sha in o["inputs"]:
@@ -87,6 +90,12 @@ def main() -> int:
                 findings.append(f"provenance drift: {path} sha changed since recorded")
     print(f"  [grounding]    raw inputs present: True; provenance sha match: "
           f"{'n/a (not recorded)' if not recorded else inputs_ok}")
+    cur_recipe = EX._sha256(script.read_bytes())
+    stale = sorted(a for a, s in recorded_recipe.items() if s and s != cur_recipe)
+    print(f"  [recipe]       recorded recipe matches current extract.py: "
+          f"{'n/a' if not any(recorded_recipe.values()) else (not stale)}")
+    if stale:
+        findings.append(f"recipe (data/extract.py) changed since {len(stale)} artifact(s) stamped — re-extract")
 
     # 3. data/ vs recipe output
     produced = {o["name"]: EX._rows_to_bytes(o["header"], o["rows"]) for o in o1}
@@ -112,15 +121,25 @@ def main() -> int:
             print(f"                   … +{len(extra)-8} more")
         findings.append(f"{len(extra)} legacy/non-conforming file(s) in data/")
 
-    # 4. reconciliation (measurements): nothing in data/ lost vs extraction
-    legacy_meas = _meas(r for f in data_dir.glob("*.csv") if f.name != "extract.py"
-                        for r in csv.reader(f.open(encoding="utf-8", errors="replace")))
+    # 4. reconciliation: nothing the PRE-EXISTING (non-recipe) data/ files hold is
+    #    missing from the extraction. Exclude the recipe's own outputs from the
+    #    "existing" set, else committed files get counted against themselves.
     new_meas = collections.Counter()
     for o in o1:
         new_meas += _meas([o["header"]] + o["rows"])
-    lost = legacy_meas - new_meas
-    extras = new_meas - legacy_meas
-    print(f"  [reconcile]    measurements in data/: {sum(legacy_meas.values())}  "
+    # Per-file coverage: each pre-existing file's values must appear in the
+    # extraction. Checked per file so redundant copies across legacy files
+    # (Combined_*, *_File2, …) don't inflate "lost"; only a value no extraction
+    # output holds is a real loss.
+    legacy_union, lost = collections.Counter(), collections.Counter()
+    for f in data_dir.glob("*.csv"):
+        if f.name == "extract.py" or f.name in produced:
+            continue
+        fm = _meas(csv.reader(f.open(encoding="utf-8", errors="replace")))
+        legacy_union += fm
+        lost += fm - new_meas
+    extras = new_meas - legacy_union
+    print(f"  [reconcile]    pre-existing measurements: {sum(legacy_union.values())}  "
           f"lost by extraction: {sum(lost.values())}  faithful extras: {sum(extras.values())}")
     if lost:
         findings.append(f"{sum(lost.values())} measurement value(s) in data/ NOT reproduced — investigate")
