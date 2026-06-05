@@ -69,10 +69,13 @@ Full convention + controlled assay vocabulary: `references/naming.md`.
 
 ## Provenance & audit
 
-`--commit` records, per output, the raw inputs **and the recipe** (`data/extract.py`)
-it came from (path + sha256) under `data_provenance` in `experiment.yml` — so a data
-file depends on both its raw sources and the recipe that produced it. `audit.py` then
-re-runs the recipe and checks:
+`--commit` records each output as an entry in `experiment.yml`'s **unified
+`provenance` list** — the same list (and entry shape) archivist uses for `README.md`.
+A data entry is `artifact: data/<file>` with its raw sources **and the recipe
+(`data/extract.py`)** recorded as `inputs` (path + sha256); the artifact path is the
+only thing distinguishing an extraction edge (`data/…`) from a review edge
+(`README.md`). So `raw → data → README` is one DAG in one place, and stock `arx audit`
+checks the data edges too. `audit.py` additionally re-runs the recipe and checks:
 
 1. **Determinism** — two runs are byte-identical.
 2. **Grounding** — raw inputs exist; recorded input sha256s still match.

@@ -24,6 +24,7 @@ Usage:
 """
 from __future__ import annotations
 import argparse, csv, hashlib, io, runpy, sys
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -128,19 +129,22 @@ def main() -> None:
     out_dir = (exp / "data") if args.commit else Path(args.preview or exp / "data" / "_preview")
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"{'COMMIT' if args.commit else 'DRY-RUN'} → {out_dir}\n")
-    # the recipe that produced these files is itself a dependency
+    # the recipe that produced these files is itself a dependency → recorded as an input
     try:
         recipe_rel = str(script.resolve().relative_to(repo))
     except ValueError:
         recipe_rel = script.name
     recipe = {"path": recipe_rel, "sha256": _sha256(script.read_bytes())}
+    today = date.today().isoformat()
     prov = []
     for o in x.outputs:
         data = _rows_to_bytes(o["header"], o["rows"])
         (out_dir / o["name"]).write_bytes(data)
-        prov.append({"artifact": f"data/{o['name']}", "sha256": _sha256(data),
-                     "recipe": recipe,
-                     "inputs": [{"path": p, "sha256": s} for p, s in o["inputs"]]})
+        # Unified provenance entry — same shape archivist uses for README.md. The
+        # artifact path (data/…) marks this as an extraction; the recipe is an input.
+        prov.append({"artifact": f"data/{o['name']}", "artifact_sha256": _sha256(data),
+                     "reviewed_at": today,
+                     "inputs": [{"path": p, "sha256": s} for p, s in o["inputs"]] + [recipe]})
         print(f"  {o['name']:28} {len(o['rows']):>5} rows x {len(o['header']):>2} cols   "
               f"← {', '.join(Path(p).name for p, _ in o['inputs'])}")
 
@@ -152,14 +156,18 @@ def main() -> None:
 
 
 def _write_provenance(sidecar: Path, entries: list[dict]) -> None:
-    """Upsert data-file provenance entries into experiment.yml (by artifact)."""
+    """Merge data-file entries into the experiment's unified `provenance` list — one
+    entry per artifact, data files alongside README.md (artifact path is the kind
+    discriminator). Preserves entries owned by archivist (README.md, etc.) and
+    supersedes the legacy `data_provenance` key. Uses the same entry shape archivist
+    does, so `arx review`/`arx audit` read and preserve these natively."""
     import yaml
     doc = yaml.safe_load(sidecar.read_text(encoding="utf-8")) if sidecar.is_file() else {}
-    prov = doc.get("data_provenance") or []
-    by_art = {e["artifact"]: e for e in prov if isinstance(e, dict)}
-    for e in entries:
-        by_art[e["artifact"]] = e
-    doc["data_provenance"] = [by_art[k] for k in sorted(by_art)]
+    doc.pop("data_provenance", None)   # superseded by unified provenance
+    ours = {e["artifact"] for e in entries}
+    kept = [e for e in (doc.get("provenance") or [])
+            if isinstance(e, dict) and e.get("artifact") not in ours]
+    doc["provenance"] = sorted(kept + entries, key=lambda e: e["artifact"])
     # width high so long paths (with spaces) aren't line-wrapped/folded
     sidecar.write_text(
         yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, width=4096),
