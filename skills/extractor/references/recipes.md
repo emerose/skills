@@ -65,10 +65,19 @@ only source (provenance records whatever path you read).
   header, or a 2-row (group + sub) header. Read with `drop_blank_rows=False`, pick the
   real header row, build flat column names, emit via `x.table`. (K1-210701 EC50
   group+sub header; cytokine MSD banner row.)
-- **Derived values live in `analysis/`, not `raw/`.** Means/SEM/EC50 fits/curve params
-  that aren't in any raw instrument file usually come from an analyst workbook under
-  `analysis/`. Extract **that workbook** (and record it as the input) rather than
-  recomputing — recomputation isn't faithful and won't reconcile. (K1-230203.)
+- **Derived values live in `analysis/`, not `raw/` — but check version authority first.**
+  Means/SEM/EC50 fits/curve params that aren't in any raw instrument file usually come from
+  an analyst workbook under `analysis/`. Distinguish two cases:
+  - **CRO-authored analyst workbook** (a Prism-exported summary, a CRO's own
+    means/SEM rollup, etc.): this is an authoritative deliverable — extract **that workbook**
+    and record it as the input. Recomputing instead isn't faithful and won't reconcile.
+  - **AI/derived workbook** (e.g. `*-generated_by_claude.xlsx`, or anything we synthesized):
+    NOT authoritative. `data/` must trace to the authoritative CRO source, so do not extract
+    these. Re-source the values from the CRO file (e.g. the Prism `.pzfx`, plus labels
+    recovered from CRO PDFs/reports), and **drop** any derived quantity that exists in no CRO
+    file at all (e.g. scipy/curve fits we computed ourselves) rather than carrying it forward.
+  Version-authority caveat: before extracting any `analysis/` workbook, confirm who authored it.
+  When in doubt, prefer the CRO's own files.
 - **In-vivo → long with subject columns.** Reshape to one row per
   observation with `tissue, region, dose_group, treatment, animal, timepoint, target`
   as columns. (K1-230102, K1-241201.)
