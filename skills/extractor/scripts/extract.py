@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["openpyxl>=3.1", "pyyaml>=6.0", "xlrd>=2.0", "python-docx>=1.1"]
+# dependencies = ["openpyxl>=3.1", "pyyaml>=6.0", "xlrd>=2.0", "python-docx>=1.1", "pdfplumber>=0.11"]
 # ///
 """Run an experiment's data/extract.py to (re)generate its data/*.csv from raw/,
 recording per-file provenance in experiment.yml.
@@ -64,6 +64,13 @@ class Extraction:
         cell strings). For CRO deliverables that ship only as a Word report; select
         the table(s) you need by index and emit with x.table(..., sources=[src])."""
         return R.read_docx_tables(self.exp / src)
+
+    def pdf_pages(self, src: str, pages: list[int] | None = None):
+        """Per-page text lines of a PDF report (each page a list of lines, in reading
+        order, internal spacing preserved). `pages` = 1-based page numbers to extract.
+        For CRO deliverables whose finalized data tables ship only as a PDF (Provantis
+        exports etc.); parse the lines into rows and emit with x.table(..., sources=[src])."""
+        return R.read_pdf_pages(self.exp / src, pages)
 
     def _input(self, src: str) -> tuple[str, str]:
         p = self.exp / src

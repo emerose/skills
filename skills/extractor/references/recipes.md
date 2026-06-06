@@ -50,6 +50,16 @@ declarations** — no imports, file I/O, or git; just calls on `x`. Run via
   source is a Word **report** (no spreadsheet): select the table(s) by index and emit
   with `x.table(out, header, rows, sources=[src])`. Inspect first by printing each
   table's index, dims, and header row; merged cells repeat their text.
+- `x.pdf_pages(src, pages=None) -> [page, …]` where each page is `[line, …]` (text
+  lines in reading order, internal spacing preserved). `pages` = 1-based page numbers.
+  For CRO deliverables whose **finalized** data tables ship only as a PDF (Provantis
+  "Report Tables (for insertion)" exports etc.) — that PDF is the authoritative source
+  even when a superseded spreadsheet export of the same data exists. Bound to the
+  table's page range, parse lines into rows (split on whitespace; multi-token cells
+  like `-1 (pm)` need a regex), and emit with `x.table(out, header, rows, sources=[src])`.
+  Inspect first by printing each page's lines; report glyphs (a `!` "Result Comment"
+  marker etc.) appear as extra tokens — filter them and keep the value, then assert
+  values-per-row == columns so a re-saved PDF can't silently misalign. (K1-241101.)
 
 `src` paths are relative to the experiment dir (e.g. `"raw/Foo.xlsx"`). The source need
 not be under `raw/` — e.g. a report under `reports/` is a valid input when that is the
