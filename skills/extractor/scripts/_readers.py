@@ -188,3 +188,29 @@ def read_docx_tables(path: Path) -> list[list[list[str]]]:
             rows.append([" ".join(str(c.text).split()) for c in row.cells])
         out.append(rows)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# PDF (CRO report tables finalized only as a PDF, e.g. Provantis exports)
+# --------------------------------------------------------------------------- #
+def read_pdf_pages(path: Path, pages: list[int] | None = None) -> list[list[str]]:
+    """Return faithful per-page text lines from a PDF (pdfplumber, layout-aware).
+
+    Result is a list of pages, each a list of text lines in reading order, with each
+    line's internal spacing preserved (NOT collapsed) so a recipe can split a tabular
+    row on whitespace. `pages` is a list of 1-based page numbers to extract (in the
+    given order); None = all pages. Deterministic for given input bytes (pdfplumber's
+    line grouping is a pure function of the page) — re-running yields identical output.
+
+    Some CRO deliverables finalize their data tables only as a PDF (Provantis "Report
+    Tables (for insertion)" exports etc.); that PDF is then the authoritative raw
+    source. A recipe selects the relevant pages and parses the lines into rows, emitting
+    with x.table(..., sources=[src]). Inspect first by printing each page's lines."""
+    import pdfplumber  # provided via the engine's deps
+    out: list[list[str]] = []
+    with pdfplumber.open(str(path)) as pdf:
+        idxs = range(len(pdf.pages)) if pages is None else [p - 1 for p in pages]
+        for i in idxs:
+            txt = pdf.pages[i].extract_text() or ""
+            out.append(txt.splitlines())
+    return out
