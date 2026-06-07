@@ -35,8 +35,8 @@ declarations** — no imports, file I/O, or git; just calls on `x`. Run via
 ## Helper API (`x`)
 
 - `x.sheet(out, src, sheet=None, drop_blank_rows=True)` — emit one worksheet faithfully.
-- `x.crc_long(out, src)` — GraphPad pzfx where **table = plate, Y column = ASO,
-  subcolumn = replicate** → tidy long `[plate, aso, log_conc, replicate, pct_kd]`. Use
+- `x.crc_long(out, src)` — GraphPad pzfx where **table = plate, Y column = guide,
+  subcolumn = replicate** → tidy long `[plate, guide, log_conc, replicate, pct_kd]`. Use
   ONLY when that shape genuinely fits (concentration-response %KD). It does not fit
   most non-CRC pzfx.
 - `x.table(out, header, rows, sources)` — emit any table you build yourself. The path
@@ -59,7 +59,7 @@ declarations** — no imports, file I/O, or git; just calls on `x`. Run via
   like `-1 (pm)` need a regex), and emit with `x.table(out, header, rows, sources=[src])`.
   Inspect first by printing each page's lines; report glyphs (a `!` "Result Comment"
   marker etc.) appear as extra tokens — filter them and keep the value, then assert
-  values-per-row == columns so a re-saved PDF can't silently misalign. (K1-241101.)
+  values-per-row == columns so a re-saved PDF can't silently misalign. (K1-000004.)
 
 `src` paths are relative to the experiment dir (e.g. `"raw/Foo.xlsx"`). The source need
 not be under `raw/` — e.g. a report under `reports/` is a valid input when that is the
@@ -70,10 +70,10 @@ only source (provenance records whatever path you read).
 - **Multi-sheet / multi-file merge → one long file.** Sheets/workbooks with the same
   schema (plates, batches, species, channels) → concatenate with a partition column
   (`plate`, `batch`, `species`, `channel`) via `x.xlsx(...)` + `x.table(...)`. Prefer
-  this over many `__partition` files. (K1-220803 species; K1-230203 batches×channels.)
+  this over many `__partition` files. (K1-000002 species; K1-000003 batches×channels.)
 - **Banner / multi-row headers.** Some sheets have a merged banner above the real
   header, or a 2-row (group + sub) header. Read with `drop_blank_rows=False`, pick the
-  real header row, build flat column names, emit via `x.table`. (K1-210701 EC50
+  real header row, build flat column names, emit via `x.table`. (K1-000000 EC50
   group+sub header; cytokine MSD banner row.)
 - **Derived values live in `analysis/`, not `raw/` — but check version authority first.**
   Means/SEM/EC50 fits/curve params that aren't in any raw instrument file usually come from
@@ -90,10 +90,10 @@ only source (provenance records whatever path you read).
   When in doubt, prefer the CRO's own files.
 - **In-vivo → long with subject columns.** Reshape to one row per
   observation with `tissue, region, dose_group, treatment, animal, timepoint, target`
-  as columns. (K1-230102, K1-241201.)
+  as columns. (K1-000005, K1-000006.)
 - **Integer-only assays (e.g. neuro scores 0–5).** The audit's `reconcile` counts only
   non-integer numerics, so it reports `0 measurements` — that's expected, not a bug.
-  Verify the superset claim yourself (every legacy score reproduced). (K1-241101.)
+  Verify the superset claim yourself (every legacy score reproduced). (K1-000004.)
 
 ## GraphPad `.pzfx` — the tricky format
 
@@ -101,7 +101,7 @@ only source (provenance records whatever path you read).
   (`XColumn`/`XAdvancedColumn`), `YColumn`s (each with `Subcolumn`s), and often a
   `RowTitlesColumn`.
 - **`x.pzfx` / `read_pzfx_structured` deliberately omit the `RowTitlesColumn`.** When
-  the row titles carry meaning (sample/ASO IDs, animal IDs), re-parse them from the XML
+  the row titles carry meaning (sample/guide IDs, animal IDs), re-parse them from the XML
   yourself and align positionally to each Y subcolumn:
 
   ```python
@@ -117,12 +117,12 @@ only source (provenance records whatever path you read).
                          for d in sc if tag(d.tag)=="d"] if rt is not None else [])
       return out
   ```
-- **Layout varies a lot.** Seen: table=plate / Y=ASO / subcol=replicate (CRC, fits
+- **Layout varies a lot.** Seen: table=plate / Y=guide / subcol=replicate (CRC, fits
   `crc_long`); Y=dose-group / subcol=plate; Y=donor×timepoint with the **analyte as the
   row index within each subcolumn** against a fixed panel order (MSD cytokines); row
   titles = samples, Y = run/timepoint. **Inspect every table before assuming a shape.**
 - **Comma decimals.** Some pzfx write `1,23` not `1.23` — normalize `,`→`.` or values
-  won't read as numeric (and won't reconcile). (K1-241201.)
+  won't read as numeric (and won't reconcile). (K1-000006.)
 - A `.pzfx` may be the **binary** Prism format (starts `PCFFGRA4…`), not XML — not
   parseable here; skip it (its data is usually also in an xlsx).
 
@@ -158,7 +158,7 @@ files to make the count zero:
   `2023-05-19 00:00:00` — the engine renders a midnight datetime date-only (see
   `_readers._fmt_dt`). Hand-curated legacy date columns are then byte-comparable.
 - **Tidy reshape.** Legacy `neocortex-l` becomes `tissue=Neocortex` + `hemisphere=Left`;
-  a constant experiment-level column (e.g. `ASO-154` on every row) is dropped as
+  a constant experiment-level column (e.g. `K1-000001` on every row) is dropped as
   redundant (it's the `exp_id`). The *information* is present; the literal combined
   string is not. This is correct — do not re-add denormalized columns to satisfy a
   byte check.
@@ -206,5 +206,5 @@ When extracting many experiments at once:
 - **Deferred / not extracted (raw instrument or no extractable measurements):** ABI
   `.eds` (QuantStudio — but its processed data is in the accompanying xlsx, so extract
   those), Axion `.spk` (MEA spikes), Apple `.numbers`, images (`.jpg/.tiff/.png`),
-  binary Prism `.pzfx`. The heterogeneous ASO-design set (`.pptx/.docx/.vcf/.txt`) is
+  binary Prism `.pzfx`. The heterogeneous guide-design set (`.pptx/.docx/.vcf/.txt`) is
   its own problem. Record these as raw, don't block extraction on them.

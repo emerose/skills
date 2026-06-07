@@ -10,7 +10,7 @@ The per-experiment script lives at <exp>/data/extract.py and defines:
 
     def build(x):
         x.sheet("01_qpcr_cp_dcp.csv", "raw/...Cp-dCp....xlsx")
-        x.sheet("02_qpcr_summary.csv", "raw/...qPCR....xlsx", sheet="Test ASOs")
+        x.sheet("02_qpcr_summary.csv", "raw/...qPCR....xlsx", sheet="Test guides")
         x.crc_long("03_crc_pct_kd.csv", "raw/...CRC graphs.pzfx")
 
 `x` (an Extraction) provides the shared, generic helpers; all experiment-specific
@@ -95,21 +95,21 @@ class Extraction:
         self._emit(name, header, rows, sources)
 
     def crc_long(self, name: str, src: str,
-                 cols=("plate", "aso", "log_conc", "replicate", "pct_kd")):
-        """Reshape a GraphPad .pzfx (one table per plate, one Y column per ASO, one
+                 cols=("plate", "guide", "log_conc", "replicate", "pct_kd")):
+        """Reshape a GraphPad .pzfx (one table per plate, one Y column per guide, one
         subcolumn per replicate) into a tidy long table — the convention's default."""
         header = list(cols)
         rows = []
         for plate, xvals, ycols in self.pzfx(src):
-            for aso, subs in ycols:
-                if not aso:
+            for guide, subs in ycols:
+                if not guide:
                     continue
                 for rep, sub in enumerate(subs):
                     for i, val in enumerate(sub):
                         if val == "":
                             continue
                         x = xvals[i] if i < len(xvals) else ""
-                        rows.append([plate, aso, x, rep, val])
+                        rows.append([plate, guide, x, rep, val])
         self._emit(name, header, rows, [src])
 
 
