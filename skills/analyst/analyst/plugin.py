@@ -237,6 +237,20 @@ def _reconcile(cap: analyst.Capture) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Grounding report
 # --------------------------------------------------------------------------- #
+def _json_default(o):
+    """JSON fallback for evidence values that are numpy/pandas scalars or arrays.
+    Claim bodies often pass ``df[col].nunique()`` (numpy int64), ``float(...)`` aside —
+    coerce those to native types so the report export never fails on a stray numpy type."""
+    if hasattr(o, "item"):           # numpy scalar (int64/float64/bool_) -> python scalar
+        try:
+            return o.item()
+        except (ValueError, TypeError):
+            pass
+    if hasattr(o, "tolist"):         # numpy array / pandas Index/Series -> list
+        return o.tolist()
+    return str(o)                    # last resort: a readable string
+
+
 _OUTCOME_LABEL = {
     "passed": "✅ grounded", "failed": "❌ DRIFT", "xfail": "⊘ contradicted",
     "xpass": "⚠️ unexpectedly grounded", "skipped": "… unverifiable",
@@ -251,7 +265,8 @@ def pytest_sessionfinish(session):
     out_dir = Path(config.getoption("--grounding-out") or config.rootpath)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "grounding_report.json").write_text(
-        json.dumps({"claims": records}, indent=2, ensure_ascii=False), encoding="utf-8")
+        json.dumps({"claims": records}, indent=2, ensure_ascii=False, default=_json_default),
+        encoding="utf-8")
     (out_dir / "grounding_report.md").write_text(_render_md(records), encoding="utf-8")
     config._analyst_report_path = out_dir / "grounding_report.md"
 
