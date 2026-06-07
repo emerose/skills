@@ -12,7 +12,8 @@ than hand-maintained.
 Public API (imported by claim specs and derivations):
 
     load(path, kind=...) / data(...)   tracked CSV loader -> DataFrame(.attrs)
-    doc(path)                          record a non-table source (PDF/docx report)
+    doc(path) -> DocRef                record a non-table source (PDF/docx/pptx report);
+                                       DocRef.text()/.contains() extract + match its prose
     evidence(**kv)                     record headline numbers for the report
     uses(claim_id)                     pull a prior claim's evidence + inputs (transitive)
     derivation(study, recipe)          context for an analysis derivation (writes + records)
@@ -35,7 +36,7 @@ from typing import Any
 
 __all__ = [
     "load", "data", "doc", "evidence", "uses", "cross", "record",
-    "derivation", "Derivation", "DocRef", "Capture",
+    "derivation", "Derivation", "DocRef", "UnsupportedDocFormat", "Capture",
     "strength", "caveats", "kind",
     "current_capture", "registry", "TRACKED_SUFFIXES",
 ]
@@ -43,8 +44,9 @@ __all__ = [
 # Source-file kinds we consider "tracked": reading one of these while a capture is
 # active is provenance the claim/derivation depends on. The bypass guard watches the
 # same set. (.csv = tidy data + derived tables; the rest = raw CRO deliverables a doc
-# claim might cite.)
-TRACKED_SUFFIXES = {".csv", ".pzfx", ".xlsx", ".xls", ".pdf", ".docx", ".yml", ".yaml"}
+# claim might cite — incl. .pptx/.ppt TC decks, which are often the only narrative source.)
+TRACKED_SUFFIXES = {".csv", ".pzfx", ".xlsx", ".xls", ".pdf", ".docx", ".pptx", ".ppt",
+                    ".yml", ".yaml"}
 
 
 def _sha256(b: bytes) -> str:
@@ -162,22 +164,140 @@ def _preserve_identifier(col, str_col):
     return col          # clean blank-free integers (counts, indices) stay numeric
 
 
+class UnsupportedDocFormat(ValueError):
+    """Raised by :meth:`DocRef.text` for a suffix no built-in reader handles."""
+
+
+def _collapse_ws(s: str) -> str:
+    """Collapse every run of whitespace to a single space (and strip). External claims
+    match *verbatim* phrases, but extractors split a sentence across runs/lines/cells
+    (worst in pptx); normalizing both sides makes a short quote match reliably."""
+    return " ".join(s.split())
+
+
+# --- per-format text readers (pure-Python; the [reports] extra) ------------- #
+# Deliberately NOT routed through libkit's loader registry: its office path needs
+# LibreOffice (soffice) on PATH and its default PDF loader uploads bytes to a hosted
+# API (datalab) — a heavyweight system dep + a confidentiality risk for CRO
+# deliverables — and it emits Markdown (reformatted), which makes verbatim matching
+# *more* flaky. These readers are offline, deterministic, and quote-faithful.
+def _text_from_pdf(path: Path) -> str:
+    import pdfplumber
+
+    with pdfplumber.open(str(path)) as pdf:
+        return "\n".join((page.extract_text() or "") for page in pdf.pages)
+
+
+def _text_from_docx(path: Path) -> str:
+    import docx
+
+    d = docx.Document(str(path))
+    parts = [p.text for p in d.paragraphs]
+    for table in d.tables:
+        for row in table.rows:
+            parts.extend(cell.text for cell in row.cells)
+    return "\n".join(parts)
+
+
+def _text_from_pptx(path: Path) -> str:
+    """Deck prose is scattered: title/body text frames, table cells, *grouped* shapes,
+    and speaker notes. Pull them all so a quote that lives in any of them is matchable."""
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    def walk(shapes):
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                yield from walk(shape.shapes)
+            else:
+                yield shape
+
+    prs = Presentation(str(path))
+    parts: list[str] = []
+    for slide in prs.slides:
+        for shape in walk(slide.shapes):
+            if shape.has_text_frame:
+                parts.append(shape.text_frame.text)
+            if shape.has_table:
+                for row in shape.table.rows:
+                    parts.extend(cell.text for cell in row.cells)
+        if slide.has_notes_slide:
+            notes = slide.notes_slide.notes_text_frame
+            if notes is not None:
+                parts.append(notes.text)
+    return "\n".join(parts)
+
+
+# suffix -> reader. Pure-Python formats only; legacy .doc/.ppt (which would need
+# LibreOffice) are intentionally absent and raise UnsupportedDocFormat.
+_TEXT_READERS = {
+    ".pdf": _text_from_pdf,
+    ".docx": _text_from_docx,
+    ".pptx": _text_from_pptx,
+}
+
+_PRESENTATION_SUFFIXES = {".pptx", ".ppt", ".odp"}
+
+
 @dataclass
 class DocRef:
-    """A handle to a non-table source (a CRO report PDF/docx) recorded as evidence.
-    Returned by :func:`doc` so a claim can quote it and keep the citation traceable."""
+    """A handle to a non-table source (a CRO report PDF/docx, or a TC .pptx deck)
+    recorded as evidence. Returned by :func:`doc` so a claim can quote it and keep the
+    citation traceable. :meth:`text`/:meth:`contains` extract and match its prose so
+    external claims stop hand-rolling per-format extraction."""
 
     path: Path
     sha256: str
+    _text: str | None = field(default=None, init=False, repr=False, compare=False)
 
     def __str__(self) -> str:
         return f"{self.path.name}@{self.sha256[:12]}"
 
+    @property
+    def is_presentation(self) -> bool:
+        """True for slide decks (.pptx/.ppt/.odp). A deck is *weaker* evidence than a
+        signed report (summary, rounded numbers, scattered text) — author such external
+        claims at ``strength="moderate"`` (max) with a caveat that the source is a deck."""
+        return self.path.suffix.lower() in _PRESENTATION_SUFFIXES
+
+    def text(self) -> str:
+        """Extract the document's plain text, dispatching on suffix: ``.pdf`` (pdfplumber),
+        ``.docx`` (python-docx), ``.pptx`` (python-pptx). Needs the ``[reports]`` extra.
+        Cached on the instance so repeated substring checks don't re-parse. Raises
+        :class:`UnsupportedDocFormat` for any other suffix (e.g. legacy ``.doc``/``.ppt``)."""
+        if self._text is None:
+            reader = _TEXT_READERS.get(self.path.suffix.lower())
+            if reader is None:
+                raise UnsupportedDocFormat(
+                    f"doc().text() can't extract {self.path.suffix!r} ({self.path.name}): "
+                    f"supported formats are {', '.join(sorted(_TEXT_READERS))} "
+                    f"(install the [reports] extra). Legacy .doc/.ppt and other office "
+                    f"formats are not supported.")
+            try:
+                self._text = reader(self.path)
+            except ImportError as exc:
+                name = getattr(exc, "name", None) or "a reader"
+                raise ImportError(
+                    f"{name} is required to read {self.path.suffix} — install the analyst "
+                    f"[reports] extra: pip install -e 'skills/analyst[reports]'") from exc
+        return self._text
+
+    def contains(self, phrase: str, *, normalize_ws: bool = True) -> bool:
+        """Substring-check ``phrase`` against the extracted :meth:`text`. With
+        ``normalize_ws`` (default), collapse whitespace on both sides first — the robust
+        way to match a verbatim quote whose extractor split it across runs/lines/cells
+        (especially in decks). This is the recommended matcher for external claims."""
+        hay = self.text()
+        if normalize_ws:
+            return _collapse_ws(phrase) in _collapse_ws(hay)
+        return phrase in hay
+
 
 def doc(path, kind: str = "doc"):
-    """Record a non-table source (PDF/docx CRO report) as a provenance input and
-    return a :class:`DocRef`. Use for *external* claims that quote a CRO report: the
-    quote is grounded in the bytes of the cited document, sha-pinned like any table."""
+    """Record a non-table source (a PDF/docx CRO report, or a .pptx TC deck) as a
+    provenance input and return a :class:`DocRef`. Use for *external* claims that quote
+    a report: the quote is grounded in the bytes of the cited document, sha-pinned like
+    any table. Call :meth:`DocRef.contains` (or :meth:`DocRef.text`) to verify the quote."""
     p = Path(path)
     sha = _sha256(p.read_bytes())
     record(kind, p, sha)

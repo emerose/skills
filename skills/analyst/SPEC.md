@@ -85,7 +85,8 @@ def test_pos_ctrl_below_criterion(k1_000000):
 ```
 
 ## Harness (`analyst` package + pytest plugin)
-- API: `data()/load()` (tracked loader, via `experiments`), `uses(claim_id)`, `doc(path)`,
+- API: `data()/load()` (tracked loader, via `experiments`), `uses(claim_id)`,
+  `doc(path)` (→ `DocRef`; `.text()`/`.contains()` extract + quote-match a PDF/docx/pptx),
   `evidence(**kv)`, and the `strength`/`caveats`/`kind` markers.
 - **Provenance capture:** a per-claim context records every `(kind, path, sha)` loaded;
   transitive through `uses`. The claim id + captured inputs + recorded evidence form a

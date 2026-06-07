@@ -39,7 +39,8 @@ for audit, with non-binary support (strength) and a git-based temporal history.
   `k.derive` = the experiment's `analysis/derive.py` (loaded collision-free); `dir(k)`
   lists tables (IPython tab-completion). DataFrames carry `.attrs["source"]`/`["sha256"]`.
 - **`analyst`** — the harness + pytest plugin. `load()/data()` (tracked loader), `doc()`
-  (record a CRO report PDF/docx), `evidence(**kv)`, `uses(claim_id)` (compose on another
+  (record a CRO report PDF/docx **or a .pptx TC deck**; the returned `DocRef.text()` /
+  `DocRef.contains()` extract + quote-match it), `evidence(**kv)`, `uses(claim_id)` (compose on another
   claim, transitive provenance), `derivation(study, __file__)` (analysis-provenance
   recorder), and the `@strength`/`@caveats`/`@kind` markers. The plugin captures
   provenance per claim, **bypass-guards** untracked source reads, runs a **reconcile
@@ -135,7 +136,35 @@ pytest <…>/analysis/claims --check-drift              # also flag stale claims
 
 Emits `grounding_report.md` + `.json` (per claim: `{id, statement, outcome, kind,
 strength, caveats, evidence, inputs+shas, reconcile, drift?}`). `pip install -e .[reports]`
-adds `pdfplumber`/`python-docx` for `doc()`-based external claims that quote a CRO report.
+adds `pdfplumber`/`python-docx`/`python-pptx` for `doc()`-based external claims that quote a
+CRO report (PDF/docx) or a TC slide deck (pptx).
+
+### External claims — quoting a report or deck
+
+`doc(path)` sha-pins the cited bytes and returns a `DocRef`. Don't hand-roll extraction:
+call `ref.text()` (suffix-dispatched: `.pdf`→pdfplumber, `.docx`→python-docx,
+`.pptx`→python-pptx; offline + deterministic, no LibreOffice/hosted API) or, for the
+quote check, `ref.contains("verbatim phrase")` (whitespace-normalized substring match —
+the robust default for prose split across lines/runs/cells):
+
+```python
+@kind("external")
+@strength("strong")                                    # signed report → strong is OK
+@caveats("verbatim quote from the signed CRO report (sha-pinned via doc())")
+def test_report_no_mortality(experiment):
+    "The signed CRL report states: 'no mortality was observed...'."
+    ref = doc(os.path.join(experiment.path, REPORT))   # records the PDF/docx sha
+    assert ref.contains("no mortality was observed")
+```
+
+- **Decks are weaker evidence.** A TC `.pptx` is a summary (rounded numbers, scattered
+  text), not a signed deliverable. Cap deck-grounded external claims at
+  `@strength("moderate")` with a `@caveats(...)` noting the source is a presentation, and
+  match **short** verbatim phrases (`ref.is_presentation` flags the deck for reviewers).
+  This is *authoring guidance* — the harness keeps `@strength` as your judgment, it does
+  not silently cap it.
+- Legacy `.doc`/`.ppt` (and other office formats) aren't supported — `ref.text()` raises
+  `UnsupportedDocFormat`. Re-save as `.docx`/`.pptx`/PDF.
 
 ## Provenance, guard, temporality
 

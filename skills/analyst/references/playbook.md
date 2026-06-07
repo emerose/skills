@@ -22,8 +22,14 @@ Smoke test: `python -c "from experiments import k1_000000 as k; print(dir(k), k.
   - **result** — a measured outcome (a knockdown %, an EC50, a significant difference).
   - **design** — a fact about how the study was run (n/group, dose, #doses), grounded in
     the data shape / the treatment key.
-  - **external** — a quote from a CRO report, via `doc(path)` + a substring check on the
-    extracted text (sha-pinned). Needs `[reports]` extras.
+  - **external** — a quote from a CRO report (PDF/docx) **or a TC slide deck (.pptx)**,
+    via `doc(path)` → `ref.contains("verbatim phrase")` (a sha-pinned, whitespace-normalized
+    substring check; `ref.text()` if you need the raw text). Don't hand-roll pdfplumber/
+    python-docx/python-pptx — `DocRef` dispatches on suffix. Needs `[reports]` extras.
+    A `.pptx` deck is **weaker** evidence than a signed report: cap at `@strength("moderate")`
+    with a caveat that the source is a presentation, and match *short* phrases (deck text is
+    scattered across shapes/notes; `ref.is_presentation` flags it). Legacy `.doc`/`.ppt`
+    aren't supported (re-save as `.docx`/`.pptx`/PDF).
   - **interpretive** — a judgment (a caveat, a mechanism), `strength="weak"`, grounded in
     a data signature where possible (e.g. bimodal response ⇒ inconsistent delivery).
 
