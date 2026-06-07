@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
-    "load", "data", "doc", "evidence", "uses", "record",
+    "load", "data", "doc", "evidence", "uses", "cross", "record",
     "derivation", "Derivation", "DocRef", "Capture",
     "strength", "caveats", "kind",
     "current_capture", "registry", "TRACKED_SUFFIXES",
@@ -190,6 +190,24 @@ def evidence(**kv) -> None:
     cap = _CURRENT.get()
     if cap is not None:
         cap.evidence.update(kv)
+
+
+def cross(study):
+    """Declare an *intentional* cross-experiment dependency. A claim's `experiment`
+    fixture covers its home experiment; reading any *other* experiment is flagged by the
+    reconcile lint as an accidental cross-read unless declared. Wrap a second study in
+    ``cross(...)`` to register it as expected and return it for use:
+
+        from experiments import k1_230402
+        screen = cross(k1_230402)                 # declares the cross-experiment dep
+        top = screen.analysis.quantigene_group_summary   # ...then read it, captured as usual
+
+    Returns the study unchanged (so it composes inline)."""
+    cap = _CURRENT.get()
+    code = getattr(study, "id", None)
+    if cap is not None and code:
+        cap.declared.add(str(code).upper())
+    return study
 
 
 def uses(claim_id: str) -> dict:

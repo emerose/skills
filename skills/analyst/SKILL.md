@@ -114,8 +114,9 @@ def test_pos_ctrl_below_criterion(experiment):    # `experiment` = this folder's
   the non-binary judgment (kept *out* of the assert).
 - **bulk** via `@pytest.mark.parametrize`. **compose** via `uses("other_claim_id")` (pulls
   its evidence + inputs transitively). Reuse derivation helpers via `experiment.derive.fn(experiment)`.
-- **cross-experiment**: import another study directly — `from experiments import k1_230402`
-  (a Study, usable in the body); it's recorded as an undeclared input unless named.
+- **cross-experiment**: import another study and wrap it in `cross(...)` to declare the
+  dependency — `from experiments import k1_230402; screen = cross(k1_230402)`; reads from it
+  are captured as provenance (sha-pinned) and the reconcile lint treats them as expected.
 - **lifecycle** = pytest states: `@pytest.mark.xfail(reason=…, strict=True)` = contradicted
   but kept on record; `pytest.skip(reason=…)` = unverifiable. `@kind`/`@strength` still apply.
 - **identifiers**: id columns whose values only look numeric (ASO `01`/`08`, leading
