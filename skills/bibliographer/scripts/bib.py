@@ -313,7 +313,7 @@ async def cmd_add(args: argparse.Namespace, store: BiblioStore) -> None:
 def topic_tag(root: Path, f: Path) -> str | None:
     """Derive a provisional ``topic:<slug>`` tag from a file's top-level folder.
 
-    The pile's existing topic folders (e.g. ``02_ube3a_biology``) become tags,
+    The pile's existing topic folders (e.g. ``02_target_biology``) become tags,
     not load-bearing structure — they're AI-generated and not fully trusted.
     """
     rel = f.relative_to(root)
@@ -454,7 +454,7 @@ def verify_candidate(
 
     Returns ``(verified, title_overlap)``. Verified requires ALL of:
     - the candidate title has enough significant tokens to be discriminating
-      (kills degenerate one-word titles like "Ube" matching any UBE3A paper);
+      (kills degenerate one-word titles like "Gene" matching any GENE_X paper);
     - a strong fraction of those tokens appear in the document's actual content
       (this is what catches mislabeled files — filename says X, content is Y);
     - the candidate's first author appears in the content or the filename;
