@@ -4,20 +4,20 @@ import _intake
 
 
 def test_classify_incoming_keywords_win():
-    assert _intake.classify_incoming("C0790222 Final Study Protocol v07 SIGNED.pdf") == "protocol"
-    assert _intake.classify_incoming("CRL_Kicho SoW2.docx") == "protocol"
-    assert _intake.classify_incoming("C0790222 Draft Report_03.docx") == "reports"
-    assert _intake.classify_incoming("C0790222 Draft Results_8Dec2023.pptx") == "reports"
-    assert _intake.classify_incoming("01August2022_Kicho_TC-05_Final.pptx") == "reports"
+    assert _intake.classify_incoming("V1234567 Final Study Protocol v07 SIGNED.pdf") == "protocol"
+    assert _intake.classify_incoming("VendorA_Sync SoW2.docx") == "protocol"
+    assert _intake.classify_incoming("V1234567 Draft Report_03.docx") == "reports"
+    assert _intake.classify_incoming("V1234567 Draft Results_8Dec2023.pptx") == "reports"
+    assert _intake.classify_incoming("01August2022_Sync_TC-05_Final.pptx") == "reports"
     assert _intake.classify_incoming("Histopathology Report.pdf") == "reports"
 
 
 def test_classify_incoming_by_extension():
-    assert _intake.classify_incoming("20260312_Kicho_Lumbar.eds") == "raw"
+    assert _intake.classify_incoming("20260312_Sync_Lumbar.eds") == "raw"
     assert _intake.classify_incoming("baseline_D30.spk") == "raw"
-    assert _intake.classify_incoming("C0790222 graphs.pzfx") == "raw"
+    assert _intake.classify_incoming("V1234567 graphs.pzfx") == "raw"
     # an unmarked CRO data file defaults to raw (original measurements)
-    assert _intake.classify_incoming("C0790222 BW results.xlsx") == "raw"
+    assert _intake.classify_incoming("V1234567 BW results.xlsx") == "raw"
     assert _intake.classify_incoming("random_deck.pptx") == "reports"
 
 

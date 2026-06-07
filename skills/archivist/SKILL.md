@@ -15,7 +15,7 @@ description: >-
   folder for stale summaries or layout problems — even if they don't say
   "archivist." Triggers include "index my experiments," "search the lab data for
   X," "which study has the Day-29 knockdown numbers," "what have we run with ASO
-  154," "file this CRO report," "update the experiment summary," or "is this
+  7," "file this CRO report," "update the experiment summary," or "is this
   summary still accurate."
 ---
 
@@ -32,7 +32,7 @@ write-ups current as the underlying data changes. It's driven by one bundled too
 
 The primary consumer is an LLM agent. Archivist's job is to make a sprawling,
 heterogeneous data folder *answerable*: "which file has the lumbar-cord knockdown
-numbers," "show me everything we ran with ASO 154," "is this summary still true."
+numbers," "show me everything we ran with ASO 7," "is this summary still true."
 
 ## The store: libkit (no separate database)
 
@@ -42,7 +42,7 @@ managed folder holds a libkit library under `<home>/.archivist/catalog.duckdb`
 libkit document live there, distinguished by the `kind` metadata key:
 
 - **`experiment`** — a card per experiment folder (keyed by its internal id, e.g.
-  `K1-230901`). Its structured fields (CRO, study IDs, status, species/model, assays,
+  `K1-000000`). Its structured fields (CRO, study IDs, status, species/model, assays,
   ASOs, related) come **only from that experiment's `experiment.yml` sidecar** (see
   below) — never scraped from prose. Embedded, so an experiment is searchable as a unit.
 - **`file`** — one per real file (keyed by relative path). *Narrative* files
@@ -64,26 +64,33 @@ corrupt anything). The **`README.md` stays purely human/agent prose; archivist n
 writes to it.** Don't mechanically parse READMEs for metadata — populate the sidecar.
 
 ```yaml
-exp_id: K1-230901
-cro: Charles River
-cro_study_ids: ["C0790222"]
+exp_id: K1-000000
+cro: Vendor A
+cro_study_ids: ["V1234567"]
 status: complete            # planned|active|complete|terminated|failed|superseded|draft
 model: Sprague-Dawley rats
 assays: [QuantiGene, Luminex, LC-MS/MS]
-asos: [ASO-154]
-related: [K1-230402, K1-241101]
+asos: [ASO-7]
+related: [K1-000001, K1-000002]
 provenance:                 # written by `arx review`, read by `arx audit`
   - artifact: README.md
     artifact_sha256: sha256-of-README-at-review
     reviewed_at: 2026-06-03
     inputs:                 # the exact files the prose was verified against, each versioned
-      - { path: "K1-230901 - Rat IT Dose-Response (C0790222)/data/quantigene_expression.csv", sha256: … }
-      - { path: "Shared/CRL/SOW2/…/report.pptx", sha256: … }   # inputs may live outside the folder
+      - { path: "K1-000000 - Rat IT Dose-Response (V1234567)/data/quantigene_expression.csv", sha256: … }
+      - { path: "Shared/Vendor A/SOW2/…/report.pptx", sha256: … }   # inputs may live outside the folder
 ```
 
 Populate it yourself or start from `arx meta <exp> --suggest` (a heuristic *draft*
 from the README that you review — never authoritative). Unknown fields, wrong types,
 or bad status values raise a clear error rather than silently vanishing.
+
+**Private vocabulary (your real CRO names).** The `--suggest` heuristic canonicalizes
+CRO names and recognizes study-id formats from a controlled vocabulary. This public
+repo ships only **generic placeholders** (`Vendor A`, …). Your real vendor names and
+vendor-specific study-id shapes are program-specific — keep them in a private
+`vocab.yml` at your data-folder root (or `$ARCHIVIST_VOCAB`), which `arx` merges over
+the defaults. See [references/vocab.example.yml](references/vocab.example.yml).
 
 ## Setup: keys and the embedding backend
 
@@ -117,21 +124,21 @@ Examples below write `arx` for brevity. Run `arx init` once per folder.
 
 ```bash
 arx init                                   # create the store + .gitignore entry
-arx index "K1-230901"                       # index one experiment (by id or path)
+arx index "K1-000000"                       # index one experiment (by id or path)
 arx reindex                                 # (re)index every experiment folder
 arx list                                    # experiments, with file counts
-arx list --kind file --experiment K1-230901 # files in one experiment
-arx show K1-230901                           # one experiment + its files
-arx search "C0790222"                        # metadata search (ids/assays/ASOs/paths/tags)
+arx list --kind file --experiment K1-000000 # files in one experiment
+arx show K1-000000                           # one experiment + its files
+arx search "V1234567"                        # metadata search (ids/assays/ASOs/paths/tags)
 arx query "lumbar spinal cord knockdown"     # SEMANTIC + full-text search INSIDE the content
-arx file "K1-230901/data/quantigene_expression.csv"   # one file's record (path, sha256, schema)
-arx read "K1-230901/data/quantigene_expression.csv"   # dump a csv/tsv/xlsx to pull exact values
+arx file "K1-000000/data/quantigene_expression.csv"   # one file's record (path, sha256, schema)
+arx read "K1-000000/data/quantigene_expression.csv"   # dump a csv/tsv/xlsx to pull exact values
 arx entity list                              # derived registry of ASOs / assays / CROs
-arx entity show "ASO-154"                    # every experiment involving ASO 154
+arx entity show "ASO-7"                    # every experiment involving ASO 7
 arx catalog                                  # export CATALOG.md + .archivist/catalog.json
-arx meta K1-230901                            # show the experiment.yml metadata (--suggest for a draft)
-arx review K1-230901                          # stamp provenance after verifying the README vs the data
-arx fingerprint K1-230901 --manifest          # the evidence fingerprint + exactly what's hashed
+arx meta K1-000000                            # show the experiment.yml metadata (--suggest for a draft)
+arx review K1-000000                          # stamp provenance after verifying the README vs the data
+arx fingerprint K1-000000 --manifest          # the evidence fingerprint + exactly what's hashed
 arx check                                    # structural integrity (missing sidecar/unindexed/layout/redundant zips)
 arx audit                                    # provenance staleness + a semantic-pass worklist
 arx pr "title" path…                         # package working-tree changes into a review PR
@@ -142,7 +149,7 @@ reports/ analysis/` + a README template following the folder's convention) and
 indexes it:
 
 ```bash
-arx new K1-260601 "Rat IT Chronic Tox" --cro "Charles River" --study-id C9999001 --model "Sprague-Dawley rats"
+arx new K1-000003 "Rat IT Chronic Tox" --cro "Vendor A" --study-id V9999001 --model "Sprague-Dawley rats"
 ```
 
 **Filing a new delivery** (a CRO/vendor data package) routes each file to the right
@@ -151,8 +158,8 @@ instrument output and raw measurements to `raw/`. It **copies** (never moves) an
 **dry-run by default** — review the plan, then `--commit`:
 
 ```bash
-arx intake K1-260601 ~/Downloads/C9999001_delivery       # dry-run: show the placement plan
-arx intake K1-260601 ~/Downloads/C9999001_delivery --commit   # copy in + reindex
+arx intake K1-000003 ~/Downloads/V9999001_delivery       # dry-run: show the placement plan
+arx intake K1-000003 ~/Downloads/V9999001_delivery --commit   # copy in + reindex
 ```
 
 `intake` flags destination collisions, skips OS cruft, and preserves any existing
@@ -167,7 +174,7 @@ flag it. Re-running `index` after the sidecar or files change refreshes the card
 **Two kinds of search, and the difference matters:**
 
 - **`arx search`** — fast metadata lookup over experiment/file records (study IDs,
-  CRO, assays, ASOs, paths, tags). Use for "the C0790222 study", "files tagged X".
+  CRO, assays, ASOs, paths, tags). Use for "the V1234567 study", "files tagged X".
 - **`arx query`** — libkit hybrid vector + BM25 search *inside the indexed content*
   (summaries, protocols, reports, and tabular schemas). Use for concepts and
   results — "where's the dose-dependent gait effect" — not just metadata. The
@@ -181,7 +188,7 @@ the recorded `path` from `arx file <path>` and open it directly.
 ## Entities (registry + live query)
 
 Entities — ASOs, assays, CROs, study IDs, models — are **not** stored as standing
-records when their facts are derivable; `arx entity show "ASO-154"` runs a live
+records when their facts are derivable; `arx entity show "ASO-7"` runs a live
 query over experiment metadata and is therefore **always current, never stale**.
 Only *curated, non-derivable* notes about an entity (why an ASO was selected, a
 CRO's quirks, an alias) are stored as `kind=entity` documents and embedded.
