@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kicho-analyst"
+version = "0.1.0"
+description = "kicho (tracked data access) + analyst (claim-grounding + analysis provenance) for the kicho-science pipeline"
+requires-python = ">=3.11"
+# Scientific deps are version-pinned for fit determinism: a 4-parameter Hill fit
+# (scipy.optimize.curve_fit) is a pure function of its inputs given the same library
+# versions, so we pin to a tested set and compare derived floats within tolerance
+# (never byte-identical) in the claims. These are the versions the pilot was built on.
+dependencies = [
+    "pandas==2.2.3",
+    "numpy==2.1.3",
+    "scipy==1.14.1",
+    "matplotlib==3.9.2",
+    "pyyaml>=6.0",
+    "pytest>=8.0",
+]
+
+[project.optional-dependencies]
+# Readers a doc()/external claim may need to quote a CRO report.
+reports = ["pdfplumber>=0.11", "python-docx>=1.1"]
+
+# Auto-load the grounding plugin: a bare `pytest analysis/claims/` works once installed.
+[project.entry-points.pytest11]
+analyst = "analyst.plugin"
+
+[tool.setuptools]
+packages = ["kicho", "analyst"]
