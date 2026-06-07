@@ -20,7 +20,7 @@ Three distinct roles — keep them separate; **`extract` must not do analysis**:
   output value traces to a cell in raw (this is what cellcov audits). No computed values,
   no fits, no choices.
 - **analysis / derivation (`data/ → analysis/`)** — COMPUTATION with choices: summary
-  tables (per-ASO KD/EC50), stats, curve fits, **and figures/graphs**. Re-derivable,
+  tables (per-target KD/EC50), stats, curve fits, **and figures/graphs**. Re-derivable,
   provenance-tracked *products* — but **not claims**; most are cited by no claim.
 - **claims (`data/`+analysis → assertions)** — the thin pytest layer. `analysis ⊃ claims`;
   a figure is an analysis artifact a claim may *cite*, not a claim itself.
@@ -30,7 +30,7 @@ deliverable?** If yes, pulling it into `data/` is faithful extraction; if the re
 *computes* it (mean, SEM, KD%, an EC50 fit) it is analysis and moves to the analysis layer.
 
 **De-overloading `extract`:** some recipes currently compute derived tables inside
-`extract.py` (e.g. K1-230203's `03_crc_dose_response` = per-dose mean/SEM/KD% computed
+`extract.py` (e.g. K1-000001's `03_dose_response` = per-dose mean/SEM/KD% computed
 from the pzfx, with point-exclusion choices). Building the analyst layer pulls those
 derivations out of `extract.py` into `analysis/`, restoring extraction to pure
 faithfulness; the computed tables become analysis outputs (exposed via `k.analysis.*`).
@@ -38,17 +38,17 @@ faithfulness; the computed tables become analysis outputs (exposed via `k.analys
 ## Components
 
 ### 1. `experiments` — typed, tracked data access (one generic module)
-`from experiments import k1_210701 as k` → a `Study` bound to the experiment folder (resolved by
+`from experiments import k1_000000 as k` → a `Study` bound to the experiment folder (resolved by
 glob on the id). Attributes are the tidy tables as pandas DataFrames; lazy, cached,
 **sha-pinned**, and every access routes through the tracked loader so it is recorded as
 provenance.
-- `02_qpcr_summary.csv` → `k.qpcr_summary`; `k.meta` → `experiment.yml`; `__dir__()` lists
+- `02_assay_summary.csv` → `k.assay_summary`; `k.meta` → `experiment.yml`; `__dir__()` lists
   tables (IPython tab-completion). DataFrames carry `.attrs["source"]`/`["sha256"]`.
 - Root via `EXPERIMENTS_ROOT` env. Later: `k.analysis.<name>` exposes derived outputs the same way.
 
 ### 2. `analysis/` — comprehensive derivations (products, not claims)
 Plain importable functions per experiment (no decorators) that **compute** the derived
-artifacts: EC50/Hill fits, group stats, per-ASO summary tables, **and figures**. Each
+artifacts: EC50/Hill fits, group stats, per-target summary tables, **and figures**. Each
 reads via `experiments` (provenance auto). Analysis **choices** (fit model, point exclusions,
 normalization) live in code + comments — explicit and reviewable. Outputs are written as
 artifacts — derived tables (`analysis/tables/*.csv`) and figures (`analysis/fig/*.png`) —
@@ -67,21 +67,21 @@ A claim **is** a pytest test:
   `@strength("strong|moderate|weak|...")`, `@caveats("…")`, `@kind("result|design|external|interpretive")`.
   Lifecycle via pytest states: `xfail(reason=)` = contradicted/retracted (kept on record);
   `skip(reason=)` = unverifiable.
-- **bulk** via `@pytest.mark.parametrize` (one body → many ASOs/regions/timepoints).
+- **bulk** via `@pytest.mark.parametrize` (one body → many guides/regions/timepoints).
 - **composition / cross-experiment** via fixtures that pull another claim's recorded
   evidence (`uses`).
 - bodies record headline numbers via `evidence(**kv)` for the report.
 
 ```python
-# analysis/claims/test_K1_210701.py
+# analysis/claims/test_K1_000000.py
 @strength("strong")
 @caveats("single positive-control series; n=2 wells at top dose")
-def test_pos_ctrl_below_criterion(k1_210701):
-    "Positive control UBE3A ASO1 ~53% KD at the 100 nM top dose — below the >60% criterion."
-    q  = k1_210701.qpcr_summary                       # load + sha-pin + provenance, one access
-    kd = q[(q["ASO ID"]=="UBE3A ASO1") & (q["ASO Concentration (nM)"]==100)]["AVE KD"].mean()
+def test_pos_ctrl_below_criterion(k1_000000):
+    "Positive-control guide ctrl-1 ~45% knockdown at the 100 nM top dose — below the >60% criterion."
+    q  = k1_000000.assay_summary                       # load + sha-pin + provenance, one access
+    kd = q[(q["guide_id"]=="ctrl-1") & (q["conc_nm"]==100)]["pct_kd"].mean()
     evidence(kd_pct=round(kd,1), criterion_pct=60)
-    assert kd == pytest.approx(53, abs=3) and kd < 60
+    assert kd == pytest.approx(45, abs=3) and kd < 60
 ```
 
 ## Harness (`analyst` package + pytest plugin)
@@ -118,7 +118,7 @@ skills/analyst/
   claims/test_*.py                 # grounding specs (assert; cite data/ + analysis outputs)
 ```
 `extract.py` stays under `<exp>/data/` and is FAITHFUL only — derivations that crept into
-it (e.g. K1-230203's computed dose-response) move here under `analysis/`.
+it (e.g. K1-000001's computed dose-response) move here under `analysis/`.
 
 ## Open questions (defer; v1 works without resolving)
 - Cross-experiment claims home — a `program/` specs dir + a libkit store, or just files?
@@ -129,15 +129,15 @@ it (e.g. K1-230203's computed dose-response) move here under `analysis/`.
 ## Pilot (validate before going comprehensive)
 Build the harness + `experiments` + the pytest plugin, then author derivations + claim specs for
 **3 experiments**:
-- **K1-210701** (in-vitro EC50) — a real Hill fit + quantitative results/design claims.
-- **K1-230203** (the temporal case) — re-derivation changed potency; exercise a `strength`
+- **K1-000000** (in-vitro EC50) — a real Hill fit + quantitative results/design claims.
+- **K1-000001** (the temporal case) — re-derivation changed potency; exercise a `strength`
   edit + drift detection. Also the **de-overload demo**: move its computed dose-response
   (mean/SEM/KD%/exclusions) out of `extract.py` into `analysis/`, leaving `extract.py`
   faithfully dumping only the pzfx cells.
-- **one in-vivo** (K1-230402) — groups / quantigene / clinical: covers design, results,
+- **one in-vivo** (K1-000002) — groups / quantigene / clinical: covers design, results,
   external, and interpretive claim kinds.
 
 **Success criteria:** `pytest` emits a grounding report; provenance is auto-captured and
-bypass-guarded; at least one claim of each kind exists; the K1-230203 strength change is
-legible in git; and everything runs cleanly in IPython (`from experiments import k1_210701 as k`).
+bypass-guarded; at least one claim of each kind exists; the K1-000001 strength change is
+legible in git; and everything runs cleanly in IPython (`from experiments import k1_000000 as k`).
 Refine the API on these three, then fan out comprehensively (one experiment per session).

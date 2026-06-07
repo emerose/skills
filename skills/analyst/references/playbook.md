@@ -1,7 +1,7 @@
 # Analyst authoring playbook
 
 How to add the analysis + claims layer to one experiment. Mirror the three pilot
-experiments (`K1-210701`, `K1-230203`, `K1-230402`) — they cover the common shapes.
+experiments (`K1-000000`, `K1-000001`, `K1-000002`) — they cover the common shapes.
 
 ## 0. Setup (once)
 
@@ -10,13 +10,13 @@ uv venv && uv pip install -e "skills/analyst[reports]"
 export EXPERIMENTS_ROOT="…/05 - Scientific Data"
 ```
 
-Smoke test: `python -c "from experiments import k1_210701 as k; print(dir(k), k.qpcr_summary.shape)"`.
+Smoke test: `python -c "from experiments import k1_000000 as k; print(dir(k), k.assay_summary.shape)"`.
 
 ## 1. Understand the experiment
 
 - `dir(k)` lists the `data/` tables; read `k.meta` (experiment.yml) and the README.
 - Decide what analysis the experiment needs: group stats, a curve fit (EC50/Hill), a
-  per-ASO summary, figures. **Most analysis artifacts are cited by no claim** — they are
+  per-target summary, figures. **Most analysis artifacts are cited by no claim** — they are
   deliverables in their own right.
 - Decide the handful of claims worth grounding. Aim for **≥1 of each kind that applies**:
   - **result** — a measured outcome (a knockdown %, an EC50, a significant difference).
@@ -60,7 +60,7 @@ Smoke test: `python -c "from experiments import k1_210701 as k; print(dir(k), k.
 If `data/extract.py` *computes* a table (mean/SEM/KD%/a fit), move it here:
 
 1. If the computation needs geometry the faithful dump dropped, **enrich the dump** so it
-   is recoverable (e.g. K1-230203's `02` gained a `row` column to keep slot A/B) — this
+   is recoverable (e.g. K1-000001's `02` gained a `row` column to keep slot A/B) — this
    keeps `02` a faithful *superset*, not a new computation.
 2. Re-extract: `uv run skills/extractor/scripts/extract.py "<exp>" --commit`.
 3. Delete the computed `data/NN_*.csv` and strip its `experiment.yml` provenance entry.
@@ -73,8 +73,7 @@ as-is and recommend the de-overload as a follow-up** instead.
 
 ## 5. Temporal corrections (when a value changes)
 
-When re-derivation changes a number (the K1-230203 case: ASO 73 81%→88.7% after restoring
-a dropped top dose), encode the change as a **git edit**, not a silent overwrite:
+When re-derivation changes a number (e.g. a value corrected from ~60% to ~70% after restoring a dropped top-dose point), encode the change as a **git edit**, not a silent overwrite:
 
 - Commit the corrected statement/value and the updated `@strength` together, with a commit
   message stating the as-of rationale. `git blame` on the marker + `git log -L` on the
@@ -82,10 +81,10 @@ a dropped top dose), encode the change as a **git edit**, not a silent overwrite
 
 ## Gotchas
 
-- **Identifier columns** (`aso` ids like `01`, `08`) are preserved as strings by the
+- **Identifier columns** (`guide_id` ids like `01`, `08`) are preserved as strings by the
   tracked loader (it detects integer-looking columns that inference would corrupt — a
   leading zero, or blanks forcing a float — and keeps the exact text). Compare them as
-  strings (`row["aso"] == "73"`). Measurement columns stay numeric.
+  strings (`row["guide_id"] == "73"`). Measurement columns stay numeric.
 - The data repo's `.git` is on a Google-Drive mount: `commit`/`add` work in place, but
   `push`/`fetch` fail with "mmap timed out". Push via
   `cp -R .git /tmp/x.git && git --git-dir=/tmp/x.git push origin <branch>`.

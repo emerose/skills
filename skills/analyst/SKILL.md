@@ -31,9 +31,9 @@ for audit, with non-binary support (strength) and a git-based temporal history.
 
 ## Two packages (the generic machinery)
 
-- **`experiments`** — typed, tracked data access. `from experiments import k1_210701 as k` resolves
-  the `K1-210701 *` folder under `$EXPERIMENTS_ROOT` and returns a `Study`. Tidy `data/` tables
-  are attributes: `02_qpcr_summary.csv` → `k.qpcr_summary` (drop the `NN_` prefix). Access
+- **`experiments`** — typed, tracked data access. `from experiments import k1_000000 as k` resolves
+  the `K1-000000 *` folder under `$EXPERIMENTS_ROOT` and returns a `Study`. Tidy `data/` tables
+  are attributes: `02_assay_summary.csv` → `k.assay_summary` (drop the `NN_` prefix). Access
   is lazy, cached, **sha-pinned**, and recorded as provenance on every read. `k.meta` =
   `experiment.yml`; `k.analysis.<name>` = a derived table under `analysis/tables/`;
   `k.derive` = the experiment's `analysis/derive.py` (loaded collision-free); `dir(k)`
@@ -76,16 +76,16 @@ artifacts through a `derivation` context, which records analysis provenance into
 
 ```python
 def ec50_table(k):                       # importable, IPython-friendly
-    crc = k.crc_pct_kd                    # tracked read
+    dr = k.dose_response                  # tracked read
     ...                                   # scipy Hill fit; document exclusions in comments
     return df
 
 def main():
     import analyst
-    from experiments import k1_210701 as k
+    from experiments import k1_000000 as k
     with analyst.derivation(k, __file__) as d:
-        d.write_table("ec50_by_aso.csv", ec50_table(k))
-        d.write_fig("crc_fits.png", plot_fits(k))
+        d.write_table("ec50_summary.csv", ec50_table(k))
+        d.write_fig("dose_response_fits.png", plot_fits(k))
 ```
 
 ### claims/test_*.py — grounding specs
@@ -102,11 +102,11 @@ from analyst import strength, caveats, kind, evidence, uses
 @strength("strong")                               # strong | moderate | weak | unverifiable | ...
 @caveats("single positive-control series; n=2 wells at the top dose")
 def test_pos_ctrl_below_criterion(experiment):    # `experiment` = this folder's Study
-    "Positive control UBE3A ASO1 ~53% KD at 100 nM — below the >60% criterion."  # = the statement
-    q = experiment.qpcr_summary                   # tracked read (captured as provenance)
-    kd = q[(q["ASO ID"]=="UBE3A ASO1") & (q["ASO Concentration (nM)"]==100)]["AVE KD"].mean()
+    "Positive-control guide ctrl-1 ~45% knockdown at the 100 nM top dose — below the >60% criterion."  # = the statement
+    q = experiment.assay_summary                   # tracked read (captured as provenance)
+    kd = q[(q["guide_id"]=="ctrl-1") & (q["conc_nm"]==100)]["pct_kd"].mean()
     evidence(kd_pct=round(kd,1), criterion_pct=60) # headline numbers for the report
-    assert kd == pytest.approx(53, abs=3) and kd < 60   # the grounding / drift check
+    assert kd == pytest.approx(45, abs=3) and kd < 60   # the grounding / drift check
 ```
 
 - **docstring** = statement · **node id** = stable id · **`experiment` (+ reads)** =
@@ -119,9 +119,9 @@ def test_pos_ctrl_below_criterion(experiment):    # `experiment` = this folder's
   are captured as provenance (sha-pinned) and the reconcile lint treats them as expected.
 - **lifecycle** = pytest states: `@pytest.mark.xfail(reason=…, strict=True)` = contradicted
   but kept on record; `pytest.skip(reason=…)` = unverifiable. `@kind`/`@strength` still apply.
-- **identifiers**: id columns whose values only look numeric (ASO `01`/`08`, leading
-  zeros) are preserved as strings by the tracked loader — compare `row["aso"] == "73"`,
-  not `== 73`. Measurement columns stay numeric.
+- **identifiers**: id columns whose values only look numeric (e.g. `guide_id` `01`/`08`,
+  leading zeros) are preserved as strings by the tracked loader — compare
+  `row["guide_id"] == "73"`, not `== 73`. Measurement columns stay numeric.
 - **fit determinism**: pin versions (pyproject), compare derived floats with
   `pytest.approx`/log-tolerance — never byte-identical.
 
