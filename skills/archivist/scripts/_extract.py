@@ -5,31 +5,33 @@ The aim is *precision over recall* for the structured fields that drive experime
 cards and the (derivable) entity registry: CRO, external study IDs, assays, ASOs,
 species/model, status, and related experiments. Everything is conservative —
 controlled vocabularies with explicit aliases, plus a few tight regexes — because
-these values feed cross-referencing (`entity show "ASO-154"`) where a false match
+these values feed cross-referencing (`entity show "ASO-7"`) where a false match
 is worse than a miss. Free-text the extractor isn't sure about is left for the
 human/agent author of a README, not invented here.
+
+Real CRO/vendor names and vendor-specific study-id formats are program-specific
+and are **not** baked into this public repo. They live in a private vocabulary
+file in your data folder (`vocab.yml`, or `$ARCHIVIST_VOCAB`); `load_vocab()`
+merges it over the generic placeholder defaults below. See that loader.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 # --------------------------------------------------------------------------- #
 # controlled vocabularies (canonical -> alias regex fragments, case-insensitive)
 # --------------------------------------------------------------------------- #
+# Public defaults are GENERIC placeholders only. Configure your real CROs in a
+# private `vocab.yml` (see load_vocab) so vendor identities stay out of this repo.
 CRO_VOCAB: dict[str, list[str]] = {
-    "Charles River": [r"charles river", r"\bCRL\b", r"\bCRDS\b"],
-    "Attentive Science": [r"attentive"],
-    "BioLegacy": [r"biolegacy"],
-    "Dash Bio": [r"dash bio"],
-    "UNC": [r"\bUNC\b", r"university of north carolina"],
-    "iXCells": [r"ixcells"],
-    "NeuCyte": [r"neucyte"],
-    "bit.bio": [r"bit\.bio"],
-    "Fios Genomics": [r"fios"],
-    "Nitto Denko Avecia": [r"avecia", r"nitto denko"],
-    "Synoligo": [r"synoligo"],
+    "Vendor A": [r"vendor a", r"\bVA\b"],
+    "Vendor B": [r"vendor b", r"\bVB\b"],
+    "Vendor C": [r"vendor c"],
 }
 
 ASSAY_VOCAB: dict[str, list[str]] = {
@@ -70,17 +72,67 @@ STATUS_HINTS: dict[str, list[str]] = {
     "draft": [r"\bDRAFT\b"],
 }
 
-# Study-id shapes seen across CROs (kept tight to avoid grabbing random codes).
-_STUDY_ID_PATTERNS = [
-    r"\bC\d{7}\b",                 # CRL, e.g. C0790222
-    r"\b\d{4}-\d{4}\b",            # Attentive, e.g. 1124-8851
-    r"\b25[PW]-KSO-\d{3}\b",       # BioLegacy, e.g. 25P-KSO-001
-    r"\bKey\s?\d{3,4}[A-Z]?\b",    # mouse studies, e.g. Key 2738 / 2830B
-    r"\bSOW\d+\b",                 # statements of work
-    r"\bCRP\s?Exp\d+\b",           # MEA CRP experiments
+# Generic study-id shapes (kept tight to avoid grabbing random codes). These are
+# vendor-neutral; vendor-specific id formats are added from the private vocab file.
+DEFAULT_STUDY_ID_PATTERNS = [
+    r"\b[A-Z]\d{7}\b",            # letter + 7 digits, e.g. V1234567
+    r"\b\d{4}-\d{4}\b",          # numeric study code, e.g. 1124-8851
+    r"\bSOW\d+\b",               # statements of work
 ]
 _ASO_RE = re.compile(r"\bASO[\s\-]?(\d{1,4})\b", re.IGNORECASE)
 _EXP_ID_RE = re.compile(r"\bK1-[A-Za-z0-9]+\b")
+
+
+# --------------------------------------------------------------------------- #
+# private vocabulary (keeps real vendor names out of this public repo)
+# --------------------------------------------------------------------------- #
+def _vocab_path(home: str | Path | None) -> Path | None:
+    """Locate the private vocabulary file: ``$ARCHIVIST_VOCAB`` if set, else
+    ``vocab.{yml,yaml,json}`` in the data folder. None if there isn't one."""
+    env = os.environ.get("ARCHIVIST_VOCAB")
+    if env:
+        p = Path(env).expanduser()
+        return p if p.is_file() else None
+    if home:
+        for name in ("vocab.yml", "vocab.yaml", "vocab.json"):
+            p = Path(home) / name
+            if p.is_file():
+                return p
+    return None
+
+
+def load_vocab(home: str | Path | None = None) -> tuple[dict[str, list[str]], list[str]]:
+    """Return ``(cro_vocab, study_id_patterns)`` — the generic public defaults
+    extended by a private config, if present.
+
+    The public skills repo ships only generic placeholder vendors and vendor-neutral
+    id shapes. Real CRO names and vendor-specific study-id formats are program-specific
+    and live in a private file in the data folder (``vocab.yml``) or at
+    ``$ARCHIVIST_VOCAB``, never here. That file is merged OVER the defaults::
+
+        cros:
+          "Real CRO Inc.": ["real cro", "\\\\bRCI\\\\b"]
+        study_id_patterns:
+          - "\\\\bRCI-\\\\d{6}\\\\b"
+    """
+    cro = dict(CRO_VOCAB)
+    pats = list(DEFAULT_STUDY_ID_PATTERNS)
+    path = _vocab_path(home)
+    if not path:
+        return cro, pats
+    raw = path.read_text(encoding="utf-8")
+    if path.suffix == ".json":
+        data = json.loads(raw)
+    else:
+        import yaml  # lazy: keeps this module importable without PyYAML
+        data = yaml.safe_load(raw)
+    if isinstance(data, dict):
+        for canon, aliases in (data.get("cros") or {}).items():
+            cro[canon] = list(aliases)
+        for pat in (data.get("study_id_patterns") or []):
+            if pat not in pats:
+                pats.append(pat)
+    return cro, pats
 
 
 def _match_vocab(text: str, vocab: dict[str, list[str]]) -> list[str]:
@@ -93,14 +145,14 @@ def _match_vocab(text: str, vocab: dict[str, list[str]]) -> list[str]:
 
 def find_asos(text: str) -> list[str]:
     """Normalise ASO mentions to ``ASO-<n>`` with leading zeros stripped, so
-    'ASO 154', 'ASO-154', and 'ASO007' all canonicalise consistently."""
+    'ASO 7', 'ASO-7', and 'ASO007' all canonicalise consistently."""
     return sorted({f"ASO-{int(m.group(1))}" for m in _ASO_RE.finditer(text)},
                   key=lambda s: int(s.split("-")[1]))
 
 
-def find_study_ids(text: str) -> list[str]:
+def find_study_ids(text: str, patterns: list[str] | None = None) -> list[str]:
     ids: list[str] = []
-    for pat in _STUDY_ID_PATTERNS:
+    for pat in (patterns if patterns is not None else DEFAULT_STUDY_ID_PATTERNS):
         for m in re.finditer(pat, text, re.IGNORECASE):
             v = re.sub(r"\s+", " ", m.group(0)).strip()
             if v not in ids:
@@ -185,14 +237,32 @@ def _first_paragraph(body: str | None) -> str | None:
     return None
 
 
-def extract_from_readme(text: str, *, exp_id: str | None = None) -> dict[str, Any]:
+def extract_from_readme(
+    text: str,
+    *,
+    exp_id: str | None = None,
+    home: str | Path | None = None,
+    cro_vocab: dict[str, list[str]] | None = None,
+    study_id_patterns: list[str] | None = None,
+) -> dict[str, Any]:
     """Extract structured experiment metadata from a README's Markdown.
 
     Returns only the keys it can fill with reasonable confidence; the caller
     merges these over the folder-derived skeleton. Recognises both the table-
     style headers used in these READMEs ("External ID", "CRO", "Species/Strain",
     "Report Status") and free vocabulary in the prose.
+
+    CRO names and study-id formats come from ``load_vocab(home)`` (generic defaults
+    plus any private ``vocab.yml``); pass ``cro_vocab``/``study_id_patterns`` to
+    override directly (e.g. in tests).
     """
+    if cro_vocab is None or study_id_patterns is None:
+        loaded_cro, loaded_pats = load_vocab(home)
+        if cro_vocab is None:
+            cro_vocab = loaded_cro
+        if study_id_patterns is None:
+            study_id_patterns = loaded_pats
+
     fields = parse_md_table_fields(text)
     out: dict[str, Any] = {}
 
@@ -213,23 +283,23 @@ def extract_from_readme(text: str, *, exp_id: str | None = None) -> dict[str, An
     # "External ID", "CRO Study ID"), so match by meaning; never the internal id.
     ext_val = _external_study_id(fields)
     if ext_val:
-        out["cro_study_ids"] = find_study_ids(ext_val) or [ext_val]
+        out["cro_study_ids"] = find_study_ids(ext_val, study_id_patterns) or [ext_val]
     # Secondary (still authoritative for THIS experiment): a study-id-shaped token
-    # in the title, e.g. "Rat IT PK/PD Screening Study (25P-KSO-001)".
+    # in the title, e.g. "Rat IT PK/PD Screening Study (V1234567)".
     if "cro_study_ids" not in out and out.get("title"):
-        tids = find_study_ids(out["title"])
+        tids = find_study_ids(out["title"], study_id_patterns)
         if tids:
             out["cro_study_ids"] = tids
 
     cro = fields.get("cro")
     if cro:
-        canon = _match_vocab(cro, CRO_VOCAB)
+        canon = _match_vocab(cro, cro_vocab)
         if canon:
             out["cro"] = canon[0]            # canonicalise a full name to the vocab
         elif not re.search(r"\bTBD\b|to be|bids|n/?a\b|none|\|", cro, re.IGNORECASE):
             out["cro"] = re.split(r"\(", cro)[0].strip()   # else a clean literal value
     else:
-        cros = _match_vocab(text, CRO_VOCAB)
+        cros = _match_vocab(text, cro_vocab)
         if cros:
             out["cro"] = cros[0]
 

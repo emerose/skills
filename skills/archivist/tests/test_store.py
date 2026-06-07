@@ -72,14 +72,14 @@ def _run(store, coro_factory):
 
 def test_upsert_experiment_keyed_by_exp_id(store):
     async def go():
-        r = await store.upsert_experiment({"exp_id": "K1-230901", "name": "Dose-Response",
-                                           "cro_study_ids": ["C0790222"]})
+        r = await store.upsert_experiment({"exp_id": "K1-000000", "name": "Dose-Response",
+                                           "cro_study_ids": ["V1234567"]})
         assert r["kind"] == "experiment"
-        assert r["exp_id"] == "K1-230901"
+        assert r["exp_id"] == "K1-000000"
         added = r["added_at"]
         # update: new content -> new document_id, but still one experiment record
-        r2 = await store.upsert_experiment({"exp_id": "K1-230901", "name": "Dose-Response",
-                                            "cro_study_ids": ["C0790222"], "status": "complete"})
+        r2 = await store.upsert_experiment({"exp_id": "K1-000000", "name": "Dose-Response",
+                                            "cro_study_ids": ["V1234567"], "status": "complete"})
         exps = await store.experiments()
         assert len(exps) == 1
         assert exps[0]["status"] == "complete"
@@ -187,8 +187,8 @@ def test_set_tags_on_experiment(store):
 
 def test_curated_entity_note(store):
     async def go():
-        await store.upsert_entity({"entity_id": "aso-154", "title": "ASO 154",
+        await store.upsert_entity({"entity_id": "aso-7", "title": "ASO 7",
                                    "note": "Lead candidate selected from the 10-ASO rat IT screen."})
-        e = await store.get_entity("aso-154")
+        e = await store.get_entity("aso-7")
         assert e is not None and "Lead candidate" in e["note"]
     _run(store, go)

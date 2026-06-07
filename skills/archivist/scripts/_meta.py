@@ -14,7 +14,7 @@ of three *kinds*, distinguished by the ``kind`` metadata key:
 
 * ``kind="experiment"`` — a generated Markdown **experiment card** summarising the
   folder (IDs, CRO, design, assays, ASOs, status, links). Embedded, so an
-  experiment is searchable as a unit. Keyed by ``exp_id`` (e.g. ``K1-230901``).
+  experiment is searchable as a unit. Keyed by ``exp_id`` (e.g. ``K1-000000``).
 * ``kind="file"`` — one per real file in an experiment. *Narrative* files
   (README/protocol/report/analysis) are ingested directly so their text is
   embedded; *tabular* files (csv/xlsx/pzfx) are represented by a generated
@@ -85,12 +85,12 @@ def entity_slug(text: str) -> str:
 # Experiment folders are named ``K1-YYMMXX - Short Name``. The id prefix is the
 # stable handle; the rest is a human-facing name. Accept a couple of separators.
 _EXP_DIR_RE = re.compile(r"^\s*(?P<id>K1-[A-Za-z0-9]+)\s*[-–—:]\s*(?P<name>.+?)\s*$")
-# A CRO study id often trails in parentheses, e.g. "… (C0790222)".
+# A CRO study id often trails in parentheses, e.g. "… (V1234567)".
 _CRO_ID_RE = re.compile(r"\(([^)]+)\)\s*$")
 
 
 def parse_experiment_dirname(dirname: str) -> dict[str, Any] | None:
-    """Parse ``K1-230901 - Rat IT Dose-Response (C0790222)`` into parts.
+    """Parse ``K1-000000 - Rat IT Dose-Response (V1234567)`` into parts.
 
     Returns ``{exp_id, name, cro_study_id_guess}`` or ``None`` if the directory
     name doesn't match the experiment convention.

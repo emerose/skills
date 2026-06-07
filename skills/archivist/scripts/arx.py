@@ -588,7 +588,8 @@ async def cmd_meta(store: ArchivistStore, args: argparse.Namespace) -> None:
         draft: dict[str, Any] = {"exp_id": parsed["exp_id"], "name": parsed["name"]}
         if readme.is_file():
             guess = _extract.extract_from_readme(
-                readme.read_text(encoding="utf-8", errors="replace"), exp_id=parsed["exp_id"])
+                readme.read_text(encoding="utf-8", errors="replace"),
+                exp_id=parsed["exp_id"], home=store.home)
             for k in ("title", "cro", "cro_study_ids", "status", "model", "assays", "asos", "related"):
                 if guess.get(k):
                     draft[k] = guess[k]
@@ -760,7 +761,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("entity_action", choices=["list", "show"])
     sp.add_argument("name", nargs="?", help="entity name (for show)")
     sp = add("new", "scaffold a new experiment folder (subdirs + README template)")
-    sp.add_argument("exp_id", help="internal id, e.g. K1-260601")
+    sp.add_argument("exp_id", help="internal id, e.g. K1-000003")
     sp.add_argument("name", help="short name, e.g. 'Rat IT Chronic Tox'")
     sp.add_argument("--cro", help="contract research org")
     sp.add_argument("--study-id", help="external/CRO study id")

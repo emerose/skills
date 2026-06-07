@@ -88,7 +88,7 @@ def test_staleness_no_provenance(tmp_path):
 # ---- schema / validation ---------------------------------------------------
 def test_validate_normalises_and_requires_exp_id():
     out = E.validate({"exp_id": "K1-1", "status": "Completed", "asos": ["ASO-1"],
-                      "cro_study_ids": ["C0790222"], "model": None})
+                      "cro_study_ids": ["V1234567"], "model": None})
     assert out["status"] == "complete"                 # synonym normalised
     assert out["asos"] == ["ASO-1"]
     assert "model" not in out                           # None-valued known field dropped
@@ -106,9 +106,9 @@ def test_validate_rejects_unknown_field_and_bad_types():
 
 
 def test_dump_then_read_roundtrip(tmp_path):
-    data = E.validate({"exp_id": "K1-1", "cro": "Charles River", "status": "complete",
+    data = E.validate({"exp_id": "K1-1", "cro": "Vendor A", "status": "complete",
                        "assays": ["qPCR", "Transfection"], "asos": ["ASO-1"],
-                       "cro_study_ids": ["CRL SOW 1, Experiment 14"]})
+                       "cro_study_ids": ["Vendor A SOW 1, Experiment 14"]})
     p = tmp_path / "experiment.yml"
     p.write_text(E.dump_sidecar(data))
     back = E.read_sidecar(p)

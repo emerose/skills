@@ -79,7 +79,7 @@ leave what's defensible:
   rationale before declaring the prose wrong.** Check the CRO decision docs (TC
   decks/minutes). Often the shortfall was known and explicitly accepted — state it
   honestly *with the source* (e.g. "positive control 53%, below the >60% criterion, but
-  CRL deemed it consistent per TC07") rather than either parroting "all passed" or
+  the CRO deemed it consistent per TC07") rather than either parroting "all passed" or
   flatly calling it a failure.
 - **Distinguish "passed a threshold" from "was selected" from "ranked top."** Don't
   conflate "164 exceeded 50% KD" with "22 were carried forward" with "the 5 highest-KD."
@@ -97,7 +97,7 @@ input** so the prose's evidentiary basis is recorded and drift-tracked — not j
 in-folder data. In-folder data files are auto-included by `arx review`; add external
 ones explicitly:
 
-    arx review <exp> --input "Shared/CRL/SOW1/TC Meetings/TC07 - CRL Kicho.pptx"
+    arx review <exp> --input "Shared/Vendor A/SOW1/TC Meetings/TC07 - Vendor A Sync.pptx"
 
 If a corrected claim cites a TC deck or minutes, that file belongs in `inputs`. (The
 semantic-pass agent's "files relied on" list, above, is exactly this set.)
