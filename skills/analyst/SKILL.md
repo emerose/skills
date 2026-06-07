@@ -49,6 +49,12 @@ Both are installed together: `pip install -e skills/analyst` (or `uv pip install
 The pytest plugin auto-loads (a `pytest11` entry point), so a bare `pytest analysis/claims/`
 works. Scientific deps are version-pinned in `pyproject.toml` for fit determinism.
 
+**Work in an isolated worktree, never the Drive checkout.** The data repo's Drive checkout
+is one shared working tree/HEAD that GitSync owns; concurrent fan-out units racing it corrupt
+each other's commits and can't push (mmap). `raw/` is tracked, so provision an off-Drive
+worktree and set `EXPERIMENTS_ROOT` to it: `eval "$(skills/analyst/scripts/new-unit.sh
+k1-000000)"`. Commit + push from there to GitHub; see the playbook §0.
+
 ## Per-experiment layout (what you author)
 
 ```
