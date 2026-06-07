@@ -49,7 +49,8 @@ Smoke test: `python -c "from experiments import k1_210701 as k; print(dir(k), k.
 - Reuse derivation helpers via **`experiment.derive.fn(experiment)`** (loads
   `analysis/derive.py` collision-free) — never `sys.path.insert` + `import derive` (every
   experiment's file is named `derive`, so they collide in `sys.modules` when run together).
-- Cross-experiment claims import another study directly: `from experiments import k1_230402`.
+- Cross-experiment claims import another study and wrap it in `cross(...)`:
+  `from experiments import k1_000000; other = cross(k1_000000)`.
 - `pytest "<exp>/analysis/claims"` → check the grounding report renders and the reconcile
   lint is quiet (no empty claims / undeclared reads / bypasses). Add `--check-drift` to
   flag claims whose inputs changed since their `@strength` was last set.
