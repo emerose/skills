@@ -1,20 +1,20 @@
 """experiments — typed, tracked access to an experiment's tidy data.
 
-    from experiments import k1_210701 as k
-    k.qpcr_summary          # data/02_qpcr_summary.csv as a DataFrame (sha-pinned)
+    from experiments import k1_000000 as k
+    k.assay_summary          # data/02_assay_summary.csv as a DataFrame (sha-pinned)
     k.meta                  # experiment.yml as a dict
-    k.analysis.ec50_by_aso  # analysis/tables/ec50_by_aso.csv (a derived output)
+    k.analysis.ec50_summary  # analysis/tables/ec50_summary.csv (a derived output)
 
 A ``k1_NNNNNN`` attribute resolves to the experiment folder ``K1-NNNNNN *`` under
 ``$EXPERIMENTS_ROOT`` (the scientific-data checkout) and returns a :class:`Study`. Tidy tables
 under ``data/`` become attributes: ``NN_<assay>_<content>.csv`` -> drop the ``NN_``
 prefix and ``.csv`` -> ``k.<assay>_<content>``. Access is lazy, cached, and sha-pinned,
 and **every access is recorded as provenance** through ``analyst.record`` — so a claim
-or derivation that touches ``k.qpcr_summary`` has that input captured automatically.
+or derivation that touches ``k.assay_summary`` has that input captured automatically.
 
 This module is the one tracked accessor the spec calls for: it knows nothing about
 claims; it just loads tables and announces what it loaded. The recording is a no-op
-when no capture is active (plain IPython use), so ``k.qpcr_summary`` works the same in
+when no capture is active (plain IPython use), so ``k.assay_summary`` works the same in
 a notebook and inside a claim.
 """
 from __future__ import annotations
@@ -42,8 +42,8 @@ def root() -> Path:
 
 
 def resolve(exp_id: str) -> Path:
-    """``k1_210701`` -> the ``K1-210701 *`` folder under EXPERIMENTS_ROOT (glob on the id)."""
-    code = exp_id.upper().replace("_", "-")           # k1_210701 -> K1-210701
+    """``k1_000000`` -> the ``K1-000000 *`` folder under EXPERIMENTS_ROOT (glob on the id)."""
+    code = exp_id.upper().replace("_", "-")           # k1_000000 -> K1-000000
     matches = sorted(root().glob(f"{code} *")) + [p for p in [root() / code] if p.is_dir()]
     matches = [m for m in matches if m.is_dir()]
     if not matches:
@@ -54,7 +54,7 @@ def resolve(exp_id: str) -> Path:
 
 
 def _attr_for(csv_name: str) -> str:
-    """``02_qpcr_summary.csv`` -> ``qpcr_summary`` (drop NN_ prefix and extension)."""
+    """``02_assay_summary.csv`` -> ``assay_summary`` (drop NN_ prefix and extension)."""
     stem = Path(csv_name).stem
     return re.sub(r"^\d+_", "", stem)
 
@@ -133,7 +133,7 @@ class Study:
         """The experiment's ``analysis/derive.py`` as a module, loaded under a unique
         name so multiple experiments' derive.py files never collide in ``sys.modules``
         (each is named ``derive``). Lets a claim reuse derivation helpers safely:
-        ``k.derive.per_animal_ube3a(k)``. Cached per process."""
+        ``k.derive.per_animal_target(k)``. Cached per process."""
         import importlib.util
         import sys
         name = f"experiments_derive_{self.id.replace('-', '_')}"
@@ -160,7 +160,7 @@ class Study:
         return f"<Study {self.id} @ {self.path.name}>"
 
 
-# Module-level attribute access (PEP 562): `from experiments import k1_210701`.
+# Module-level attribute access (PEP 562): `from experiments import k1_000000`.
 _studies: dict[str, Study] = {}
 
 

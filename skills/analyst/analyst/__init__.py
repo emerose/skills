@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
-    "load", "data", "doc", "evidence", "uses", "record",
+    "load", "data", "doc", "evidence", "uses", "cross", "record",
     "derivation", "Derivation", "DocRef", "Capture",
     "strength", "caveats", "kind",
     "current_capture", "registry", "TRACKED_SUFFIXES",
@@ -112,11 +112,11 @@ def load(path, kind: str = "data"):
     itself goes through a ``BytesIO`` so the bypass guard never double-counts it.
 
     Identifier-column fidelity: pandas infers an all-numeric column to int/float, which
-    silently corrupts identifier columns whose values only look numeric — e.g. ASO ids
+    silently corrupts identifier columns whose values only look numeric — e.g. identifier columns
     ``"01"``/``"08"`` become ``1``/``8`` (leading zero lost, and ``"01"`` now collides
     with ``"1"``). We guard against that by re-reading the column as faithful strings
     whenever the inferred integer form does not round-trip to the original text; such a
-    column is kept as strings so ``row["aso"] == "73"`` works and leading zeros survive.
+    column is kept as strings so ``row["guide_id"] == "73"`` works and leading zeros survive.
     Genuine measurement columns (floats, clean integers) are unaffected."""
     import pandas as pd
 
@@ -190,6 +190,24 @@ def evidence(**kv) -> None:
     cap = _CURRENT.get()
     if cap is not None:
         cap.evidence.update(kv)
+
+
+def cross(study):
+    """Declare an *intentional* cross-experiment dependency. A claim's `experiment`
+    fixture covers its home experiment; reading any *other* experiment is flagged by the
+    reconcile lint as an accidental cross-read unless declared. Wrap a second study in
+    ``cross(...)`` to register it as expected and return it for use:
+
+        from experiments import k1_000000        # some other experiment
+        other = cross(k1_000000)                  # declares the cross-experiment dep
+        tbl = other.analysis.some_summary         # ...then read it, captured as usual
+
+    Returns the study unchanged (so it composes inline)."""
+    cap = _CURRENT.get()
+    code = getattr(study, "id", None)
+    if cap is not None and code:
+        cap.declared.add(str(code).upper())
+    return study
 
 
 def uses(claim_id: str) -> dict:
