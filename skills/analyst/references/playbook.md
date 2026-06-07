@@ -3,12 +3,27 @@
 How to add the analysis + claims layer to one experiment. Mirror the three pilot
 experiments (`K1-000000`, `K1-000001`, `K1-000002`) — they cover the common shapes.
 
-## 0. Setup (once)
+## 0. Setup
+
+**Never work in the Google-Drive checkout of the data repo.** It is one working tree /
+index / HEAD that GitSync keeps fast-forwarded to `origin/main`, and every concurrent
+fan-out unit shares it — so HEAD wanders mid-task, a plain `git commit` sweeps a sibling's
+staged files, and pushing off the Drive hits "mmap timed out". `raw/` is tracked in git, so
+a unit needs nothing from the Drive: provision an isolated, off-Drive worktree instead.
 
 ```
+# install the package once (in the skills repo)
 uv venv && uv pip install -e "skills/analyst[reports]"
-export EXPERIMENTS_ROOT="…/05 - Scientific Data"
+
+# provision a per-unit worktree off a local clone of origin/main, and point
+# EXPERIMENTS_ROOT at it (clones ~1GB the first time, then each unit is ~instant):
+eval "$(skills/analyst/scripts/new-unit.sh k1-000000)"
 ```
+
+Do all edits, `python derive.py`, and `pytest` in that worktree; commit there (scoped to
+your experiment dir) and `git -C "$EXPERIMENTS_ROOT" push origin analyst/k1-000000` straight
+to GitHub; open one PR. After it merges, `skills/analyst/scripts/new-unit.sh --remove
+k1-000000`. (See the header of `scripts/new-unit.sh` for env overrides + teardown.)
 
 Smoke test: `python -c "from experiments import k1_000000 as k; print(dir(k), k.assay_summary.shape)"`.
 
