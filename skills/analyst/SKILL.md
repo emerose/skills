@@ -90,36 +90,37 @@ def main():
 
 ### claims/test_*.py — grounding specs
 
-A claim **is** a pytest test. `conftest.py` exposes the Study as a fixture:
+A claim **is** a pytest test. Request the `experiment` fixture — it resolves the Study
+from the test file's path, so **no conftest is needed** (the fixture ships with the
+plugin):
 
 ```python
 import pytest
-from experiments import k1_210701 as _study
-@pytest.fixture
-def k1_210701(): return _study
-```
-
-```python
 from analyst import strength, caveats, kind, evidence, uses
 
 @kind("result")                                   # result | design | external | interpretive
 @strength("strong")                               # strong | moderate | weak | unverifiable | ...
 @caveats("single positive-control series; n=2 wells at the top dose")
-def test_pos_ctrl_below_criterion(k1_210701):
+def test_pos_ctrl_below_criterion(experiment):    # `experiment` = this folder's Study
     "Positive control UBE3A ASO1 ~53% KD at 100 nM — below the >60% criterion."  # = the statement
-    q = k1_210701.qpcr_summary                    # tracked read (captured as provenance)
+    q = experiment.qpcr_summary                   # tracked read (captured as provenance)
     kd = q[(q["ASO ID"]=="UBE3A ASO1") & (q["ASO Concentration (nM)"]==100)]["AVE KD"].mean()
     evidence(kd_pct=round(kd,1), criterion_pct=60) # headline numbers for the report
     assert kd == pytest.approx(53, abs=3) and kd < 60   # the grounding / drift check
 ```
 
-- **docstring** = statement · **node id** = stable id · **fixtures** = declared inputs ·
-  **body** = justification · **assert** = grounding/drift check · **markers** = the
-  non-binary judgment (kept *out* of the assert).
+- **docstring** = statement · **node id** = stable id · **`experiment` (+ reads)** =
+  inputs · **body** = justification · **assert** = grounding/drift check · **markers** =
+  the non-binary judgment (kept *out* of the assert).
 - **bulk** via `@pytest.mark.parametrize`. **compose** via `uses("other_claim_id")` (pulls
-  its evidence + inputs transitively). Reuse derivation helpers via `k.derive.fn(k)`.
+  its evidence + inputs transitively). Reuse derivation helpers via `experiment.derive.fn(experiment)`.
+- **cross-experiment**: import another study directly — `from experiments import k1_230402`
+  (a Study, usable in the body); it's recorded as an undeclared input unless named.
 - **lifecycle** = pytest states: `@pytest.mark.xfail(reason=…, strict=True)` = contradicted
   but kept on record; `pytest.skip(reason=…)` = unverifiable. `@kind`/`@strength` still apply.
+- **identifiers**: id columns whose values only look numeric (ASO `01`/`08`, leading
+  zeros) are preserved as strings by the tracked loader — compare `row["aso"] == "73"`,
+  not `== 73`. Measurement columns stay numeric.
 - **fit determinism**: pin versions (pyproject), compare derived floats with
   `pytest.approx`/log-tolerance — never byte-identical.
 
@@ -128,11 +129,12 @@ def test_pos_ctrl_below_criterion(k1_210701):
 ```
 pytest "<exp>/analysis/claims"                       # one experiment
 pytest <exp1>/analysis/claims <exp2>/... --grounding-out DIR   # combined report
+pytest <…>/analysis/claims --check-drift              # also flag stale claims (see below)
 ```
 
 Emits `grounding_report.md` + `.json` (per claim: `{id, statement, outcome, kind,
-strength, caveats, evidence, inputs+shas, reconcile}`). `pip install -e .[reports]` adds
-`pdfplumber`/`python-docx` for `doc()`-based external claims that quote a CRO report.
+strength, caveats, evidence, inputs+shas, reconcile, drift?}`). `pip install -e .[reports]`
+adds `pdfplumber`/`python-docx` for `doc()`-based external claims that quote a CRO report.
 
 ## Provenance, guard, temporality
 
@@ -140,10 +142,15 @@ strength, caveats, evidence, inputs+shas, reconcile}`). `pip install -e .[report
   sha256)`; `uses` carries another claim's inputs transitively. Never hand-maintained.
 - **Bypass guard**: during a claim, a direct `open`/`pandas.read_csv` of a tracked source
   file under `$EXPERIMENTS_ROOT` is captured + flagged, so the input set can't be incomplete.
-- **Reconcile lint**: warns when declared fixtures ≠ captured inputs (dead fixture /
+- **Reconcile lint**: warns when a claim's declared experiment (its home folder + any
+  named `k1_NNNNNN` fixture) ≠ the experiments it actually read from (empty claim /
   undeclared cross-experiment read).
 - **Temporal ledger = git**: editing a `@strength` or a statement across commits is a
   belief change; `git blame` + the commit message is the "as-of" rationale. No YAML.
+- **Drift (`--check-drift`)**: for each claim, finds the commit that last set its
+  `@strength` marker (`git blame`) and flags the claim **stale** if any captured input
+  changed since then → re-judge. Off by default (keeps runs fast + git-free); when on,
+  each claim gets a `drift` field (`fresh` vs `stale` + the changed inputs).
 
 ## Authoring a new experiment
 
