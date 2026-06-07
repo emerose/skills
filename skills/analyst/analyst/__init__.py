@@ -5,7 +5,7 @@ This package provides the small runtime that turns plain pytest tests into
 derivations*. It owns one thing: a per-run **capture context** that records every
 source file read while it is active (its kind, path and sha256), plus the headline
 numbers a claim chooses to surface. Everything else (typed table access) lives in
-the companion `kicho` package, which simply calls :func:`record` whenever it loads
+the companion `experiments` package, which simply calls :func:`record` whenever it loads
 a table — so provenance is captured automatically from one tracked accessor rather
 than hand-maintained.
 
@@ -90,7 +90,7 @@ def current_capture() -> Capture | None:
 
 def record(kind: str, path, sha: str, via: str = "tracked") -> None:
     """Record a (kind, path, sha) into the active capture, if any. Called by
-    ``kicho`` on every table access and by :func:`load`/:func:`doc` here."""
+    ``experiments`` on every table access and by :func:`load`/:func:`doc` here."""
     cap = _CURRENT.get()
     if cap is not None:
         cap.record(kind, path, sha, via)
@@ -102,7 +102,7 @@ registry: dict[str, dict] = {}
 
 
 # --------------------------------------------------------------------------- #
-# Tracked loaders (the API kicho + claim bodies call directly).
+# Tracked loaders (the API experiments-package + claim bodies call directly).
 # --------------------------------------------------------------------------- #
 def load(path, kind: str = "data"):
     """Read a CSV into a DataFrame, sha-pin it, and record it as provenance.
@@ -205,24 +205,24 @@ def kind(category: str):
 # Bypass guard — make untracked source reads visible.
 # --------------------------------------------------------------------------- #
 # While a capture is active we wrap ``pandas.read_csv`` and ``builtins.open`` so that a
-# *direct* read of a tracked source file (one not routed through ``load``/``kicho``) is
+# *direct* read of a tracked source file (one not routed through ``load``/``experiments``) is
 # still captured and flagged. This guarantees the captured input set is complete: a
 # claim can't quietly read a CSV behind the harness's back. We capture-and-flag rather
 # than hard-fail, so the grounding report still renders — the reconcile lint surfaces
-# the bypass. Reads outside KICHO_ROOT (pytest internals, the report file, temp files)
+# the bypass. Reads outside EXPERIMENTS_ROOT (pytest internals, the report file, temp files)
 # are ignored so the guard never interferes with the test runner itself.
 _guard_installed = False
 _orig_open = builtins.open
 _orig_read_csv = None
 
 
-def _kicho_root() -> Path | None:
-    r = os.environ.get("KICHO_ROOT")
+def _data_root() -> Path | None:
+    r = os.environ.get("EXPERIMENTS_ROOT")
     return Path(r).resolve() if r else None
 
 
 def _under_root(p: Path) -> bool:
-    root = _kicho_root()
+    root = _data_root()
     if root is None:
         return False
     try:
@@ -285,7 +285,7 @@ def install_guard() -> None:
 class Derivation:
     """Context manager for an analysis derivation.
 
-    Inside the ``with`` block, every table read via ``kicho`` is captured as an input.
+    Inside the ``with`` block, every table read via ``experiments`` is captured as an input.
     ``write_table``/``write_fig`` write the artifact under ``analysis/`` and record a
     provenance entry (artifact + sha, inputs = the captured data files + the deriving
     recipe) into the experiment's unified ``provenance`` list — the same shape the

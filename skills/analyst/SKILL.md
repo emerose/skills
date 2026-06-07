@@ -2,7 +2,7 @@
 name: analyst
 description: >-
   Add a re-derivable analysis layer and grounded, traceable scientific claims on top of
-  an experiment's tidy data/ (the extractor's output). Provides `kicho` (typed, tracked
+  an experiment's tidy data/ (the extractor's output). Provides `experiments` (typed, tracked
   access to data/ tables as sha-pinned pandas DataFrames) and `analyst` (a claim-grounding
   harness + pytest plugin). Each experiment owns an analysis/ folder: derive.py computes
   summary tables, stats, curve fits (EC50/Hill) and figures from data/ with analysis
@@ -31,8 +31,8 @@ for audit, with non-binary support (strength) and a git-based temporal history.
 
 ## Two packages (the generic machinery)
 
-- **`kicho`** — typed, tracked data access. `from kicho import k1_210701 as k` resolves
-  the `K1-210701 *` folder under `$KICHO_ROOT` and returns a `Study`. Tidy `data/` tables
+- **`experiments`** — typed, tracked data access. `from experiments import k1_210701 as k` resolves
+  the `K1-210701 *` folder under `$EXPERIMENTS_ROOT` and returns a `Study`. Tidy `data/` tables
   are attributes: `02_qpcr_summary.csv` → `k.qpcr_summary` (drop the `NN_` prefix). Access
   is lazy, cached, **sha-pinned**, and recorded as provenance on every read. `k.meta` =
   `experiment.yml`; `k.analysis.<name>` = a derived table under `analysis/tables/`;
@@ -68,7 +68,7 @@ its provenance, re-run `extractor/scripts/audit.py` + `cellcov.py` to confirm CL
 
 ### derive.py — re-derivable products
 
-Plain importable functions (no decorators) that compute artifacts, reading via `kicho`
+Plain importable functions (no decorators) that compute artifacts, reading via `experiments`
 (provenance auto-captured). Analysis **choices** (fit model, point exclusions,
 normalization) live in code + comments — explicit and reviewable. A `main()` writes the
 artifacts through a `derivation` context, which records analysis provenance into
@@ -82,7 +82,7 @@ def ec50_table(k):                       # importable, IPython-friendly
 
 def main():
     import analyst
-    from kicho import k1_210701 as k
+    from experiments import k1_210701 as k
     with analyst.derivation(k, __file__) as d:
         d.write_table("ec50_by_aso.csv", ec50_table(k))
         d.write_fig("crc_fits.png", plot_fits(k))
@@ -94,7 +94,7 @@ A claim **is** a pytest test. `conftest.py` exposes the Study as a fixture:
 
 ```python
 import pytest
-from kicho import k1_210701 as _study
+from experiments import k1_210701 as _study
 @pytest.fixture
 def k1_210701(): return _study
 ```
@@ -136,10 +136,10 @@ strength, caveats, evidence, inputs+shas, reconcile}`). `pip install -e .[report
 
 ## Provenance, guard, temporality
 
-- **Auto-capture**: every `kicho`/`load`/`doc` read during a claim records `(kind, path,
+- **Auto-capture**: every `experiments`/`load`/`doc` read during a claim records `(kind, path,
   sha256)`; `uses` carries another claim's inputs transitively. Never hand-maintained.
 - **Bypass guard**: during a claim, a direct `open`/`pandas.read_csv` of a tracked source
-  file under `$KICHO_ROOT` is captured + flagged, so the input set can't be incomplete.
+  file under `$EXPERIMENTS_ROOT` is captured + flagged, so the input set can't be incomplete.
 - **Reconcile lint**: warns when declared fixtures ≠ captured inputs (dead fixture /
   undeclared cross-experiment read).
 - **Temporal ledger = git**: editing a `@strength` or a statement across commits is a

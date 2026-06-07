@@ -1,12 +1,12 @@
-"""kicho — typed, tracked access to an experiment's tidy data.
+"""experiments — typed, tracked access to an experiment's tidy data.
 
-    from kicho import k1_210701 as k
+    from experiments import k1_210701 as k
     k.qpcr_summary          # data/02_qpcr_summary.csv as a DataFrame (sha-pinned)
     k.meta                  # experiment.yml as a dict
     k.analysis.ec50_by_aso  # analysis/tables/ec50_by_aso.csv (a derived output)
 
 A ``k1_NNNNNN`` attribute resolves to the experiment folder ``K1-NNNNNN *`` under
-``$KICHO_ROOT`` (the kicho-science checkout) and returns a :class:`Study`. Tidy tables
+``$EXPERIMENTS_ROOT`` (the scientific-data checkout) and returns a :class:`Study`. Tidy tables
 under ``data/`` become attributes: ``NN_<assay>_<content>.csv`` -> drop the ``NN_``
 prefix and ``.csv`` -> ``k.<assay>_<content>``. Access is lazy, cached, and sha-pinned,
 and **every access is recorded as provenance** through ``analyst.record`` — so a claim
@@ -31,18 +31,18 @@ _STUDY_RE = re.compile(r"^k1_\d{6}$", re.IGNORECASE)
 
 
 def root() -> Path:
-    r = os.environ.get("KICHO_ROOT")
+    r = os.environ.get("EXPERIMENTS_ROOT")
     if not r:
         raise RuntimeError(
-            "KICHO_ROOT is not set — point it at the '05 - Scientific Data' checkout.")
+            "EXPERIMENTS_ROOT is not set — point it at the '05 - Scientific Data' checkout.")
     p = Path(r)
     if not p.is_dir():
-        raise RuntimeError(f"KICHO_ROOT does not exist: {p}")
+        raise RuntimeError(f"EXPERIMENTS_ROOT does not exist: {p}")
     return p
 
 
 def resolve(exp_id: str) -> Path:
-    """``k1_210701`` -> the ``K1-210701 *`` folder under KICHO_ROOT (glob on the id)."""
+    """``k1_210701`` -> the ``K1-210701 *`` folder under EXPERIMENTS_ROOT (glob on the id)."""
     code = exp_id.upper().replace("_", "-")           # k1_210701 -> K1-210701
     matches = sorted(root().glob(f"{code} *")) + [p for p in [root() / code] if p.is_dir()]
     matches = [m for m in matches if m.is_dir()]
@@ -136,7 +136,7 @@ class Study:
         ``k.derive.per_animal_ube3a(k)``. Cached per process."""
         import importlib.util
         import sys
-        name = f"kicho_derive_{self.id.replace('-', '_')}"
+        name = f"experiments_derive_{self.id.replace('-', '_')}"
         if name in sys.modules:
             return sys.modules[name]
         p = self.path / "analysis" / "derive.py"
@@ -160,7 +160,7 @@ class Study:
         return f"<Study {self.id} @ {self.path.name}>"
 
 
-# Module-level attribute access (PEP 562): `from kicho import k1_210701`.
+# Module-level attribute access (PEP 562): `from experiments import k1_210701`.
 _studies: dict[str, Study] = {}
 
 
@@ -169,7 +169,7 @@ def __getattr__(name: str):
         if name not in _studies:
             _studies[name] = Study(name)
         return _studies[name]
-    raise AttributeError(f"module 'kicho' has no attribute '{name}'")
+    raise AttributeError(f"module 'experiments' has no attribute '{name}'")
 
 
 def __dir__():

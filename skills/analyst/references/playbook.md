@@ -7,10 +7,10 @@ experiments (`K1-210701`, `K1-230203`, `K1-230402`) — they cover the common sh
 
 ```
 uv venv && uv pip install -e "skills/analyst[reports]"
-export KICHO_ROOT="…/05 - Scientific Data"
+export EXPERIMENTS_ROOT="…/05 - Scientific Data"
 ```
 
-Smoke test: `python -c "from kicho import k1_210701 as k; print(dir(k), k.qpcr_summary.shape)"`.
+Smoke test: `python -c "from experiments import k1_210701 as k; print(dir(k), k.qpcr_summary.shape)"`.
 
 ## 1. Understand the experiment
 
@@ -29,7 +29,7 @@ Smoke test: `python -c "from kicho import k1_210701 as k; print(dir(k), k.qpcr_s
 
 ## 2. Write `analysis/derive.py`
 
-- Plain importable functions, reading via `kicho` (provenance auto). Put **choices** in
+- Plain importable functions, reading via `experiments` (provenance auto). Put **choices** in
   code + comments (fit model, point exclusions, normalization, which probe/replicate).
 - A `main()` writes artifacts through `analyst.derivation(k, __file__)`:
   `d.write_table(name, df)` and `d.write_fig(name, fig)`. This records analysis provenance
@@ -43,7 +43,7 @@ Smoke test: `python -c "from kicho import k1_210701 as k; print(dir(k), k.qpcr_s
 
 - `conftest.py`: the 4-line fixture exposing the Study (copy from a pilot; rename the id).
 - `test_*.py`: one test per claim. Docstring = statement; `@kind/@strength/@caveats`;
-  body re-derives the number via `kicho` (or `k.analysis.*` / `k.derive.fn(k)`); `assert`
+  body re-derives the number via `experiments` (or `k.analysis.*` / `k.derive.fn(k)`); `assert`
   is the grounding/drift check; `evidence(**kv)` records headline numbers.
 - Reuse derivation helpers via **`k.derive.fn(k)`** (loads `analysis/derive.py` collision-
   free) — never `sys.path.insert` + `import derive` (every experiment's file is named

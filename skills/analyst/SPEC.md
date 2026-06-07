@@ -37,19 +37,19 @@ faithfulness; the computed tables become analysis outputs (exposed via `k.analys
 
 ## Components
 
-### 1. `kicho` — typed, tracked data access (one generic module)
-`from kicho import k1_210701 as k` → a `Study` bound to the experiment folder (resolved by
+### 1. `experiments` — typed, tracked data access (one generic module)
+`from experiments import k1_210701 as k` → a `Study` bound to the experiment folder (resolved by
 glob on the id). Attributes are the tidy tables as pandas DataFrames; lazy, cached,
 **sha-pinned**, and every access routes through the tracked loader so it is recorded as
 provenance.
 - `02_qpcr_summary.csv` → `k.qpcr_summary`; `k.meta` → `experiment.yml`; `__dir__()` lists
   tables (IPython tab-completion). DataFrames carry `.attrs["source"]`/`["sha256"]`.
-- Root via `KICHO_ROOT` env. Later: `k.analysis.<name>` exposes derived outputs the same way.
+- Root via `EXPERIMENTS_ROOT` env. Later: `k.analysis.<name>` exposes derived outputs the same way.
 
 ### 2. `analysis/` — comprehensive derivations (products, not claims)
 Plain importable functions per experiment (no decorators) that **compute** the derived
 artifacts: EC50/Hill fits, group stats, per-ASO summary tables, **and figures**. Each
-reads via `kicho` (provenance auto). Analysis **choices** (fit model, point exclusions,
+reads via `experiments` (provenance auto). Analysis **choices** (fit model, point exclusions,
 normalization) live in code + comments — explicit and reviewable. Outputs are written as
 artifacts — derived tables (`analysis/tables/*.csv`) and figures (`analysis/fig/*.png`) —
 each recording its inputs+shas + the deriving code version (analysis provenance, parallel
@@ -61,7 +61,7 @@ Reusable in IPython; the claim specs ground over these.
 ### 3. `analysis/claims/test_*.py` — grounding specs (pytest)
 A claim **is** a pytest test:
 - **statement** = docstring · **id** = pytest node id (stable, free) · **inputs** = the
-  `kicho`/fixtures it reads (captured) · **body** = the derivation/justification ·
+  `experiments`/fixtures it reads (captured) · **body** = the derivation/justification ·
   **assertion** = the grounding/drift check ("does the data still match the statement?").
 - **markers carry the judgment** (kept *out* of the assert so it stays non-binary):
   `@strength("strong|moderate|weak|...")`, `@caveats("…")`, `@kind("result|design|external|interpretive")`.
@@ -85,7 +85,7 @@ def test_pos_ctrl_below_criterion(k1_210701):
 ```
 
 ## Harness (`analyst` package + pytest plugin)
-- API: `data()/load()` (tracked loader, via `kicho`), `uses(claim_id)`, `doc(path)`,
+- API: `data()/load()` (tracked loader, via `experiments`), `uses(claim_id)`, `doc(path)`,
   `evidence(**kv)`, and the `strength`/`caveats`/`kind` markers.
 - **Provenance capture:** a per-claim context records every `(kind, path, sha)` loaded;
   transitive through `uses`. The claim id + captured inputs + recorded evidence form a
@@ -109,7 +109,7 @@ hand-maintained beyond the specs themselves.
 ## Layout
 ```
 skills/analyst/
-  kicho/__init__.py            # typed, tracked data access
+  experiments/__init__.py            # typed, tracked data access
   analyst/__init__.py          # data/uses/doc/evidence/strength + pytest plugin
   SPEC.md
 <data repo>/<exp>/analysis/
@@ -127,7 +127,7 @@ it (e.g. K1-230203's computed dose-response) move here under `analysis/`.
 - Whether to emit a generated drift-lock — start without.
 
 ## Pilot (validate before going comprehensive)
-Build the harness + `kicho` + the pytest plugin, then author derivations + claim specs for
+Build the harness + `experiments` + the pytest plugin, then author derivations + claim specs for
 **3 experiments**:
 - **K1-210701** (in-vitro EC50) — a real Hill fit + quantitative results/design claims.
 - **K1-230203** (the temporal case) — re-derivation changed potency; exercise a `strength`
@@ -139,5 +139,5 @@ Build the harness + `kicho` + the pytest plugin, then author derivations + claim
 
 **Success criteria:** `pytest` emits a grounding report; provenance is auto-captured and
 bypass-guarded; at least one claim of each kind exists; the K1-230203 strength change is
-legible in git; and everything runs cleanly in IPython (`from kicho import k1_210701 as k`).
+legible in git; and everything runs cleanly in IPython (`from experiments import k1_210701 as k`).
 Refine the API on these three, then fan out comprehensively (one experiment per session).

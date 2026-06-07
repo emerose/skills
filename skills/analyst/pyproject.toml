@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kicho-analyst"
+name = "experiments-analyst"
 version = "0.1.0"
-description = "kicho (tracked data access) + analyst (claim-grounding + analysis provenance) for the kicho-science pipeline"
+description = "experiments (tracked data access) + analyst (claim-grounding + analysis provenance) for the scientific-data pipeline"
 requires-python = ">=3.11"
 # Scientific deps are version-pinned for fit determinism: a 4-parameter Hill fit
 # (scipy.optimize.curve_fit) is a pure function of its inputs given the same library
@@ -29,4 +29,4 @@ reports = ["pdfplumber>=0.11", "python-docx>=1.1"]
 analyst = "analyst.plugin"
 
 [tool.setuptools]
-packages = ["kicho", "analyst"]
+packages = ["experiments", "analyst"]

@@ -9,7 +9,7 @@ contradicted/retracted, ``skip`` = unverifiable).
 This plugin:
   * registers the markers (no "unknown mark" warnings),
   * wraps each test in an :class:`analyst.Capture` (autouse fixture) so every
-    ``kicho``/``load``/``doc`` read is recorded, and installs the bypass guard,
+    ``experiments``/``load``/``doc`` read is recorded, and installs the bypass guard,
   * runs the reconcile lint (declared fixtures vs captured inputs),
   * collects ``{id, statement, outcome, evidence, inputs+shas, strength, caveats,
     kind}`` per claim and writes ``grounding_report.md`` + ``.json``.
@@ -89,7 +89,7 @@ def pytest_runtest_makereport(item, call):
     evidence = dict(cap.evidence) if cap else {}
     inputs = list(cap.inputs) if cap else []
 
-    # reconcile lint: a kicho fixture requested but nothing from its experiment read,
+    # reconcile lint: an experiments-package fixture requested but nothing from its experiment read,
     # or files captured whose experiment isn't among the declared fixtures.
     reconcile = _reconcile(cap) if cap else []
 
@@ -113,7 +113,7 @@ def pytest_runtest_makereport(item, call):
 def _reconcile(cap: analyst.Capture) -> list[str]:
     """Warn when declared fixtures != captured inputs. Cheap, advisory."""
     msgs = []
-    # kicho study fixtures look like k1_NNNNNN; their experiment id is the fixture name.
+    # experiments-package study fixtures look like k1_NNNNNN; their experiment id is the fixture name.
     declared_exps = {f.upper().replace("_", "-") for f in cap.declared
                      if f.lower().startswith("k1_")}
     captured_paths = [Path(i["path"]) for i in cap.inputs]
