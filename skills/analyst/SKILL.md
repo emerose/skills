@@ -115,7 +115,7 @@ def test_pos_ctrl_below_criterion(experiment):    # `experiment` = this folder's
 - **bulk** via `@pytest.mark.parametrize`. **compose** via `uses("other_claim_id")` (pulls
   its evidence + inputs transitively). Reuse derivation helpers via `experiment.derive.fn(experiment)`.
 - **cross-experiment**: import another study and wrap it in `cross(...)` to declare the
-  dependency — `from experiments import k1_230402; screen = cross(k1_230402)`; reads from it
+  dependency — `from experiments import k1_000000; other = cross(k1_000000)`; reads from it
   are captured as provenance (sha-pinned) and the reconcile lint treats them as expected.
 - **lifecycle** = pytest states: `@pytest.mark.xfail(reason=…, strict=True)` = contradicted
   but kept on record; `pytest.skip(reason=…)` = unverifiable. `@kind`/`@strength` still apply.

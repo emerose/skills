@@ -198,9 +198,9 @@ def cross(study):
     reconcile lint as an accidental cross-read unless declared. Wrap a second study in
     ``cross(...)`` to register it as expected and return it for use:
 
-        from experiments import k1_230402
-        screen = cross(k1_230402)                 # declares the cross-experiment dep
-        top = screen.analysis.quantigene_group_summary   # ...then read it, captured as usual
+        from experiments import k1_000000        # some other experiment
+        other = cross(k1_000000)                  # declares the cross-experiment dep
+        tbl = other.analysis.some_summary         # ...then read it, captured as usual
 
     Returns the study unchanged (so it composes inline)."""
     cap = _CURRENT.get()
