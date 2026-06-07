@@ -41,15 +41,18 @@ Smoke test: `python -c "from experiments import k1_210701 as k; print(dir(k), k.
 
 ## 3. Write `analysis/claims/`
 
-- `conftest.py`: the 4-line fixture exposing the Study (copy from a pilot; rename the id).
-- `test_*.py`: one test per claim. Docstring = statement; `@kind/@strength/@caveats`;
-  body re-derives the number via `experiments` (or `k.analysis.*` / `k.derive.fn(k)`); `assert`
-  is the grounding/drift check; `evidence(**kv)` records headline numbers.
-- Reuse derivation helpers via **`k.derive.fn(k)`** (loads `analysis/derive.py` collision-
-  free) — never `sys.path.insert` + `import derive` (every experiment's file is named
-  `derive`, so they collide in `sys.modules` when run together).
+- **No conftest needed.** Request the `experiment` fixture — it resolves the Study from
+  the test file's path. `test_*.py`: one test per claim. Docstring = statement;
+  `@kind/@strength/@caveats`; body re-derives the number via `experiment` (or
+  `experiment.analysis.*` / `experiment.derive.fn(experiment)`); `assert` is the
+  grounding/drift check; `evidence(**kv)` records headline numbers.
+- Reuse derivation helpers via **`experiment.derive.fn(experiment)`** (loads
+  `analysis/derive.py` collision-free) — never `sys.path.insert` + `import derive` (every
+  experiment's file is named `derive`, so they collide in `sys.modules` when run together).
+- Cross-experiment claims import another study directly: `from experiments import k1_230402`.
 - `pytest "<exp>/analysis/claims"` → check the grounding report renders and the reconcile
-  lint is quiet (no dead fixtures / undeclared reads / bypasses).
+  lint is quiet (no empty claims / undeclared reads / bypasses). Add `--check-drift` to
+  flag claims whose inputs changed since their `@strength` was last set.
 
 ## 4. De-overloading `extract.py` (only if a derived table lives in it)
 
@@ -78,9 +81,10 @@ a dropped top dose), encode the change as a **git edit**, not a silent overwrite
 
 ## Gotchas
 
-- **Identifier columns** (`aso` ids like `01`, `08`) round-trip through pandas inference
-  as floats. Coerce in the claim (`int(float(row["aso"]))`) or compare numerically. A
-  spec refinement (dtype hints) is noted in the pilot report.
+- **Identifier columns** (`aso` ids like `01`, `08`) are preserved as strings by the
+  tracked loader (it detects integer-looking columns that inference would corrupt — a
+  leading zero, or blanks forcing a float — and keeps the exact text). Compare them as
+  strings (`row["aso"] == "73"`). Measurement columns stay numeric.
 - The data repo's `.git` is on a Google-Drive mount: `commit`/`add` work in place, but
   `push`/`fetch` fail with "mmap timed out". Push via
   `cp -R .git /tmp/x.git && git --git-dir=/tmp/x.git push origin <branch>`.

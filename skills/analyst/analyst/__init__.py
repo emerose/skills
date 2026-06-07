@@ -109,7 +109,15 @@ def load(path, kind: str = "data"):
 
     The DataFrame carries ``.attrs["source"]`` and ``.attrs["sha256"]``. Reading is
     done from the file bytes (so the sha is of exactly what was parsed); the parse
-    itself goes through a ``BytesIO`` so the bypass guard never double-counts it."""
+    itself goes through a ``BytesIO`` so the bypass guard never double-counts it.
+
+    Identifier-column fidelity: pandas infers an all-numeric column to int/float, which
+    silently corrupts identifier columns whose values only look numeric — e.g. ASO ids
+    ``"01"``/``"08"`` become ``1``/``8`` (leading zero lost, and ``"01"`` now collides
+    with ``"1"``). We guard against that by re-reading the column as faithful strings
+    whenever the inferred integer form does not round-trip to the original text; such a
+    column is kept as strings so ``row["aso"] == "73"`` works and leading zeros survive.
+    Genuine measurement columns (floats, clean integers) are unaffected."""
     import pandas as pd
 
     p = Path(path)
@@ -117,12 +125,41 @@ def load(path, kind: str = "data"):
     sha = _sha256(raw)
     record(kind, p, sha)
     df = pd.read_csv(io.BytesIO(raw))
+    str_df = pd.read_csv(io.BytesIO(raw), dtype=str, keep_default_na=False)
+    for col in df.columns:
+        df[col] = _preserve_identifier(df[col], str_df[col])
     df.attrs["source"] = str(p)
     df.attrs["sha256"] = sha
     return df
 
 
 data = load  # spec spells the tracked loader both ways
+
+
+import re as _re
+
+_INT_LIKE = _re.compile(r"^-?\d+$")
+
+
+def _preserve_identifier(col, str_col):
+    """Keep a column as faithful strings when pandas' numeric inference would corrupt
+    identifiers. Fires only when every non-blank value is a plain integer string AND
+    inference would alter it — i.e. a leading zero is present (``"01"`` -> ``1``) or the
+    column was floated by blank cells (``"73"`` -> ``73.0``, NaN for the blanks). Real
+    measurement columns (any decimal point, sign-less floats, clean blank-free integers
+    like counts/indices) are left numeric and untouched."""
+    import pandas as pd
+
+    if not (pd.api.types.is_integer_dtype(col.dtype) or pd.api.types.is_float_dtype(col.dtype)):
+        return col  # already object/string
+    nonblank = str_col[str_col != ""]
+    if not len(nonblank) or not nonblank.map(lambda v: bool(_INT_LIKE.match(v))).all():
+        return col  # has decimals / non-integer text -> a real measurement column
+    has_leading_zero = nonblank.map(lambda v: len(v) > 1 and v.lstrip("-").startswith("0")).any()
+    has_blanks = (str_col == "").any()
+    if has_leading_zero or has_blanks:
+        return str_col  # identifier-like; keep the exact text
+    return col          # clean blank-free integers (counts, indices) stay numeric
 
 
 @dataclass
