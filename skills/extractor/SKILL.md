@@ -35,7 +35,7 @@ audits that grounding. It is the `raw → data` stage of the provenance pipeline
 # <experiment>/data/extract.py
 def build(x):
     x.sheet("01_qpcr_cp_dcp.csv", "raw/…Cp-dCp….xlsx")           # one worksheet, faithful
-    x.sheet("02_qpcr_summary.csv", "raw/…qPCR….xlsx", sheet="Test ASOs")
+    x.sheet("02_qpcr_summary.csv", "raw/…qPCR….xlsx", sheet="Test guides")
     x.crc_long("03_crc_pct_kd.csv", "raw/…CRC graphs.pzfx")      # pzfx → tidy long
     # bespoke cases: read raw rows and emit your own table
     _, rows = x.xlsx("raw/…EC50s….xlsx", sheet="EC50s", drop_blank_rows=False)

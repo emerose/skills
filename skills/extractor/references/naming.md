@@ -11,8 +11,8 @@ NN_<assay>_<content>[__<partition>].csv
 
 1. **lowercase `snake_case`, `.csv`, ASCII, no spaces.**
 2. **No redundant source IDs in the name.** Drop the experiment id (`K1-…`), CRO
-   phase/experiment numbers (`Phase_5_`, `Exp10_`), and vendor names (`McSwiggen_`,
-   `PYW001_`). The folder already identifies the experiment and `experiment.yml`
+   phase/experiment numbers (`Phase_5_`, `Exp10_`), and vendor names (`VendorA_`,
+   `LotB001_`). The folder already identifies the experiment and `experiment.yml`
    provenance records the exact source file. Keep a vendor/source token *only* when
    it genuinely distinguishes two same-assay datasets in the same experiment.
 3. **`NN_`** — two-digit prefix giving **pipeline order**: low→high reads
@@ -32,7 +32,7 @@ NN_<assay>_<content>[__<partition>].csv
 
 Default to **a single long-format (tidy) file** with the split dimension as a
 **column**, rather than many wide per-partition files. E.g. the per-plate CRC tables
-from a `.pzfx` become **one** `0N_crc_pct_kd.csv` with `plate, aso, log_conc,
+from a `.pzfx` become **one** `0N_crc_pct_kd.csv` with `plate, guide, log_conc,
 replicate, pct_kd` columns — not `…__plate1/2/3.csv`. One row per observation; the
 machine-readable partition lives in a column, where it's queryable and joinable.
 
@@ -48,22 +48,22 @@ Jess) · `viability` · `cytokine` · `immunotox` · `mea` · `pk` · `biodist` 
 `bw` (body weight) · `hematology` · `chemistry` (clinical chemistry) ·
 `clinical` (clinical observations) · `histo` · `neuro` ·
 `survival` (in-vivo animal survival) · `seq` (sequencing/variants) ·
-`design` (ASO design tables) · `sample` (sample/tissue inventory & QC) ·
+`design` (guide design tables) · `sample` (sample/tissue inventory & QC) ·
 `summary` (cross-assay per-subject rollup tables)
 
 ## Content descriptors (common)
 
-`cp_dcp` (raw qPCR Cp/ΔCp per well) · `summary` (per-ASO averages / %CV / %KD) ·
+`cp_dcp` (raw qPCR Cp/ΔCp per well) · `summary` (per-guide averages / %CV / %KD) ·
 `pct_kd` · `ec50` / `values` · `fold_change` · `concentrations` · `ranking`.
 
 ## Examples
 
-**K1-211101 (Rat Fibroblast ASO Validation)**
+**K1-000001 (in-vitro guide validation)**
 - `01_qpcr_cp_dcp.csv` — raw per-well Cp / VIC / ΔCp
-- `02_qpcr_summary.csv` — per-ASO AVE/STDEV/%CV (the "Test ASOs" sheet)
-- `03_crc_pct_kd.csv` — long: `plate, aso, log_conc, replicate, pct_kd` (from the 3 pzfx plate tables)
+- `02_qpcr_summary.csv` — per-guide AVE/STDEV/%CV (the "Test guides" sheet)
+- `03_crc_pct_kd.csv` — long: `plate, guide, log_conc, replicate, pct_kd` (from the 3 pzfx plate tables)
 
-**K1-210701 (Potency Determination)**
+**K1-000000 (potency determination)**
 - `01_qpcr_cp_dcp.csv`
 - `02_qpcr_summary.csv`
 - `03_ec50_values.csv`
