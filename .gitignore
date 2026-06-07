@@ -31,6 +31,10 @@ uv.lock
 .ruff_cache/
 .mypy_cache/
 
+# analyst pytest-plugin output (written to CWD on any pytest run in this repo)
+grounding_report.md
+grounding_report.json
+
 # Local Claude Code settings (keep shared config, ignore machine-local)
 .claude/settings.local.json
 

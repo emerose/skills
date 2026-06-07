@@ -123,8 +123,18 @@ only source (provenance records whatever path you read).
   titles = samples, Y = run/timepoint. **Inspect every table before assuming a shape.**
 - **Comma decimals.** Some pzfx write `1,23` not `1.23` — normalize `,`→`.` or values
   won't read as numeric (and won't reconcile). (K1-000006.)
-- A `.pzfx` may be the **binary** Prism format (starts `PCFFGRA4…`), not XML — not
-  parseable here; skip it (its data is usually also in an xlsx).
+- **Three on-disk Prism shapes, sniffed by leading bytes** (no need to branch in the
+  recipe — `x.pzfx` / `read_pzfx` dispatch automatically):
+  - XML `.pzfx` (`<?xml…`) — parsed directly (the `<Table>` layout above).
+  - zip `.prism` (`PK\x03\x04`, Prism 10/11) — a zip of JSON + one `data.csv` grid per
+    data sheet; `read_prism` maps it to the **same** structured/flat shape as the pzfx
+    readers, so `crc_long` and friends work unchanged. Values are stored at full float64
+    precision and collapsed back to Prism's displayed value (shortest round-trip), so a
+    `.prism` extraction is byte-identical to the same data re-exported as XML `.pzfx`
+    (the lone exception: survival/XY tables, where the XML export *duplicates* the X
+    column — a pzfx artifact, absent from the faithful `.prism` read).
+  - **legacy binary** (`PCFFGRA4…`, Prism 4/5/6) — not parseable; the reader raises a
+    clear "re-export as `.pzfx`/`.prism`" error (its data is usually also in an xlsx).
 
 ## Faithful superset + legacy handling
 
@@ -202,9 +212,14 @@ When extracting many experiments at once:
 
 ## Format support
 
-- **Supported:** `.xlsx` (openpyxl), `.xls` (xlrd), GraphPad `.pzfx` (XML).
+- **Supported:** `.xlsx` (openpyxl), `.xls` (xlrd), GraphPad Prism XML `.pzfx` **and
+  modern zip `.prism`** (Prism 10/11). The Prism readers (`x.pzfx` / `read_pzfx`) sniff
+  the file by its leading bytes and route automatically, so a recipe points `x.pzfx` at
+  either a `.pzfx` or a `.prism` and gets the same shape (see the Prism section above).
 - **Deferred / not extracted (raw instrument or no extractable measurements):** ABI
   `.eds` (QuantStudio — but its processed data is in the accompanying xlsx, so extract
   those), Axion `.spk` (MEA spikes), Apple `.numbers`, images (`.jpg/.tiff/.png`),
-  binary Prism `.pzfx`. The heterogeneous guide-design set (`.pptx/.docx/.vcf/.txt`) is
-  its own problem. Record these as raw, don't block extraction on them.
+  **legacy binary** Prism (magic `PCFFGRA4`, Prism 4/5/6 — re-export as `.pzfx`/`.prism`;
+  the reader raises a clear error for these). The heterogeneous guide-design set
+  (`.pptx/.docx/.vcf/.txt`) is its own problem. Record these as raw, don't block
+  extraction on them.

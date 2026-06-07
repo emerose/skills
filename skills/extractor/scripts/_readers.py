@@ -4,12 +4,21 @@ Each reader returns (header: list[str], rows: list[list]) so a recipe can write 
 CSV and the extractor can record provenance. Readers are pure functions of the
 source bytes — re-running on the same input yields identical output (diffable).
 
-Formats: .xlsx (openpyxl) and GraphPad Prism .pzfx (XML) cover the large majority
-of measurement data. Add new readers here so recipes stay thin.
+Formats: .xlsx (openpyxl) and GraphPad Prism cover the large majority of measurement
+data. Prism comes in three on-disk shapes; the Prism readers sniff and route by the
+file's leading bytes (see `read_pzfx` / `_prism_sniff`):
+  - XML  `.pzfx`  (starts `<?xml`)         — parsed here directly;
+  - zip  `.prism` (starts `PK\x03\x04`)    — Prism 10/11, parsed by `read_prism`;
+  - binary legacy (starts `PCFFGRA4`)      — Prism 4/5/6, not parseable → clear error.
+Add new readers here so recipes stay thin.
 """
 from __future__ import annotations
+import csv as _csv
 import datetime as _dt
+import io as _io
+import json as _json
 import xml.etree.ElementTree as ET
+import zipfile as _zipfile
 from pathlib import Path
 
 
@@ -109,7 +118,15 @@ def _subcolumns(col: ET.Element) -> list[list[str]]:
 def read_pzfx_structured(path: Path):
     """Structured view of each table: (table_title, x_values, [(y_title, [subcolumns])]).
     `x_values` is the first X-family subcolumn; each Y column keeps its subcolumns
-    (replicates) intact — the basis for a tidy long-format reshape."""
+    (replicates) intact — the basis for a tidy long-format reshape.
+
+    Sniffs the file: a zip `.prism` routes to `read_prism_structured`, the legacy
+    binary format raises, and XML `.pzfx` is parsed here."""
+    fmt = _prism_sniff(path)
+    if fmt == "zip":
+        return read_prism_structured(path)
+    if fmt == "binary":
+        raise ValueError(_PRISM_BINARY_MSG.format(path=Path(path).name))
     root = ET.parse(path).getroot()
     out = []
     for t in [el for el in root.iter() if _tag(el.tag) == "Table"]:
@@ -133,7 +150,15 @@ def read_pzfx(path: Path) -> list[tuple[str, list[str], list[list[str]]]]:
     leading '' index column (0..n-1), then each X-family subcolumn as `_<k>`,
     then each Y column's subcolumns as `<col title>_<g>` where g is a running
     index across all Y subcolumns in the table. Mirrors the conventional
-    pandas-style pzfx dump so the layout is recognizable and value-faithful."""
+    pandas-style pzfx dump so the layout is recognizable and value-faithful.
+
+    Sniffs the file: a zip `.prism` routes to `read_prism`, the legacy binary
+    format raises, and XML `.pzfx` is parsed here."""
+    fmt = _prism_sniff(path)
+    if fmt == "zip":
+        return read_prism(path)
+    if fmt == "binary":
+        raise ValueError(_PRISM_BINARY_MSG.format(path=Path(path).name))
     root = ET.parse(path).getroot()
     tables = [el for el in root.iter() if _tag(el.tag) == "Table"]
     results = []
@@ -154,6 +179,166 @@ def read_pzfx(path: Path) -> list[tuple[str, list[str], list[list[str]]]]:
         for yc in ycols:
             ytitle = _direct_title(yc)
             for sub in _subcolumns(yc):
+                cols.append((f"{ytitle}_{g}", sub))
+                g += 1
+        nrows = max((len(v) for _, v in cols), default=0)
+        header = [""] + [name for name, _ in cols]
+        rows = []
+        for i in range(nrows):
+            row = [str(i)]
+            for _, vals in cols:
+                row.append(vals[i] if i < len(vals) else "")
+            rows.append(row)
+        results.append((title, header, rows))
+    return results
+
+
+# --------------------------------------------------------------------------- #
+# GraphPad Prism .prism  (Prism 10/11 — a zip of JSON + per-table CSV)
+# --------------------------------------------------------------------------- #
+# A `.prism` is a zip archive (magic `PK\x03\x04`):
+#   document.json                      — TOC; `sheets.data` lists input data-sheet UUIDs
+#   data/sheets/<UUID>/sheet.json      — DataSheet: title + `table` (uid, dataSets, xDataSet)
+#   data/sets/<UUID>.json              — DataSet: column/group title + replicate layout
+#   data/tables/<table-uid>/data.csv   — the actual values, a rectangular CSV grid
+# The grid's columns are, left to right: an optional leading row-titles column (present
+# on grouped tables), then the X column(s), then each Y dataset's subcolumns. Cells are
+# stored at full float64 precision (e.g. `72.7179749000000015`); the shortest round-trip
+# float repr recovers the value Prism actually shows (`72.7179749`), so a faithful read
+# is byte-identical to the same data re-exported as XML `.pzfx` (the one exception is
+# survival/XY tables, where the XML export redundantly duplicates the X column — a pzfx
+# quirk, not real data). Output shape matches `read_pzfx` so this is a drop-in.
+
+_PRISM_BINARY_MSG = (
+    "{path} is a legacy binary Prism file (magic 'PCFFGRA4', Prism 4/5/6 era) — its "
+    "data is not stored as text and cannot be read here. Re-export from Prism as XML "
+    "'.pzfx' (File ▸ Export, or save-as an older Prism format that writes XML) or as a "
+    "modern '.prism', then point the recipe at that file."
+)
+
+
+def _prism_sniff(path: Path) -> str:
+    """Classify a Prism file by its leading bytes: 'zip' (.prism), 'binary' (legacy
+    PCFFGRA4), or 'xml' (.pzfx / anything else, parsed as XML)."""
+    with open(path, "rb") as f:
+        head = f.read(8)
+    if head[:4] == b"PK\x03\x04":
+        return "zip"
+    if head == b"PCFFGRA4":
+        return "binary"
+    return "xml"
+
+
+def _prism_nsub(ds: dict) -> int:
+    """Number of subcolumns (replicate slots) a DataSet occupies in its table's CSV
+    grid. Grouped tables store a `replicate ranges` list whose ranges (`"0~11"`, `"12"`)
+    index the subcolumns, so the slot count is the max index + 1 (trailing empty slots
+    included, exactly as the XML export keeps them); simpler tables carry a flat
+    `replicates` list, one entry per subcolumn."""
+    rr = ds.get("replicate ranges")
+    if rr:
+        m = 0
+        for entry in rr:
+            r = str(entry.get("range", "0"))
+            end = int(r.split("~")[-1]) if "~" in r else int(r)
+            m = max(m, end + 1)
+        return m
+    return len(ds.get("replicates", [])) or 1
+
+
+def _prism_num(s: str) -> str:
+    """A raw CSV cell → faithful string: '' for blank, the shortest round-trip repr of
+    the float (integers as integers) so full-precision storage collapses back to the
+    displayed value; non-numeric text is passed through verbatim."""
+    s = s.strip()
+    if s == "":
+        return ""
+    try:
+        f = float(s)
+    except ValueError:
+        return s
+    return str(int(f)) if f.is_integer() else repr(f)
+
+
+def _prism_tables(path: Path):
+    """Core `.prism` parser → one (table_title, [x_subcolumns], [(y_title, [y_subcolumns])])
+    per input data sheet, in document order. Each subcolumn is a list of cell strings
+    (one per grid row). This is the shared basis for `read_prism` (flat) and
+    `read_prism_structured`, mirroring the pzfx readers' intermediate shape."""
+    with _zipfile.ZipFile(path) as z:
+        names = set(z.namelist())
+
+        def js(name: str) -> dict:
+            return _json.loads(z.read(name))
+
+        doc = js("document.json")
+        out = []
+        for suid in doc.get("sheets", {}).get("data", []):
+            sheet = js(f"data/sheets/{suid}/sheet.json")
+            table = sheet.get("table") or {}
+            tuid = table.get("uid")
+            if not tuid:
+                continue
+            csv_name = f"data/tables/{tuid}/data.csv"
+            if csv_name not in names:
+                # Some Prism exports store a table's values in a binary `data.bin`
+                # column store instead of a text `data.csv`. Only the CSV form is
+                # supported; surface it rather than silently dropping the table.
+                raise ValueError(
+                    f"{Path(path).name}: data sheet {sheet.get('title', suid)!r} has no "
+                    f"text data.csv (binary table store not supported) — re-export from Prism."
+                )
+            content = js(f"data/tables/{tuid}/content.json")
+            ncol = int(content.get("numberOfColumns", 0))
+            grid = list(_csv.reader(_io.TextIOWrapper(z.open(csv_name), encoding="utf-8")))
+
+            def load_set(u: str) -> dict:
+                return js(f"data/sets/{u}.json")
+
+            xset = table.get("xDataSet")
+            x_n = _prism_nsub(load_set(xset)) if xset else 0
+            ydefs = [(ds.get("title", ""), _prism_nsub(ds))
+                     for ds in (load_set(u) for u in table.get("dataSets", []))]
+
+            # Leading row-titles columns (grouped tables) are whatever the grid carries
+            # beyond the planned X + Y data columns; drop them (the pzfx readers omit
+            # row titles too, generating a 0-based index instead).
+            leading = max(0, ncol - (x_n + sum(n for _, n in ydefs)))
+
+            def col(c: int) -> list[str]:
+                idx = leading + c
+                return [_prism_num(row[idx]) if idx < len(row) else "" for row in grid]
+
+            x_subcols = [col(c) for c in range(x_n)]
+            ycols, c = [], x_n
+            for ytitle, nsub in ydefs:
+                ycols.append((ytitle, [col(c + k) for k in range(nsub)]))
+                c += nsub
+            out.append((sheet.get("title", ""), x_subcols, ycols))
+        return out
+
+
+def read_prism_structured(path: Path):
+    """`.prism` analogue of `read_pzfx_structured`: (table_title, x_values,
+    [(y_title, [subcolumns])]) per data sheet. `x_values` is the first X subcolumn."""
+    return [(title, (xs[0] if xs else []), ycols) for title, xs, ycols in _prism_tables(path)]
+
+
+def read_prism(path: Path) -> list[tuple[str, list[str], list[list[str]]]]:
+    """Read a modern GraphPad `.prism` (Prism 10/11, a zip of JSON + per-table CSV) into
+    one (table_title, header, rows) per input data sheet — the same flattened-wide shape
+    as `read_pzfx` (leading '' index column, then each X subcolumn as `_<k>`, then each Y
+    column's subcolumns as `<col title>_<g>` with g running across all Y subcolumns), so
+    it is a drop-in for the pzfx path. Values are faithful (full precision collapsed to
+    the displayed value); empty cells are ''."""
+    results = []
+    for title, x_subcols, ycols in _prism_tables(path):
+        cols: list[tuple[str, list[str]]] = []
+        for sub in x_subcols:
+            cols.append((f"_{len(cols)}", sub))
+        g = 0
+        for ytitle, subs in ycols:
+            for sub in subs:
                 cols.append((f"{ytitle}_{g}", sub))
                 g += 1
         nrows = max((len(v) for _, v in cols), default=0)
