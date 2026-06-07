@@ -132,7 +132,9 @@ def pytest_runtest_makereport(item, call):
 
     # reconcile lint: the claim's experiment was declared but nothing read from it, or
     # files were read from an experiment the claim didn't declare (undeclared input).
-    reconcile = _reconcile(cap) if cap else []
+    # Skipped claims read nothing by design (unverifiable-from-this-data), so the
+    # "empty claim?" check doesn't apply — don't cry wolf on them.
+    reconcile = _reconcile(cap, skipped=(outcome == "skipped")) if cap else []
 
     rec = {
         "id": item.nodeid,
@@ -213,10 +215,11 @@ def _compute_drift(item, cap) -> dict:
             "strength_commit": commit[:10], "changed_inputs": changed}
 
 
-def _reconcile(cap: analyst.Capture) -> list[str]:
+def _reconcile(cap: analyst.Capture, skipped: bool = False) -> list[str]:
     """Warn when the claim's declared experiments != the experiments it actually read
     from. ``cap.declared`` already holds experiment codes (home + named fixtures).
-    Cheap, advisory."""
+    Cheap, advisory. A ``skipped`` claim reads nothing by design, so the "empty claim?"
+    half is suppressed for it (an undeclared-read or bypass would still be flagged)."""
     msgs = []
     declared_exps = set(cap.declared)
     captured_exps = set()
@@ -224,8 +227,9 @@ def _reconcile(cap: analyst.Capture) -> list[str]:
         for part in Path(i["path"]).parts:
             if part.upper().startswith("K1-"):
                 captured_exps.add(part.split(" ")[0].upper())
-    for e in declared_exps - captured_exps:
-        msgs.append(f"claim is in/declares {e} but read no file from it (empty claim?)")
+    if not skipped:
+        for e in declared_exps - captured_exps:
+            msgs.append(f"claim is in/declares {e} but read no file from it (empty claim?)")
     for e in captured_exps - declared_exps:
         msgs.append(f"read files from {e} but the claim didn't declare it "
                     f"(undeclared cross-experiment input — name it via a k1_{e[3:]} fixture)")

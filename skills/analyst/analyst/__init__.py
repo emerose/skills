@@ -334,17 +334,34 @@ def uses(claim_id: str) -> dict:
     """Compose on another claim: merge its recorded inputs into this capture
     (transitive provenance) and return its evidence dict. The referenced claim must
     have run earlier in the session (pytest collection order). Enables
-    cross-experiment / cross-claim composition without re-reading source."""
+    cross-experiment / cross-claim composition without re-reading source.
+
+    ``claim_id`` may be a full node id or a bare function name. A bare name can be
+    ambiguous across experiments (two may define a claim by the same name); when it is,
+    prefer a candidate **in the calling claim's own test file** (the common same-file
+    composition case), so a short ``uses("test_x")`` stays robust whether the suite runs
+    one experiment or the whole program. For a genuine cross-experiment reference, pass
+    a qualified id (``"<file>::test_x"``)."""
+    cap = _CURRENT.get()
     rec = registry.get(claim_id)
     if rec is None:
-        # tolerate short ids: match on node-id suffix
-        cand = [k for k in registry if k.endswith(claim_id) or k.split("::")[-1] == claim_id]
-        rec = registry.get(cand[0]) if len(cand) == 1 else None
+        cand = [k for k in registry
+                if k == claim_id or k.endswith("::" + claim_id) or k.split("::")[-1] == claim_id]
+        if len(cand) > 1 and cap is not None and cap.claim_id:
+            my_file = cap.claim_id.split("::")[0]   # prefer a same-file candidate
+            same = [k for k in cand if k.split("::")[0] == my_file]
+            if same:
+                cand = same
+        if len(cand) == 1:
+            rec = registry.get(cand[0])
+        elif len(cand) > 1:
+            raise LookupError(
+                f"uses({claim_id!r}) is ambiguous across experiments — qualify it as "
+                f"'<file>::{claim_id.split('::')[-1]}'. Candidates: {sorted(cand)}")
     if rec is None:
         raise LookupError(
             f"uses({claim_id!r}): no completed claim with that id has run yet "
             f"(known: {sorted(registry)})")
-    cap = _CURRENT.get()
     if cap is not None:
         for inp in rec["inputs"]:
             cap.record(inp["kind"], inp["path"], inp["sha256"], via="uses")
