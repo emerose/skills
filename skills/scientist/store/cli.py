@@ -521,33 +521,102 @@ async def cmd_check(store: ArchivistStore, args: argparse.Namespace) -> None:
             print(f"    {f}")
 
 
+def _staleness_entry(home: Path, exp_dir: Path, exp_id: str) -> dict[str, Any]:
+    """The per-experiment provenance-staleness portion of an audit entry — PURE: it
+    re-hashes the recorded ledger against the evidence on disk via the shared core, and
+    never touches the libkit store. Shared by the store-backed ``cmd_audit`` and the
+    store-free ``audit_report``."""
+    sidecar_path = exp_dir / provenance.SIDECAR_NAME
+    entry: dict[str, Any] = {"exp_id": exp_id}
+    if not sidecar_path.is_file():
+        entry["staleness"] = "no-experiment-yml"
+        return entry
+    try:
+        provenance.read_sidecar(exp_dir)  # validate (raises on a bad sidecar)
+        st = provenance.staleness(exp_dir, repo_root=home)
+        entry["staleness"] = st["state"]
+        if st["state"] == "stale":
+            for k in ("changed", "missing", "added", "artifact_changed", "reviewed_at"):
+                if st.get(k):
+                    entry[k] = st[k]
+    except provenance.SidecarError as e:
+        entry["staleness"] = "invalid-experiment-yml"
+        entry["error"] = str(e)
+    return entry
+
+
+def _source_files_on_disk(exp_dir: Path, home: Path) -> list[str]:
+    """The data/report/raw/analysis files an agent should read for the semantic pass,
+    as home-relative paths — derived by walking the folder, no store required."""
+    out = []
+    for f in _files.iter_experiment_files(exp_dir):
+        if f["role"] in ("data", "report", "raw", "analysis"):
+            try:
+                out.append(str(f["abs_path"].resolve().relative_to(home.resolve())))
+            except ValueError:
+                out.append(f["filename"])
+    return sorted(out)
+
+
+def audit_report(home: Path, only: str | None = None) -> list[dict[str, Any]]:
+    """Build the provenance-staleness audit report by walking on-disk experiment folders
+    — NO libkit store required. One entry per experiment (or just ``only``), each with its
+    ``staleness`` state (+ drift detail when stale) and a ``source_files`` worklist for
+    the semantic pass. This is the store-free path `sci audit` uses when no store exists.
+    """
+    report = []
+    if only:
+        found = _find_experiment_dir(home, only)
+        if not found:
+            die(f"no experiment matching {only!r}")
+        pairs = [(found[0], found[1]["exp_id"])]
+    else:
+        pairs = [(c.resolve(), p["exp_id"]) for c in sorted(home.iterdir())
+                 if c.is_dir() and (p := _meta.parse_experiment_dirname(c.name))]
+    for exp_dir, exp_id in pairs:
+        entry = _staleness_entry(home, exp_dir, exp_id)
+        entry["source_files"] = _source_files_on_disk(exp_dir, home)
+        report.append(entry)
+    return report
+
+
+def print_audit_report(report: list[dict[str, Any]], as_json: bool) -> None:
+    """Render an audit report (store-backed or store-free) — identical output either way."""
+    if as_json:
+        emit_json(report)
+        return
+    for e in report:
+        print(f"{e['exp_id']}: {e['staleness']}")
+        if e.get("error"):
+            print(f"    {e['error']}")
+        if e.get("staleness") == "stale":
+            if e.get("artifact_changed"):
+                print("    an artifact (e.g. README) edited since last review")
+            for p in e.get("changed", []):
+                print(f"    changed: {p}")
+            for p in e.get("missing", []):
+                print(f"    missing: {p}")
+            for p in e.get("added", []):
+                print(f"    added (unrecorded): {p}")
+            print(f"    last reviewed {e.get('reviewed_at')}")
+    print("\nFor the semantic pass, run `sci audit --json` and fan out an agent per "
+          "experiment to read its source_files and verify the README prose.")
+
+
 async def cmd_audit(store: ArchivistStore, args: argparse.Namespace) -> None:
     """Provenance staleness (experiment.yml provenance vs the evidence on disk) +
     a worklist for the parallel-agent semantic pass.
 
     Checks the WHOLE provenance ledger (data/ extract edges + analysis/ derive edges
     + the README review edge) via the shared core — re-hashing every recorded input
-    and artifact and reporting per-file drift.
+    and artifact and reporting per-file drift. When a store is present the
+    ``source_files`` worklist is sourced from the index; the staleness check itself is
+    store-free (see :func:`_staleness_entry`).
     """
     report = []
     async for exp_dir, exp_id in _experiment_dirs(store, args.experiment):
-        sidecar_path = exp_dir / provenance.SIDECAR_NAME
         files = await store.files(exp_id)
-        entry: dict[str, Any] = {"exp_id": exp_id}
-        if not sidecar_path.is_file():
-            entry["staleness"] = "no-experiment-yml"
-        else:
-            try:
-                provenance.read_sidecar(exp_dir)  # validate (raises on a bad sidecar)
-                st = provenance.staleness(exp_dir, repo_root=store.home)
-                entry["staleness"] = st["state"]
-                if st["state"] == "stale":
-                    for k in ("changed", "missing", "added", "artifact_changed", "reviewed_at"):
-                        if st.get(k):
-                            entry[k] = st[k]
-            except provenance.SidecarError as e:
-                entry["staleness"] = "invalid-experiment-yml"
-                entry["error"] = str(e)
+        entry = _staleness_entry(store.home, exp_dir, exp_id)
         # source files an agent should read to verify the prose semantically
         entry["source_files"] = [fr["path"] for fr in files
                                  if fr.get("role") in ("data", "report", "raw", "analysis")]
@@ -827,6 +896,23 @@ async def _run(args: argparse.Namespace) -> None:
         await handler(store, args)
     finally:
         await store.close()
+
+
+def store_exists(args: argparse.Namespace) -> bool:
+    """Whether a libkit store is initialized under the resolved data folder."""
+    return (_home(args) / STORE_DIRNAME / "catalog.duckdb").exists()
+
+
+def dispatch_audit_storeless(args: argparse.Namespace) -> int:
+    """Run `sci audit` WITHOUT opening the libkit store: pure provenance staleness over
+    on-disk experiment folders. Used when no store is initialized so a single on-disk
+    experiment can be audited without a store (and without a "no scientist store" error).
+    """
+    home = _home(args)
+    _load_dotenv(home)
+    report = audit_report(home, getattr(args, "experiment", None))
+    print_audit_report(report, args.json)
+    return 0
 
 
 def dispatch(args: argparse.Namespace) -> int:

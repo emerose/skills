@@ -383,7 +383,11 @@ def staleness(exp_dir: Path, repo_root: Path | None = None) -> dict[str, Any]:
     """
     exp = Path(exp_dir)
     home = Path(repo_root) if repo_root is not None else exp.parent
-    sidecar = read_sidecar(exp)
+    # Staleness only needs the provenance ledger, so read it LENIENTLY: a provenance-only
+    # sidecar (no exp_id yet — the extractor stamps provenance before metadata is filled)
+    # is a valid ledger to check. (Callers that want schema validation call read_sidecar
+    # separately first, as `audit` does.)
+    sidecar = _load_raw(exp)
     prov = edges(sidecar)
     recorded_inputs = [e for e in prov if e.get("inputs")]
     if not recorded_inputs:

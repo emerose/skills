@@ -2,11 +2,11 @@
 
 Maintains the link between what the experiment *claims* and the data that justifies it, and walks the
 `raw → data → analysis → claims` DAG to find where grounding breaks. Three layers: per-artifact
-**provenance review**, **staleness/structural audit**, and (target) end-to-end **traceability**.
+**provenance review**, **staleness/structural audit**, and end-to-end **traceability** (`sci trace`).
 
-> review/audit/check/fingerprint run via `sci` (this skill's CLI); program rollup + drift via
-> `skills/scientist/scripts/rollup.py` and `pytest --check-drift` — these fold into `sci` in a later
-> stage, where `sci trace` ties them together.
+> review/audit/check/fingerprint/trace run via `sci` (this skill's CLI); program rollup + drift via
+> `skills/scientist/scripts/rollup.py` and `pytest --check-drift` (these fold into `sci` in a later
+> stage). `sci trace` ties the provenance DAG and the grounding report together — see "Trace" below.
 
 ## Provenance: the one ledger
 
@@ -74,13 +74,31 @@ EXPERIMENTS_ROOT=… rollup.py [--out DIR] [--no-drift]   # PROGRAM-WIDE rollup
 `kind=claim` card (statement embedded; outcome + strength as metadata), so `sci query` surfaces grounded
 evidence directly — and never surfaces a contradicted (`xfail`) or weak claim as fact without its status.
 
-## Trace — end-to-end (target capability)
+## Trace — end-to-end
 
-`sci trace <exp>` *(to be built in Stage B4)* walks the one provenance ledger to connect a claim back to
-the original measurements — claim → analysis artifact(s) → `data/` file(s) → `raw/` source(s) — and
-flags every break: an unsourced data value, a non-reproducing analysis, an ungrounded claim, a drifted
-input. It is the ROADMAP's per-experiment **traceability status**, buildable only once all phases share
-the one `provenance/` core. Until then, compose it from `audit` + `cellcov` + the grounding report.
+```bash
+sci trace <exp> [--json] [--claim <id>] [--report PATH]   # claim → analysis → data → raw, with breaks
+```
+
+`sci trace` walks the one provenance ledger to connect each terminal back to the original measurements —
+**claim → analysis artifact(s) → `data/` file(s) → `raw/` source(s)** — and flags every break. It is a
+**pure provenance walk: it needs NO libkit store** (reads only `experiment.yml` + an optional
+`grounding_report.json`) and never re-runs an analysis (reproduction is out of scope — this is a static
+DAG + drift walk).
+
+- **Terminals.** With a grounding report present (default search: `<exp>/analysis/grounding_report.json`,
+  then `<exp>/grounding_report.json`; override with `--report`), each *claim* is a terminal and its cited
+  `inputs` are its backing. `--claim <id>` traces just one claim (full nodeid or its trailing name). With
+  no report, the README + top `analysis/` artifacts are the terminals.
+- **Break categories** (each names the offending file):
+  - `missing` — a recorded input file is absent on disk;
+  - `drifted` — a recorded input's bytes differ from its recorded sha (reuses `staleness`);
+  - `unsourced` — a `data/` edge with no `raw/` input, or an `analysis/` edge with no `data/` input;
+  - `dangling` — a claim/edge references an artifact or data file that no edge produces and that isn't on disk;
+  - `ungrounded` — a claim whose inputs include no `data/` or `analysis/` artifact (a pure assertion).
+- **Output.** Human-readable per-terminal chain-to-raw + breaks + an overall **GROUNDED / BROKEN** verdict;
+  with `--json`, `{experiment, chains:[{terminal, kind, path_to_raw, breaks}], breaks, status}`. Exit 0 if
+  fully grounded, 1 if any break. (Lives in `provenance/trace.py` — provenance-level and store-free.)
 
 ## Changes land as reviewable PRs
 
