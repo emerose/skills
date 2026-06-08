@@ -38,6 +38,11 @@ for audit, with non-binary support (strength) and a git-based temporal history.
   `experiment.yml`; `k.analysis.<name>` = a derived table under `analysis/tables/`;
   `k.derive` = the experiment's `analysis/derive.py` (loaded collision-free); `dir(k)`
   lists tables (IPython tab-completion). DataFrames carry `.attrs["source"]`/`["sha256"]`.
+  `from experiments import program` exposes **cross-experimental reference facts** under
+  `$EXPERIMENTS_ROOT/program/` (entity registries, naming conventions, constants) the same
+  tracked way: `program.asos` / `program.conventions` (tables/yml), and `canonical_aso(name)`
+  resolves an entity alias (e.g. a CRO-prefixed `ASO3607_154`) to its canonical id via the
+  documented convention. `program/claims/` is the home for grounded *cross-cutting* claims.
 - **`analyst`** — the harness + pytest plugin. `load()/data()` (tracked loader), `doc()`
   (record a CRO report PDF/docx **or a .pptx TC deck**; the returned `DocRef.text()` /
   `DocRef.contains()` extract + quote-match it), `evidence(**kv)`, `uses(claim_id)` (compose on another

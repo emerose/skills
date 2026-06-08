@@ -25,9 +25,12 @@ from pathlib import Path
 
 import analyst
 
-__all__ = ["Study", "root", "resolve"]
+__all__ = ["Study", "Program", "program", "canonical_aso", "root", "resolve"]
 
 _STUDY_RE = re.compile(r"^k1_\d{6}$", re.IGNORECASE)
+# An ASO reference, possibly with a CRO client-id prefix: '[ASO][ _-]<client>[_-]<id>' or
+# '[ASO][ _-]<id>'. The trailing number is the canonical id; leading zeros are dropped.
+_ASO_RE = re.compile(r"(?:ASO)?\s*[ _-]*(?:\d+[_-])?0*(\d+)\s*$", re.IGNORECASE)
 
 
 def root() -> Path:
@@ -160,8 +163,75 @@ class Study:
         return f"<Study {self.id} @ {self.path.name}>"
 
 
-# Module-level attribute access (PEP 562): `from experiments import k1_000000`.
+class Program:
+    """Cross-experimental reference facts + the home for program-level claims:
+    ``$EXPERIMENTS_ROOT/program/``. The *contents* (entity registries, naming conventions,
+    program constants) are program-specific and live in the data repo; this accessor is
+    generic. Reads route through the tracked loader, so referencing a program fact from a
+    claim/derivation is captured as provenance like any other input.
+
+        from experiments import program
+        program.asos                      # program/asos.csv — the molecule registry
+        program.conventions               # program/conventions.yml — naming rules, constants
+        program.canonical("ASO3607_154")  # -> 154  (resolve an alias to the canonical id)
+
+    ``program/claims/test_*.py`` is the natural home for grounded cross-cutting claims
+    (e.g. a lead/backup assessment) — collected by the same pytest plugin as any claims dir."""
+
+    def __init__(self):
+        self.path = root() / "program"
+
+    @property
+    def conventions(self) -> dict:
+        """``program/conventions.yml`` as a dict (recorded as a provenance input)."""
+        import yaml
+        p = self.path / "conventions.yml"
+        analyst.record("reference", p, analyst._sha256(p.read_bytes()))
+        return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
+    def table(self, name: str):
+        """A reference table ``program/<name>[.csv]`` as a tracked DataFrame."""
+        p = self.path / (name if name.endswith(".csv") else f"{name}.csv")
+        return analyst.load(p, kind="reference")
+
+    @property
+    def asos(self):
+        """``program/asos.csv`` — the ASO molecule registry."""
+        return self.table("asos")
+
+    def canonical(self, name) -> int | None:
+        """Resolve an ASO alias to its canonical numeric Kicho id, applying the program's
+        documented naming convention (``conventions.yml: aso_naming``) — the CRO client-id
+        prefix to strip and any explicit overrides for the cases the rule misses. Falls back
+        to the bare "trailing ASO number" rule if no conventions file is present."""
+        s = str(name).strip()
+        try:
+            conv = (self.conventions or {}).get("aso_naming", {}) or {}
+        except (FileNotFoundError, OSError):
+            conv = {}
+        overrides = conv.get("overrides") or {}
+        if s in overrides:
+            return int(overrides[s])
+        m = _ASO_RE.search(s)
+        return int(m.group(1)) if m else None
+
+
+# Module-level attribute access (PEP 562): `from experiments import k1_000000`, `program`.
 _studies: dict[str, Study] = {}
+_program: Program | None = None
+
+
+def _get_program() -> Program:
+    global _program
+    if _program is None:
+        _program = Program()
+    return _program
+
+
+def canonical_aso(name) -> int | None:
+    """Module-level shortcut for ``program.canonical(name)`` — resolve an ASO alias
+    (``ASO-154``, ``ASO 154``, ``ASO3607_154``, …) to its canonical numeric id."""
+    return _get_program().canonical(name)
 
 
 def __getattr__(name: str):
@@ -169,6 +239,8 @@ def __getattr__(name: str):
         if name not in _studies:
             _studies[name] = Study(name)
         return _studies[name]
+    if name == "program":            # `from experiments import program` -> the Program accessor
+        return _get_program()
     raise AttributeError(f"module 'experiments' has no attribute '{name}'")
 
 
