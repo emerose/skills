@@ -25,15 +25,9 @@ from pathlib import Path
 
 import analyst
 
-__all__ = ["Study", "Program", "program", "canonical_aso", "root", "resolve"]
+__all__ = ["Study", "Program", "program", "canonical", "root", "resolve"]
 
 _STUDY_RE = re.compile(r"^k1_\d{6}$", re.IGNORECASE)
-# An ASO reference, ANCHORED so the whole label must be an ASO id form — a bare number,
-# 'ASO[ _-]NNN', or a CRO-client-prefixed 'ASO<client>[_-]NNN'. This is deliberately strict:
-# free-text that merely contains digits (e.g. the positive control 'UBE3A ASO1', a dose
-# label) does NOT match and resolves to None, rather than being silently mis-canonicalized.
-# The trailing number is the canonical id; an optional <client> prefix and leading zeros drop.
-_ASO_RE = re.compile(r"^\s*(?:ASO[ _-]?)?(?:\d+[_-])?0*(\d+)\s*$", re.IGNORECASE)
 
 
 def root() -> Path:
@@ -99,21 +93,21 @@ class Study:
         self.id = exp_id.upper().replace("_", "-")
         self.path = resolve(exp_id)
         self._cache: dict[str, tuple] = {}    # resolved path -> (df, sha)
-        self._aso_cols = None                 # declared ASO-id columns (lazy, from experiment.yml)
+        self._id_cols = None                  # declared id columns (lazy, from experiment.yml)
 
-    def _declared_aso_columns(self) -> list[str]:
-        """Column names this experiment declares as ASO-id fields (``aso_id_columns`` in
-        experiment.yml). Read once; not recorded as provenance (it's config, not data)."""
-        if self._aso_cols is None:
+    def _id_columns(self) -> list[str]:
+        """Column names this experiment declares as canonicalizable id fields (``id_columns``
+        in experiment.yml). Read once; not recorded as provenance (it's config, not data)."""
+        if self._id_cols is None:
             import yaml
             p = self.path / "experiment.yml"
             try:
                 m = yaml.safe_load(p.read_text(encoding="utf-8")) if p.is_file() else {}
             except Exception:
                 m = {}
-            cols = (m or {}).get("aso_id_columns") or []
-            self._aso_cols = [cols] if isinstance(cols, str) else list(cols)
-        return self._aso_cols
+            cols = (m or {}).get("id_columns") or []
+            self._id_cols = [cols] if isinstance(cols, str) else list(cols)
+        return self._id_cols
 
     # --- table discovery ---
     def _data_files(self) -> dict[str, Path]:
@@ -133,14 +127,14 @@ class Study:
             analyst.record(kind, path, sha)   # re-record for this capture
             return df
         df = analyst.load(path, kind=kind)    # reads bytes, sha-pins, records, sets .attrs
-        # Boundary canonicalization: for any DECLARED ASO-id column present, add a canonical
-        # `aso_id` sibling — in-memory only, so data/ on disk stays faithful. The canonical
-        # value derives from the program registry/convention (recorded as provenance via
-        # canonical_aso); the original column is preserved untouched. Non-ASO values (controls,
-        # blanks) resolve to None, not a wrong id.
-        for col in self._declared_aso_columns():
-            if col in df.columns and "aso_id" not in df.columns:
-                df["aso_id"] = canonical_aso(df[col])
+        # Boundary canonicalization: for any DECLARED id column present, add a `canonical_id`
+        # sibling — in memory only, so data/ on disk stays faithful. The canonical value
+        # derives from the program registry/convention (recorded as provenance via canonical());
+        # the original column is preserved untouched, and values that don't match the convention
+        # (controls, blanks, free text) resolve to None rather than a wrong id.
+        for col in self._id_columns():
+            if col in df.columns and "canonical_id" not in df.columns:
+                df["canonical_id"] = canonical(df[col])
         self._cache[key] = (df, df.attrs["sha256"])
         return df
 
@@ -197,12 +191,12 @@ class Program:
     claim/derivation is captured as provenance like any other input.
 
         from experiments import program
-        program.asos                      # program/asos.csv — the molecule registry
-        program.conventions               # program/conventions.yml — naming rules, constants
-        program.canonical("ASO3607_154")  # -> 154  (resolve an alias to the canonical id)
+        program.table("entities")          # a reference table (tracked, sha-pinned)
+        program.conventions                # program/conventions.yml — naming rules, constants
+        program.canonical("<prefixed-alias>")   # resolve an alias to its canonical id
 
-    ``program/claims/test_*.py`` is the natural home for grounded cross-cutting claims
-    (e.g. a lead/backup assessment) — collected by the same pytest plugin as any claims dir."""
+    ``program/claims/test_*.py`` is the natural home for grounded cross-cutting claims —
+    collected by the same pytest plugin as any claims dir."""
 
     def __init__(self):
         self.path = root() / "program"
@@ -224,26 +218,26 @@ class Program:
         p = self.path / (name if name.endswith(".csv") else f"{name}.csv")
         return analyst.load(p, kind="reference")
 
-    @property
-    def asos(self):
-        """``program/asos.csv`` — the ASO molecule registry."""
-        return self.table("asos")
-
     def canonical(self, name) -> int | None:
-        """Resolve an ASO alias to its canonical numeric Kicho id, applying the program's
-        documented naming convention (``conventions.yml: aso_naming``) — the CRO client-id
-        prefix to strip and any explicit overrides for the cases the rule misses. Falls back
-        to the bare "trailing ASO number" rule if no conventions file is present."""
+        """Resolve an entity alias to its canonical numeric id using the program's documented
+        convention (``conventions.yml: entity_resolution``) — a regex whose first capture group
+        is the canonical id (e.g. to strip a CRO client-id prefix), plus explicit ``overrides``
+        for the cases the rule misses. A value that doesn't match resolves to ``None`` (so a
+        control / free-text label isn't mis-mapped); returns ``None`` if no convention is set."""
         s = str(name).strip()
         try:
-            conv = (self.conventions or {}).get("aso_naming", {}) or {}
+            conv = (self.conventions or {}).get("entity_resolution", {}) or {}
         except (FileNotFoundError, OSError):
             conv = {}
         overrides = conv.get("overrides") or {}
         if s in overrides:
             return int(overrides[s])
-        m = _ASO_RE.search(s)
-        return int(m.group(1)) if m else None
+        pattern = conv.get("id_pattern")
+        if pattern:
+            m = re.match(pattern, s, re.IGNORECASE)
+            if m:
+                return int(m.group(1))
+        return None
 
 
 # Module-level attribute access (PEP 562): `from experiments import k1_000000`, `program`.
@@ -258,11 +252,11 @@ def _get_program() -> Program:
     return _program
 
 
-def canonical_aso(name):
-    """Resolve an ASO alias (``ASO-154``, ``ASO 154``, ``ASO3607_154``, …) to its canonical
-    numeric Kicho id via the program's documented convention. Scalar in -> ``int | None``;
-    a pandas Series in -> a Series of ``int | None`` (so it maps a whole column). Values that
-    aren't an ASO-id form (controls, blanks) resolve to ``None``."""
+def canonical(name):
+    """Resolve an entity alias to its canonical numeric id via the program's documented
+    convention (``program.canonical``). Scalar in -> ``int | None``; a pandas Series in -> a
+    Series of ``int | None`` (so it maps a whole column). Values that don't match the
+    convention (controls, blanks, free text) resolve to ``None``."""
     prog = _get_program()
     if hasattr(name, "map") and hasattr(name, "index"):   # pandas Series -> vectorized
         return name.map(prog.canonical)

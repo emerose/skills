@@ -40,17 +40,18 @@ for audit, with non-binary support (strength) and a git-based temporal history.
   lists tables (IPython tab-completion). DataFrames carry `.attrs["source"]`/`["sha256"]`.
   `from experiments import program` exposes **cross-experimental reference facts** under
   `$EXPERIMENTS_ROOT/program/` (entity registries, naming conventions, constants) the same
-  tracked way: `program.asos` / `program.conventions` (tables/yml), and `canonical_aso(name)`
-  resolves an entity alias (e.g. a CRO-prefixed `ASO3607_154`) to its canonical id via the
-  documented convention (strict — a non-id value like the control `UBE3A ASO1` → `None`, not
-  a wrong id). `program/claims/` is the home for grounded *cross-cutting* claims.
-- **Canonical ids at the read boundary (not in `data/`):** an experiment can declare its
-  ASO-id columns in `experiment.yml` (`aso_id_columns: ["ASO ID", "aso"]`); the accessor then
-  adds a canonical **`aso_id`** column *in memory* whenever it loads a table containing one of
-  those columns — the original column is preserved and `data/` on disk stays faithful (the
-  canonical value derives from the program registry, so it's an analysis-layer value, not a
-  raw cell). Claims/derivations read `aso_id` to join across experiments; messy/embedded cases
-  (a compound `SampleName`, a free-text treatment) instead apply `canonical_aso()` in `derive.py`.
+  tracked way: `program.table(name)` / `program.conventions`, and `canonical(name)` resolves
+  an entity alias (e.g. a CRO-client-prefixed label) to its canonical id via the convention
+  declared in `conventions.yml` (strict — a value that isn't an id form resolves to `None`,
+  not a wrong id). `program/claims/` is the home for grounded *cross-cutting* claims.
+- **Canonical ids at the read boundary (not in `data/`):** an experiment can declare its id
+  columns in `experiment.yml` (`id_columns: [...]`); the accessor then adds a canonical
+  **`canonical_id`** column *in memory* whenever it loads a table containing one of them — the
+  original column is preserved and `data/` on disk stays faithful (the canonical value derives
+  from the program convention, so it's an analysis-layer value, not a raw cell). Claims/
+  derivations read `canonical_id` to join across experiments; messy/embedded cases (a compound
+  key column, a free-text label) instead apply `canonical()` in `derive.py`. The resolution
+  rule itself (the regex + overrides) lives in the program's `conventions.yml`, not in the skill.
 - **`analyst`** — the harness + pytest plugin. `load()/data()` (tracked loader), `doc()`
   (record a CRO report PDF/docx **or a .pptx TC deck**; the returned `DocRef.text()` /
   `DocRef.contains()` extract + quote-match it), `evidence(**kv)`, `uses(claim_id)` (compose on another
