@@ -46,7 +46,7 @@ def pytest_addoption(parser):
                 help="directory for grounding_report.{md,json} (default: rootdir)")
     g.addoption("--check-drift", action="store_true", default=False,
                 help="flag claims whose captured inputs changed since the commit that "
-                     "last set their @strength marker (git-based; needs EXPERIMENTS_ROOT "
+                     "last set their @strength marker (git-based; needs SCIENTIST_HOME "
                      "to be the data repo). Off by default to keep runs fast + git-free.")
 
 
@@ -186,7 +186,7 @@ def _compute_drift(item, cap) -> dict:
     affirmed => stale (re-judge). Pure git; degrades gracefully when unavailable."""
     root = analyst._data_root()
     if root is None or not (Path(root) / ".git").exists():
-        return {"checked": False, "note": "EXPERIMENTS_ROOT is not a git repo"}
+        return {"checked": False, "note": "SCIENTIST_HOME is not a git repo"}
     loc = _strength_line(item)
     if loc is None:
         return {"checked": False, "note": "claim source unavailable"}
@@ -194,7 +194,7 @@ def _compute_drift(item, cap) -> dict:
     try:
         rel_file = Path(src_file).resolve().relative_to(Path(root).resolve())
     except ValueError:
-        return {"checked": False, "note": "claim file outside EXPERIMENTS_ROOT"}
+        return {"checked": False, "note": "claim file outside SCIENTIST_HOME"}
     blame = _git(root, "blame", "-L", f"{line},{line}", "--porcelain", "--", str(rel_file))
     if blame is None or blame.returncode != 0 or not blame.stdout:
         return {"checked": False, "note": "git blame failed"}

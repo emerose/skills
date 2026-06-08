@@ -6,10 +6,9 @@ This is a thin, guardrail layer over the importable modules (:mod:`_store`,
 ``experiment.yml`` access (read/validate/write the sidecar, record provenance,
 staleness, review inputs) routes through :mod:`provenance` — never re-implemented.
 
-Behavior is preserved EXACTLY from archivist this stage: env vars stay
-``ARCHIVIST_*`` / ``DEEPINFRA_API_KEY`` / ``DATALAB_API_KEY``, the store dir stays
-``.archivist/catalog.duckdb``, and the ``--home`` flag stays. ``sci store-init`` /
-the subcommand surface mirror ``arx`` one-for-one.
+Configuration: the data-tree root resolves from ``--home``, else ``$SCIENTIST_HOME``
+(fallback ``$ARCHIVIST_HOME``), else cwd; the store dir is ``.scientist/catalog.duckdb``.
+Third-party keys (``DEEPINFRA_API_KEY`` / ``DATALAB_API_KEY``) are untouched.
 
 ``register(subparsers)`` adds the store subcommands to an existing ``sci`` parser;
 ``dispatch(args)`` runs the selected one (sync wrapper over the async handler).
@@ -25,6 +24,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import provenance
+from provenance import env_first
 
 from . import _audit, _extract, _files, _generate, _intake, _meta, _pr
 from ._store import STORE_DIRNAME, ArchivistStore, EmbedderConfigError
@@ -73,7 +73,8 @@ def emit_json(obj: Any) -> None:
 
 
 def _home(args: argparse.Namespace) -> Path:
-    return Path(args.home or os.environ.get("ARCHIVIST_HOME") or Path.cwd()).resolve()
+    return Path(args.home or env_first("SCIENTIST_HOME", "ARCHIVIST_HOME")
+                or Path.cwd()).resolve()
 
 
 def _require_initialized(home: Path) -> None:
@@ -114,6 +115,10 @@ async def cmd_init(store: ArchivistStore, args: argparse.Namespace) -> None:
     print(f"initialized scientist store at {store.home / STORE_DIRNAME}")
     if add:
         print(f"  added to .gitignore: {', '.join(add)}")
+    legacy = store.home / ".archivist"
+    if legacy.is_dir():
+        print(f"  note: a legacy {legacy.name}/ store exists; it is unused now "
+              f"(rebuild the new store with `sci reindex`, then remove it).")
 
 
 async def cmd_index(store: ArchivistStore, args: argparse.Namespace) -> None:
@@ -823,11 +828,14 @@ async def cmd_review(store: ArchivistStore, args: argparse.Namespace) -> None:
                                          extra_inputs=args.input or [])
     provenance.write_sidecar(exp_dir, updated)
     entry = provenance.provenance_entry(updated, provenance.DEFAULT_ARTIFACT)
+    if entry is None:  # review() always writes this artifact entry; guard for robustness
+        die(f"review did not record a {provenance.DEFAULT_ARTIFACT} provenance entry")
     if args.json:
         emit_json({"exp_id": parsed["exp_id"], "provenance": entry, "missing": missing})
     else:
-        print(f"stamped {parsed['exp_id']}: README verified against {len(entry['inputs'])} "
-              f"input files (reviewed {entry['reviewed_at']})")
+        print(f"stamped {parsed['exp_id']}: README verified against "
+              f"{len(entry.get('inputs') or [])} "
+              f"input files (reviewed {entry.get('reviewed_at')})")
         for m in missing:
             print(f"  ! declared input not found on disk: {m}", file=sys.stderr)
 
@@ -896,11 +904,12 @@ def register(sub: argparse._SubParsersAction) -> None:
     """Register the store subcommands on an existing ``sci`` subparser action.
 
     Each store subcommand carries a ``--home`` flag (managed data folder; default
-    ``$ARCHIVIST_HOME`` or cwd) and a ``--json`` flag, mirroring ``arx`` exactly.
+    ``$SCIENTIST_HOME``, fallback ``$ARCHIVIST_HOME``, else cwd) and a ``--json`` flag.
     """
     def add(name: str, help_: str) -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=help_)
-        sp.add_argument("--home", help="managed data folder (default: $ARCHIVIST_HOME or cwd)")
+        sp.add_argument("--home",
+                        help="managed data folder (default: $SCIENTIST_HOME or cwd)")
         sp.add_argument("--json", action="store_true", help="machine-readable output")
         return sp
 

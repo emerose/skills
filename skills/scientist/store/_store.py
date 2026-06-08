@@ -17,15 +17,16 @@ Two libkit facts shape everything:
 
 from __future__ import annotations
 
-import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from provenance import env_first
+
 from . import _meta
 
-STORE_DIRNAME = ".archivist"
+STORE_DIRNAME = ".scientist"
 DB_FILENAME = "catalog.duckdb"
 
 
@@ -41,7 +42,7 @@ class ArchivistStore:
     """Async wrapper over a libkit ``Library`` scoped to one data folder.
 
     ``home`` is the managed scientific-data folder; the libkit store lives at
-    ``home/.archivist/catalog.duckdb`` (gitignored). All file paths in metadata
+    ``home/.scientist/catalog.duckdb`` (gitignored). All file paths in metadata
     are stored relative to ``home`` so the catalog is portable.
     """
 
@@ -58,24 +59,27 @@ class ArchivistStore:
         embedding: str | None = None,
         model: str | None = None,
     ) -> "ArchivistStore":
-        """Open (creating if needed) the libkit library under ``home/.archivist``.
+        """Open (creating if needed) the libkit library under ``home/.scientist``.
 
         ``embedding``/``model`` must stay consistent across runs — libkit fixes
         the store's vector dimension from the embedder at creation and refuses to
-        reopen with a different one. Defaults come from ``ARCHIVIST_EMBEDDING``
-        (default ``remote`` — DeepInfra, no local model download) and
-        ``ARCHIVIST_EMBED_MODEL`` (default ``qwen3_600m``, dim 1024).
+        reopen with a different one. Defaults come from ``SCIENTIST_EMBEDDING``
+        (fallback ``ARCHIVIST_EMBEDDING``; default ``remote`` — DeepInfra, no local
+        model download) and ``SCIENTIST_EMBED_MODEL`` (fallback
+        ``ARCHIVIST_EMBED_MODEL``; default ``qwen3_600m``, dim 1024).
         """
         from libkit import Library
         from libkit.errors import EmbedderMismatch
 
         store_dir = home / STORE_DIRNAME
         store_dir.mkdir(parents=True, exist_ok=True)
-        embedding = embedding or os.environ.get("ARCHIVIST_EMBEDDING", "remote")
-        model = model or os.environ.get("ARCHIVIST_EMBED_MODEL", "qwen3_600m")
-        allow_mismatch = os.environ.get("ARCHIVIST_ALLOW_EMBEDDER_MISMATCH", "").lower() in (
-            "1", "true", "yes",
-        )
+        embedding = embedding or env_first("SCIENTIST_EMBEDDING", "ARCHIVIST_EMBEDDING",
+                                           default="remote")
+        model = model or env_first("SCIENTIST_EMBED_MODEL", "ARCHIVIST_EMBED_MODEL",
+                                   default="qwen3_600m")
+        allow_mismatch = (env_first("SCIENTIST_ALLOW_EMBEDDER_MISMATCH",
+                                    "ARCHIVIST_ALLOW_EMBEDDER_MISMATCH", default="").lower()
+                          in ("1", "true", "yes"))
         try:
             lib = Library.open(
                 store_dir / DB_FILENAME,
@@ -89,8 +93,8 @@ class ArchivistStore:
                 "one configured now:\n"
                 f"  stored : {e.observed}\n"
                 f"  current: {e.expected}\n"
-                "Set ARCHIVIST_EMBEDDING / ARCHIVIST_EMBED_MODEL to match how the "
-                "library was created, or set ARCHIVIST_ALLOW_EMBEDDER_MISMATCH=1 to "
+                "Set SCIENTIST_EMBEDDING / SCIENTIST_EMBED_MODEL to match how the "
+                "library was created, or set SCIENTIST_ALLOW_EMBEDDER_MISMATCH=1 to "
                 "override (only if you know the two are vector-compatible)."
             ) from e
         return cls(home, lib)

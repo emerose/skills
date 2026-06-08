@@ -11,17 +11,18 @@ human/agent author of a README, not invented here.
 
 Real CRO/vendor names and vendor-specific study-id formats are program-specific
 and are **not** baked into this public repo. They live in a private vocabulary
-file in your data folder (`vocab.yml`, or `$ARCHIVIST_VOCAB`); `load_vocab()`
+file in your data folder (`vocab.yml`, or `$SCIENTIST_VOCAB`); `load_vocab()`
 merges it over the generic placeholder defaults below. See that loader.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
+
+from provenance import env_first
 
 # --------------------------------------------------------------------------- #
 # controlled vocabularies (canonical -> alias regex fragments, case-insensitive)
@@ -87,9 +88,10 @@ _EXP_ID_RE = re.compile(r"\bK1-[A-Za-z0-9]+\b")
 # private vocabulary (keeps real vendor names out of this public repo)
 # --------------------------------------------------------------------------- #
 def _vocab_path(home: str | Path | None) -> Path | None:
-    """Locate the private vocabulary file: ``$ARCHIVIST_VOCAB`` if set, else
-    ``vocab.{yml,yaml,json}`` in the data folder. None if there isn't one."""
-    env = os.environ.get("ARCHIVIST_VOCAB")
+    """Locate the private vocabulary file: ``$SCIENTIST_VOCAB`` (fallback
+    ``$ARCHIVIST_VOCAB``) if set, else ``vocab.{yml,yaml,json}`` in the data folder.
+    None if there isn't one."""
+    env = env_first("SCIENTIST_VOCAB", "ARCHIVIST_VOCAB")
     if env:
         p = Path(env).expanduser()
         return p if p.is_file() else None
@@ -108,7 +110,7 @@ def load_vocab(home: str | Path | None = None) -> tuple[dict[str, list[str]], li
     The public skills repo ships only generic placeholder vendors and vendor-neutral
     id shapes. Real CRO names and vendor-specific study-id formats are program-specific
     and live in a private file in the data folder (``vocab.yml``) or at
-    ``$ARCHIVIST_VOCAB``, never here. That file is merged OVER the defaults::
+    ``$SCIENTIST_VOCAB``, never here. That file is merged OVER the defaults::
 
         cros:
           "Real CRO Inc.": ["real cro", "\\\\bRCI\\\\b"]

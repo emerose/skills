@@ -19,7 +19,8 @@ from typing import Any, Iterator
 from . import _meta
 
 # Never index these — VCS, caches, virtualenvs, the store itself, OS cruft.
-IGNORE_DIR_NAMES = {".git", ".archivist", "__pycache__", "node_modules", ".ipynb_checkpoints"}
+IGNORE_DIR_NAMES = {".git", ".scientist", ".archivist", "__pycache__", "node_modules",
+                    ".ipynb_checkpoints"}
 IGNORE_DIR_SUFFIXES = (".dist-info", ".egg-info")
 IGNORE_FILE_NAMES = {".DS_Store", "Thumbs.db"}
 # Skip anything inside a virtualenv or site-packages, wherever it sits.

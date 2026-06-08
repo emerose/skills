@@ -41,11 +41,29 @@ provenance:
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 SIDECAR_NAME = "experiment.yml"
+
+
+# --------------------------------------------------------------------------- #
+# environment
+# --------------------------------------------------------------------------- #
+def env_first(*names: str, default: str | None = None) -> str | None:
+    """Return the value of the first *set* environment variable among ``names``.
+
+    Lets a primary ``SCIENTIST_*`` name take precedence while an older name
+    (``ARCHIVIST_*`` / ``EXPERIMENTS_ROOT``) is honored as a non-breaking fallback.
+    A variable counts as "set" if present in the environment (even if empty), so an
+    explicit empty value wins over a later fallback — matching normal env semantics.
+    """
+    for name in names:
+        if name in os.environ:
+            return os.environ[name]
+    return default
 
 # Lifecycle statuses; common synonyms normalise to these. Unknown values raise a
 # clear error (never silently accepted) listing the allowed set.
@@ -437,7 +455,7 @@ def staleness(exp_dir: Path, repo_root: Path | None = None) -> dict[str, Any]:
         return {"state": "up-to-date", "n_inputs": len(recorded)}
     # Surface the most-recent review date among the recorded edges so callers can
     # report "last reviewed <date>" without re-reading the sidecar.
-    reviewed = sorted(e.get("reviewed_at") for e in recorded_inputs if e.get("reviewed_at"))
+    reviewed = sorted(r for e in recorded_inputs if (r := e.get("reviewed_at")))
     return {"state": "stale", "changed": sorted(changed), "missing": sorted(missing),
             "added": added, "artifact_changed": artifact_changed,
             "reviewed_at": reviewed[-1] if reviewed else None}

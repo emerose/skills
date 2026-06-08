@@ -2,7 +2,7 @@
 """Program-wide grounding rollup — aggregate every experiment's claims into one
 "state of the evidence" report.
 
-Runs the claims of every ``<exp>/analysis/claims`` under ``$EXPERIMENTS_ROOT`` in a
+Runs the claims of every ``<exp>/analysis/claims`` under ``$SCIENTIST_HOME`` in a
 single pytest session (so cross-experiment ``cross()``/``uses()`` links resolve), then
 aggregates the combined grounding report into a program-level view:
 
@@ -14,7 +14,7 @@ aggregates the combined grounding report into a program-level view:
 Output: ``program_evidence.md`` + ``program_evidence.json`` in --out (default: cwd).
 
 Usage:
-    EXPERIMENTS_ROOT=… rollup.py [--out DIR] [--no-drift]
+    SCIENTIST_HOME=… rollup.py [--out DIR] [--no-drift]
 
 The rollup tool is generic (no experiment-specifics). It is the substrate for the
 semantic audit (checking the program's stated conclusions against these grounded claims).
@@ -167,9 +167,11 @@ def main():
     ap.add_argument("--no-drift", action="store_true", help="skip the git drift check (faster)")
     args = ap.parse_args()
 
-    root = os.environ.get("EXPERIMENTS_ROOT")
+    # SCIENTIST_HOME is the data-tree root; EXPERIMENTS_ROOT is the legacy fallback.
+    root = next((os.environ[k] for k in ("SCIENTIST_HOME", "EXPERIMENTS_ROOT")
+                 if k in os.environ), None)
     if not root:
-        raise SystemExit("set EXPERIMENTS_ROOT to the experiments data repo")
+        raise SystemExit("set SCIENTIST_HOME to the experiments data repo")
     root = Path(root)
     dirs = find_claims_dirs(root)
     if not dirs:

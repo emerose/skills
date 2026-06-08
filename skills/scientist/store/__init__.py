@@ -3,8 +3,8 @@ over a tree of scientific experiments (the former ``archivist``).
 
 libkit IS the store — there is no separate database. Each experiment, file, and
 curated-entity note is one libkit document; all fields live in the document's
-free-form ``metadata`` JSON. The store dir is ``<home>/.archivist/catalog.duckdb``
-(env vars / dir names preserved verbatim from archivist this stage).
+free-form ``metadata`` JSON. The store dir is ``<home>/.scientist/catalog.duckdb``
+(gitignored, rebuildable from a ``sci reindex``).
 
 Structured ``experiment.yml`` access (read/validate/write the sidecar, record
 provenance, compute staleness, resolve review inputs) is NOT duplicated here — it

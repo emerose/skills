@@ -35,6 +35,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from provenance import env_first
 from provenance import record_provenance as _record_provenance
 
 __all__ = [
@@ -412,7 +413,7 @@ def kind(category: str):
 # still captured and flagged. This guarantees the captured input set is complete: a
 # claim can't quietly read a CSV behind the harness's back. We capture-and-flag rather
 # than hard-fail, so the grounding report still renders — the reconcile lint surfaces
-# the bypass. Reads outside EXPERIMENTS_ROOT (pytest internals, the report file, temp files)
+# the bypass. Reads outside SCIENTIST_HOME (pytest internals, the report file, temp files)
 # are ignored so the guard never interferes with the test runner itself.
 _guard_installed = False
 _orig_open = builtins.open
@@ -420,7 +421,7 @@ _orig_read_csv = None
 
 
 def _data_root() -> Path | None:
-    r = os.environ.get("EXPERIMENTS_ROOT")
+    r = env_first("SCIENTIST_HOME", "EXPERIMENTS_ROOT")
     return Path(r).resolve() if r else None
 
 
@@ -534,8 +535,12 @@ class Derivation:
         return out
 
     def _rel(self, p: Path) -> str:
+        # Resolve BOTH sides (realpath) before relative_to: when the data-repo root is
+        # reached through a symlink (e.g. macOS /tmp -> /private/var), resolving only the
+        # path leaves the two prefixes mismatched and relative_to falls back to an
+        # absolute path. Resolving both keeps recorded input paths repo-relative.
         try:
-            return str(p.resolve().relative_to(self.exp.parent))
+            return str(p.resolve().relative_to(self.exp.parent.resolve()))
         except ValueError:
             return str(p)
 

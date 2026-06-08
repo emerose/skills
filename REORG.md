@@ -120,7 +120,8 @@ once all phases share `provenance/`.
       breaking quote-match) → KEPT pure-Python + TODO; needs upstream libkit `extract_text`. Notes:
       analysis entries now carry reviewed_at (intentional DAG unification); pre-existing
       Derivation._rel() emits absolute paths when EXPERIMENTS_ROOT is under a symlink (/tmp) — B5 fix.
-- [ ] Stage B4 — unify sci CLI + add `sci trace`
+- [x] Stage B4 — B4a (89cb17c): sci trace + staleness decoupled from store. B4b (e2f8ce1):
+      claims indexed into libkit (kind=claim) + honest query rendering. 91 pass/1 skip.
       MUST-FIX (from B2): merged `sci audit <exp>` runs data-extraction audit fine but its
       provenance-staleness pass opens the libkit store and prints "error: no scientist store"
       even though staleness is PURE (experiment.yml only). Decouple: single-exp staleness +

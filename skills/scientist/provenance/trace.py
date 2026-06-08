@@ -41,7 +41,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from . import _load_raw, edges, sha256_file, staleness
+from . import _load_raw, edges, staleness
 
 GROUNDING_REPORT_NAME = "grounding_report.json"
 
@@ -288,7 +288,6 @@ def render(result: dict[str, Any]) -> str:
         term = ch["terminal"]
         short = term.split("::")[-1] if ch["kind"] == "claim" else term
         chain = ch["path_to_raw"]
-        arrow = "  ".join(chain) if chain else "(no chain)"
         verdict = "GROUNDED" if not ch["breaks"] else "BROKEN"
         lines.append(f"  [{ch['kind']}] {short}: {verdict}")
         if chain:

@@ -6,7 +6,7 @@
     k.analysis.ec50_summary  # analysis/tables/ec50_summary.csv (a derived output)
 
 A ``k1_NNNNNN`` attribute resolves to the experiment folder ``K1-NNNNNN *`` under
-``$EXPERIMENTS_ROOT`` (the scientific-data checkout) and returns a :class:`Study`. Tidy tables
+``$SCIENTIST_HOME`` (the scientific-data checkout) and returns a :class:`Study`. Tidy tables
 under ``data/`` become attributes: ``NN_<assay>_<content>.csv`` -> drop the ``NN_``
 prefix and ``.csv`` -> ``k.<assay>_<content>``. Access is lazy, cached, and sha-pinned,
 and **every access is recorded as provenance** through ``analyst.record`` — so a claim
@@ -19,11 +19,11 @@ a notebook and inside a claim.
 """
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
 import analyst
+from provenance import env_first
 
 __all__ = ["Study", "root", "resolve"]
 
@@ -31,18 +31,18 @@ _STUDY_RE = re.compile(r"^k1_\d{6}$", re.IGNORECASE)
 
 
 def root() -> Path:
-    r = os.environ.get("EXPERIMENTS_ROOT")
+    r = env_first("SCIENTIST_HOME", "EXPERIMENTS_ROOT")
     if not r:
         raise RuntimeError(
-            "EXPERIMENTS_ROOT is not set — point it at the '05 - Scientific Data' checkout.")
+            "SCIENTIST_HOME is not set — point it at the '05 - Scientific Data' checkout.")
     p = Path(r)
     if not p.is_dir():
-        raise RuntimeError(f"EXPERIMENTS_ROOT does not exist: {p}")
+        raise RuntimeError(f"SCIENTIST_HOME does not exist: {p}")
     return p
 
 
 def resolve(exp_id: str) -> Path:
-    """``k1_000000`` -> the ``K1-000000 *`` folder under EXPERIMENTS_ROOT (glob on the id)."""
+    """``k1_000000`` -> the ``K1-000000 *`` folder under SCIENTIST_HOME (glob on the id)."""
     code = exp_id.upper().replace("_", "-")           # k1_000000 -> K1-000000
     matches = sorted(root().glob(f"{code} *")) + [p for p in [root() / code] if p.is_dir()]
     matches = [m for m in matches if m.is_dir()]
