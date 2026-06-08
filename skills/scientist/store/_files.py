@@ -16,7 +16,7 @@ import hashlib
 from pathlib import Path
 from typing import Any, Iterator
 
-import _meta
+from . import _meta
 
 # Never index these — VCS, caches, virtualenvs, the store itself, OS cruft.
 IGNORE_DIR_NAMES = {".git", ".archivist", "__pycache__", "node_modules", ".ipynb_checkpoints"}

@@ -21,8 +21,9 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-import _experiment
-import _files
+import provenance
+
+from . import _files
 
 _CRUFT = {".DS_Store", "Thumbs.db"}
 
@@ -34,7 +35,7 @@ def structural_flags(home: Path, exp_dir: Path, exp_rec: dict[str, Any],
 
     if not (exp_dir / "README.md").is_file():
         flags.append("missing:readme")
-    if not (exp_dir / _experiment.SIDECAR_NAME).is_file():
+    if not (exp_dir / provenance.SIDECAR_NAME).is_file():
         flags.append("missing:experiment-yml")
 
     # file records whose on-disk file is gone
@@ -63,7 +64,7 @@ def structural_flags(home: Path, exp_dir: Path, exp_rec: dict[str, Any],
     # layout: stray files at the experiment root (only README.* + experiment.yml belong)
     for child in sorted(exp_dir.iterdir()):
         if child.is_file() and child.name not in _CRUFT \
-                and child.name != _experiment.SIDECAR_NAME \
+                and child.name != provenance.SIDECAR_NAME \
                 and not child.name.lower().startswith("readme") \
                 and not child.name.startswith("."):
             flags.append(f"layout:root-file:{child.name}")

@@ -1,19 +1,42 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
-# dependencies = ["openpyxl>=3.1", "pyyaml>=6.0", "xlrd>=2.0", "python-docx>=1.1", "pdfplumber>=0.11"]
+# requires-python = ">=3.12"
+# dependencies = [
+#   "openpyxl>=3.1",
+#   "pyyaml>=6.0",
+#   "xlrd>=2.0",
+#   "python-docx>=1.1",
+#   "pdfplumber>=0.11",
+#   "libkit>=0.2.3",
+#   "platformdirs>=4.0",
+# ]
 # ///
-"""scientist CLI — zero-install entry point for the extraction stage.
+"""scientist CLI — zero-install entry point for the whole skill.
 
-Runnable directly with uv (PEP 723 deps inline), no virtualenv:
+Runnable directly with uv (PEP 723 deps inline), no virtualenv. Two families of
+subcommands share one tool:
+
+Extraction (operates on an experiment folder's data/ ↔ raw/):
 
     uv run skills/scientist/scripts/sci.py extract "<exp dir>"            # dry run → data/_preview/
     uv run skills/scientist/scripts/sci.py extract "<exp dir>" --commit   # write data/*.csv + provenance
-    uv run skills/scientist/scripts/sci.py audit   "<exp dir>"            # re-extract, check data/ vs raw/
     uv run skills/scientist/scripts/sci.py cellcov "<exp dir>"            # full cell-coverage of legacy CSVs
 
+Store (a libkit-backed index/search/catalog over a tree of experiments):
+
+    uv run skills/scientist/scripts/sci.py init --home "<data folder>"
+    uv run skills/scientist/scripts/sci.py reindex --home "<data folder>"
+    uv run skills/scientist/scripts/sci.py query "lumbar knockdown" --home "<data folder>"
+    uv run skills/scientist/scripts/sci.py review K1-000000 --home "<data folder>"
+
+`audit` runs BOTH passes on one experiment: the extraction re-extraction check of
+data/ ↔ raw/ AND provenance staleness of the experiment.yml ledger. With no
+experiment, it runs the store staleness pass across the whole data folder. Use
+`sci check` for the structural-integrity report.
+
 `extract`'s recipe lives at <exp>/data/extract.py and defines build(x); see the
-extraction package and references/extract.md.
+extraction package and references/extract.md. Store env vars / dirs are unchanged
+from archivist: $ARCHIVIST_HOME / $ARCHIVIST_VOCAB / .archivist/catalog.duckdb.
 """
 from __future__ import annotations
 
@@ -22,16 +45,19 @@ import sys
 from pathlib import Path
 
 # Put skills/scientist (the package root) onto sys.path so the flat top-level
-# packages (provenance, labfiles, extraction) import.
+# packages (provenance, labfiles, extraction) and the store subpackage import.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import extraction as EXT  # noqa: E402
+from store import cli as STORE_CLI  # noqa: E402
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="sci", description="scientist extraction CLI")
+    ap = argparse.ArgumentParser(prog="sci", description="scientist CLI: extraction + store",
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    # ---- extraction subcommands ----
     p_ex = sub.add_parser("extract", help="(re)generate data/*.csv from raw/ via the recipe")
     p_ex.add_argument("exp", help="experiment folder (path)")
     p_ex.add_argument("--script", help="extract.py to run (default <exp>/data/extract.py)")
@@ -39,26 +65,54 @@ def main() -> int:
                       help="write data/*.csv + experiment.yml provenance")
     p_ex.add_argument("--preview", help="dry-run output dir (default <exp>/data/_preview)")
 
-    p_au = sub.add_parser("audit", help="re-extract and check data/ against raw/")
-    p_au.add_argument("exp", help="experiment folder (path)")
-    p_au.add_argument("--script", help="extract.py to run (default <exp>/data/extract.py)")
-
     p_cc = sub.add_parser("cellcov", help="full cell-coverage check of legacy data/ CSVs")
     p_cc.add_argument("exp", help="experiment folder (path)")
     p_cc.add_argument("--script", help="extract.py to run (default <exp>/data/extract.py)")
     p_cc.add_argument("--examples", type=int, default=8,
                       help="show up to N example uncovered values per file (0 = none)")
 
+    # ---- store subcommands (init/index/reindex/list/show/search/query/file/read/
+    #      entity/new/intake/meta/review/fingerprint/catalog/check/audit/pr) ----
+    STORE_CLI.register(sub)
+
+    # `audit` is registered by the store as a provenance-staleness command; extend it
+    # with the extraction re-extraction flag so `sci audit <exp>` runs BOTH passes.
+    audit_p = sub.choices["audit"]
+    audit_p.add_argument("--script",
+                         help="extract.py for the data/ re-extraction pass (default <exp>/data/extract.py)")
+
     args = ap.parse_args()
 
     if args.cmd == "extract":
         EXT.extract(args.exp, script=args.script, commit=args.commit, preview=args.preview)
         return 0
-    if args.cmd == "audit":
-        return EXT.audit(args.exp, args.script)
     if args.cmd == "cellcov":
         return EXT.cellcov(args.exp, args.script, args.examples)
-    return 2
+    if args.cmd == "audit":
+        return _audit_both(args)
+    return STORE_CLI.dispatch(args)
+
+
+def _audit_both(args: argparse.Namespace) -> int:
+    """`sci audit`: run the data/-edge re-extraction audit (extraction) AND the
+    provenance-staleness audit (store). The extraction pass needs a single experiment
+    folder with a recipe; the store pass runs over one experiment or the whole folder.
+    """
+    rc = 0
+    exp = getattr(args, "experiment", None)
+    if exp:
+        exp_path = Path(exp)
+        recipe = Path(args.script) if args.script else (exp_path / "data" / "extract.py")
+        if exp_path.is_dir() and recipe.is_file():
+            print("== data/ re-extraction audit ==")
+            rc = EXT.audit(exp, args.script) or 0
+        else:
+            print("== data/ re-extraction audit ==")
+            print(f"(skipped: no recipe at {recipe} — provenance pass only)")
+        print("\n== provenance staleness audit ==")
+    # The store staleness pass (handles one exp_id/path or the whole --home folder).
+    store_rc = STORE_CLI.dispatch(args)
+    return rc or store_rc
 
 
 if __name__ == "__main__":

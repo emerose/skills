@@ -6,7 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "scientist"
 version = "0.1.0"
 description = "scientist — consolidated scientific-data skill: shared provenance core + lab-file readers + the raw→data extractor"
-requires-python = ">=3.11"
+# libkit (the store layer) requires >=3.12, matching scripts/sci.py's PEP723 header.
+requires-python = ">=3.12"
 # Deterministic format readers (xlsx/xls, GraphPad Prism, Word/PDF report tables)
 # plus PyYAML for the experiment.yml sidecar. Pinned loosely; readers are pure
 # functions of the source bytes given a fixed library set.
@@ -16,8 +17,11 @@ dependencies = [
     "xlrd>=2.0",
     "python-docx>=1.1",
     "pdfplumber>=0.11",
+    # store layer (libkit-backed index/search/catalog)
+    "libkit>=0.2.3",
+    "platformdirs>=4.0",
 ]
 
 [tool.setuptools]
-# Flat top-level packages. experiments / analyst / store land in later stages.
-packages = ["provenance", "labfiles", "extraction"]
+# Flat top-level packages. analyst lands in a later stage.
+packages = ["provenance", "labfiles", "extraction", "store"]

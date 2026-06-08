@@ -1,6 +1,6 @@
 """Unit tests for _files: walking + classification + tabular schema (stdlib only)."""
 
-import _files
+from store import _files
 
 
 def _make_experiment(root):

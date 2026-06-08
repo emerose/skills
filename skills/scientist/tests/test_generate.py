@@ -1,7 +1,7 @@
 """Unit tests for _generate: the Files-on-disk view (the only thing archivist
 renders into prose-free output now)."""
 
-import _generate
+from store import _generate
 
 FILES = [
     {"path": "K1-1/README.md", "role": "readme", "file_type": "md"},

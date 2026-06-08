@@ -4,9 +4,9 @@ Maintains the link between what the experiment *claims* and the data that justif
 `raw → data → analysis → claims` DAG to find where grounding breaks. Three layers: per-artifact
 **provenance review**, **staleness/structural audit**, and (target) end-to-end **traceability**.
 
-> Stage-A note: review/audit/check/fingerprint run via `skills/archivist/scripts/arx.py`; program
-> rollup + drift via `skills/analyst/scripts/rollup.py` and `pytest --check-drift`. These consolidate
-> into the `sci` CLI in the target, where `sci trace` ties them together. Workflow below is unchanged.
+> review/audit/check/fingerprint run via `sci` (this skill's CLI); program rollup + drift via
+> `skills/analyst/scripts/rollup.py` and `pytest --check-drift` — these fold into `sci` in a later
+> stage, where `sci trace` ties them together.
 
 ## Provenance: the one ledger
 
@@ -18,9 +18,9 @@ drift is inspectable file by file.
 ## README review & staleness (the prose ↔ data link)
 
 ```bash
-arx fingerprint K1-000000 [--manifest]   # the input files (+ current sha256) review would record now
-arx review K1-000000 [--input <repo-rel path>]   # stamp provenance after verifying README vs data
-arx audit  [K1-000000] [--json]          # staleness vs recorded provenance + a semantic worklist
+sci fingerprint K1-000000   # the input files (+ current sha256) review would record now
+sci review K1-000000 [--input <repo-rel path>]   # stamp provenance after verifying README vs data
+sci audit  [K1-000000] [--json]          # staleness vs recorded provenance + a semantic worklist
 ```
 
 - **`review`** — run after you've verified the README still matches the data. Records, per artifact
@@ -33,12 +33,12 @@ arx audit  [K1-000000] [--json]          # staleness vs recorded provenance + a 
   edited since review), `no-provenance` (never reviewed), or `no-/invalid-experiment-yml`. `--json` adds
   a per-experiment `source_files` worklist for the **semantic pass**: fan out an agent per experiment to
   read the data and verify the prose — the authoritative content check (see
-  [skills/archivist/references/auditing.md](../../archivist/references/auditing.md)).
+  [auditing.md](auditing.md)).
 
 ## Structural check
 
 ```bash
-arx check [K1-000000] [--json]   # structural integrity; never mutates
+sci check [K1-000000] [--json]   # structural integrity; never mutates
 ```
 Flags missing `README.md`/`experiment.yml`, on-disk files not indexed, layout drift, thin metadata,
 and **redundant archives** (a zip whose members are already extracted in-folder — the `raw.zip` case).
@@ -48,7 +48,7 @@ Emits a worklist.
 
 The `data/` edges have their own re-extraction audit (determinism, grounding, recipe-sha, data/↔recipe,
 reconciliation, naming) plus the full cell-coverage check — see [extract.md](extract.md) (`audit.py`,
-`cellcov.py`). Because the data edges live in the same `provenance` list, stock `arx audit` checks them too.
+`cellcov.py`). Because the data edges live in the same `provenance` list, stock `sci audit` checks them too.
 
 ## Claims: grounding report, rollup, drift
 
@@ -71,7 +71,7 @@ EXPERIMENTS_ROOT=… rollup.py [--out DIR] [--no-drift]   # PROGRAM-WIDE rollup
   `git blame` + the commit message is the "as-of" rationale. No YAML.
 
 **Claims feed the store.** The grounding report is the source for indexing each claim into libkit as a
-`kind=claim` card (statement embedded; outcome + strength as metadata), so `arx query` surfaces grounded
+`kind=claim` card (statement embedded; outcome + strength as metadata), so `sci query` surfaces grounded
 evidence directly — and never surfaces a contradicted (`xfail`) or weak claim as fact without its status.
 
 ## Trace — end-to-end (target capability)
@@ -85,7 +85,7 @@ the one `provenance/` core. Until then, compose it from `audit` + `cellcov` + th
 ## Changes land as reviewable PRs
 
 ```bash
-arx pr "title" <paths…> [--dry-run]   # branch, commit, push, open a PR for you to review & merge
+sci pr "title" <paths…> [--dry-run]   # branch, commit, push, open a PR for you to review & merge
 ```
 The data folder is a git repo with a private GitHub remote; scientist never writes silently to `main`.
 The libkit store (`.archivist/`) is gitignored. `--dry-run` shows the git/gh steps first.
@@ -93,6 +93,6 @@ The libkit store (`.archivist/`) is gitignored. `--dry-run` shows the git/gh ste
 ## Maintaining (for agents working ON scientist)
 
 For the periodic correctness/hygiene procedure — structural `check`, deps-staleness `audit`, and the
-parallel-agent semantic pass — see [skills/archivist/references/auditing.md](../../archivist/references/auditing.md).
+parallel-agent semantic pass — see [auditing.md](auditing.md).
 Keep stateful stores healthy (repo-root AGENTS.md): a fast deterministic pass for structure + a
 parallel-agent pass that actually reads the data, both emitting a structured worklist.

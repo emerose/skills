@@ -214,3 +214,86 @@ def test_in_folder_inputs_excludes_readme_and_sidecar(tmp_path):
     (exp / "data" / "01_a.csv").write_bytes(b"c\n")
     names = {p.name for p in P.in_folder_inputs(exp)}
     assert names == {"a.xlsx", "01_a.csv"}
+
+
+# --------------------------------------------------------------------------- #
+# README review (artifact provenance with declared external inputs) — the layer
+# the store's `review`/`fingerprint`/`audit` commands build on. Ported from the
+# former archivist _experiment tests, rewritten against the shared core API.
+# --------------------------------------------------------------------------- #
+def _review_exp(tmp_path):
+    """An experiment folder under a repo root (tmp_path). Returns (home, exp_dir)."""
+    d = tmp_path / "K1-1 - Exp"
+    (d / "data").mkdir(parents=True)
+    (d / "raw").mkdir()
+    (d / "data" / "kd.csv").write_text("a,b\n1,2\n")
+    (d / "raw" / "plate.eds").write_bytes(b"\x00\x01raw")
+    (d / "README.md").write_text("# prose\n")
+    (d / "experiment.yml").write_text("exp_id: K1-1\n")
+    return tmp_path, d
+
+
+def test_in_folder_data_files_repo_relative_excludes_readme_and_sidecar(tmp_path):
+    home, d = _review_exp(tmp_path)
+    (d / "README.pdf").write_bytes(b"%PDF render")     # a render, must be excluded too
+    paths = P.in_folder_data_files(home, d)
+    assert paths == ["K1-1 - Exp/data/kd.csv", "K1-1 - Exp/raw/plate.eds"]  # repo-rel, sorted
+    assert not any("README" in p or "experiment.yml" in p for p in paths)
+
+
+def test_review_records_explicit_inputs_and_artifact_sha(tmp_path):
+    home, d = _review_exp(tmp_path)
+    sidecar, missing = P.review(home, d, {"exp_id": "K1-1"}, today="2026-06-04")
+    assert missing == []
+    entry = sidecar["provenance"][0]
+    assert entry["artifact"] == "README.md"
+    assert entry["reviewed_at"] == "2026-06-04"
+    assert {i["path"] for i in entry["inputs"]} == {"K1-1 - Exp/data/kd.csv", "K1-1 - Exp/raw/plate.eds"}
+    assert all(len(i["sha256"]) == 64 for i in entry["inputs"])    # real hashes
+    assert len(entry["artifact_sha256"]) == 64
+
+
+def test_review_includes_and_preserves_external_inputs(tmp_path):
+    home, d = _review_exp(tmp_path)
+    ext = home / "Shared" / "deck.pptx"; ext.parent.mkdir(); ext.write_bytes(b"slides")
+    sidecar, missing = P.review(home, d, {"exp_id": "K1-1"}, today="2026-06-04",
+                                extra_inputs=["Shared/deck.pptx"])
+    assert "Shared/deck.pptx" in {i["path"] for i in sidecar["provenance"][0]["inputs"]}
+    # a re-review (no extra_inputs given) preserves the external one
+    sidecar2, _ = P.review(home, d, sidecar, today="2026-06-05")
+    assert "Shared/deck.pptx" in {i["path"] for i in sidecar2["provenance"][0]["inputs"]}
+
+
+def test_review_reports_missing_declared_input(tmp_path):
+    home, d = _review_exp(tmp_path)
+    _, missing = P.review(home, d, {"exp_id": "K1-1"}, today="2026-06-04",
+                          extra_inputs=["Shared/gone.pptx"])
+    assert missing == ["Shared/gone.pptx"]
+
+
+def test_resolve_inputs(tmp_path):
+    home, d = _review_exp(tmp_path)
+    inputs, missing = P.resolve_inputs(home, d, ["Shared/gone.pptx"])
+    assert [i["path"] for i in inputs] == ["K1-1 - Exp/data/kd.csv", "K1-1 - Exp/raw/plate.eds"]
+    assert missing == ["Shared/gone.pptx"]
+
+
+def test_review_staleness_reports_reviewed_at(tmp_path):
+    home, d = _review_exp(tmp_path)
+    sidecar, _ = P.review(home, d, {"exp_id": "K1-1"}, today="2026-06-04")
+    P.write_sidecar(d, sidecar)
+    assert P.staleness(d, repo_root=home)["state"] == "up-to-date"
+    (d / "data" / "kd.csv").write_text("a,b\n9,9\n")    # an input changed
+    st = P.staleness(d, repo_root=home)
+    assert st["state"] == "stale"
+    assert st["changed"] == ["K1-1 - Exp/data/kd.csv"]
+    assert st["reviewed_at"] == "2026-06-04"            # surfaced for "last reviewed"
+
+
+def test_review_staleness_artifact_edit(tmp_path):
+    home, d = _review_exp(tmp_path)
+    sidecar, _ = P.review(home, d, {"exp_id": "K1-1"}, today="2026-06-04")
+    P.write_sidecar(d, sidecar)
+    (d / "README.md").write_text("# edited prose\n")    # the artifact itself changed
+    st = P.staleness(d, repo_root=home)
+    assert st["state"] == "stale" and st["artifact_changed"] is True

@@ -1,6 +1,6 @@
 """Unit tests for the pure model helpers in _meta (no libkit, no network)."""
 
-import _meta
+from store import _meta
 
 
 def test_parse_experiment_dirname_basic():

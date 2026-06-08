@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import _meta
+from . import _meta
 
 STORE_DIRNAME = ".archivist"
 DB_FILENAME = "catalog.duckdb"

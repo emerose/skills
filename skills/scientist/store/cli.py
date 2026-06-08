@@ -1,24 +1,18 @@
-#!/usr/bin/env -S uv run --quiet --script
-# /// script
-# requires-python = ">=3.12"
-# dependencies = ["libkit>=0.2.3", "openpyxl>=3.1", "platformdirs>=4.0", "pyyaml>=6.0"]
-# ///
-"""arx - a libkit-backed archivist for a tree of scientific experiments.
+"""Command handlers + argparse wiring for the store subcommands (the former ``arx``
+CLI), folded into the ``sci`` entry point.
 
-The managed folder (default: $ARCHIVIST_HOME or the current directory) holds one
-subfolder per experiment, named ``K1-YYMMXX - Short Name``, each with the layout
-the folder's own LAYOUT.md defines (raw/ data/ protocol/ reports/ analysis/ +
-README.md). archivist keeps a libkit store under ``<home>/.archivist/`` (the
-single source of truth) that indexes every file for full-text + semantic search
-and tracks experiment-level metadata, entities, and cross-references.
+This is a thin, guardrail layer over the importable modules (:mod:`_store`,
+:mod:`_meta`, :mod:`_files`, …) and the shared :mod:`provenance` core. All
+``experiment.yml`` access (read/validate/write the sidecar, record provenance,
+staleness, review inputs) routes through :mod:`provenance` — never re-implemented.
 
-libkit IS the store: there is no separate archivist database. Each experiment,
-file, and curated-entity note is one libkit document; all archivist fields live
-in the document's free-form ``metadata`` JSON.
+Behavior is preserved EXACTLY from archivist this stage: env vars stay
+``ARCHIVIST_*`` / ``DEEPINFRA_API_KEY`` / ``DATALAB_API_KEY``, the store dir stays
+``.archivist/catalog.duckdb``, and the ``--home`` flag stays. ``sci store-init`` /
+the subcommand surface mirror ``arx`` one-for-one.
 
-This CLI is a thin, guardrail layer over the importable modules (`_store`,
-`_meta`, `_files`); novel one-off operations can import those directly. Run
-`arx <command> --help` for details.
+``register(subparsers)`` adds the store subcommands to an existing ``sci`` parser;
+``dispatch(args)`` runs the selected one (sync wrapper over the async handler).
 """
 
 from __future__ import annotations
@@ -30,21 +24,21 @@ import sys
 from pathlib import Path
 from typing import Any, NoReturn
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+import provenance
 
-import _audit  # noqa: E402
-import _experiment  # noqa: E402
-import _extract  # noqa: E402
-import _files  # noqa: E402
-import _generate  # noqa: E402
-import _intake  # noqa: E402
-import _meta  # noqa: E402
-import _pr  # noqa: E402
-from _store import ArchivistStore, EmbedderConfigError, STORE_DIRNAME  # noqa: E402
+from . import _audit, _extract, _files, _generate, _intake, _meta, _pr
+from ._store import STORE_DIRNAME, ArchivistStore, EmbedderConfigError
 
 # Narrative files larger than this are catalogued as descriptors rather than
 # parsed+embedded whole (avoids choking on the multi-hundred-MB raw text dumps).
 MAX_EMBED_BYTES = 25 * 1024 * 1024
+
+# The set of subcommands this module owns (so sci can route them here).
+STORE_COMMANDS = (
+    "init", "index", "reindex", "list", "show", "search", "query", "file",
+    "read", "entity", "new", "intake", "meta", "review", "fingerprint",
+    "catalog", "check", "audit", "pr",
+)
 
 
 def _load_dotenv(home: Path) -> None:
@@ -84,7 +78,7 @@ def _home(args: argparse.Namespace) -> Path:
 
 def _require_initialized(home: Path) -> None:
     if not (home / STORE_DIRNAME / "catalog.duckdb").exists():
-        die(f"no archivist store under {home} — run `arx init --home {home}` first")
+        die(f"no scientist store under {home} — run `sci init --home {home}` first")
 
 
 def _find_experiment_dir(home: Path, ident: str) -> tuple[Path, dict[str, Any]] | None:
@@ -117,7 +111,7 @@ async def cmd_init(store: ArchivistStore, args: argparse.Namespace) -> None:
             if existing and existing[-1].strip():
                 fh.write("\n")
             fh.write("\n".join(add) + "\n")
-    print(f"initialized archivist store at {store.home / STORE_DIRNAME}")
+    print(f"initialized scientist store at {store.home / STORE_DIRNAME}")
     if add:
         print(f"  added to .gitignore: {', '.join(add)}")
 
@@ -214,14 +208,15 @@ async def _index_experiment(store: ArchivistStore, exp_dir: Path,
     # Structured metadata comes ONLY from the schema'd experiment.yml sidecar — never
     # scraped from README prose. A missing/invalid sidecar leaves metadata minimal
     # (and `check`/`audit` flag it); a bad sidecar surfaces a clear error, not silence.
-    sidecar = exp_dir / _experiment.SIDECAR_NAME
+    sidecar = exp_dir / provenance.SIDECAR_NAME
     if sidecar.is_file():
         try:
-            meta = _experiment.read_sidecar(sidecar)
+            meta = provenance.read_sidecar(exp_dir)
             meta.pop("exp_id", None)        # folder is authoritative for the id
+            meta.pop("provenance", None)    # the ledger isn't experiment-card metadata
             exp_rec.update(meta)
             exp_rec.setdefault("name", parsed["name"])
-        except _experiment.SidecarError as e:
+        except provenance.SidecarError as e:
             print(f"  ! {parsed['exp_id']}: {e}", file=sys.stderr)
             exp_rec["metadata_error"] = str(e)
     await store.upsert_experiment(exp_rec)
@@ -260,7 +255,7 @@ async def cmd_list(store: ArchivistStore, args: argparse.Namespace) -> None:
 async def cmd_show(store: ArchivistStore, args: argparse.Namespace) -> None:
     rec = await store.get_experiment(args.experiment)
     if rec is None:
-        die(f"no experiment {args.experiment!r} (index it with `arx index`)")
+        die(f"no experiment {args.experiment!r} (index it with `sci index`)")
     files = await store.files(args.experiment)
     if args.json:
         emit_json({"experiment": rec, "files": files})
@@ -407,12 +402,12 @@ async def cmd_new(store: ArchivistStore, args: argparse.Namespace) -> None:
         (folder / sub).mkdir(parents=True, exist_ok=True)
     (folder / "README.md").write_text(
         _meta.readme_template({"exp_id": args.exp_id, "name": args.name}), encoding="utf-8")
-    meta = _experiment.validate({
+    meta = provenance.validate({
         "exp_id": args.exp_id, "name": args.name, "status": "planned",
         "cro": args.cro, "model": args.model,
         "cro_study_ids": [args.study_id] if args.study_id else [],
     })
-    (folder / _experiment.SIDECAR_NAME).write_text(_experiment.dump_sidecar(meta), encoding="utf-8")
+    provenance.write_sidecar(folder, meta)
     await _index_experiment(store, folder.resolve(), parsed, verbose=not args.json)
     if args.json:
         emit_json({"created": store.relpath(folder), "exp_id": args.exp_id})
@@ -437,7 +432,7 @@ async def cmd_intake(store: ArchivistStore, args: argparse.Namespace) -> None:
 
     found = _find_experiment_dir(store.home, args.experiment)
     if not found:
-        die(f"no experiment matching {args.experiment!r} — scaffold it first with `arx new`")
+        die(f"no experiment matching {args.experiment!r} — scaffold it first with `sci new`")
     exp_dir, parsed = found
     plan = _intake.plan_intake(sources, exp_dir)
 
@@ -527,25 +522,30 @@ async def cmd_check(store: ArchivistStore, args: argparse.Namespace) -> None:
 
 
 async def cmd_audit(store: ArchivistStore, args: argparse.Namespace) -> None:
-    """Provenance staleness (experiment.yml fingerprint vs the evidence on disk) +
-    a worklist for the parallel-agent semantic pass."""
+    """Provenance staleness (experiment.yml provenance vs the evidence on disk) +
+    a worklist for the parallel-agent semantic pass.
+
+    Checks the WHOLE provenance ledger (data/ extract edges + analysis/ derive edges
+    + the README review edge) via the shared core — re-hashing every recorded input
+    and artifact and reporting per-file drift.
+    """
     report = []
     async for exp_dir, exp_id in _experiment_dirs(store, args.experiment):
-        sidecar_path = exp_dir / _experiment.SIDECAR_NAME
+        sidecar_path = exp_dir / provenance.SIDECAR_NAME
         files = await store.files(exp_id)
         entry: dict[str, Any] = {"exp_id": exp_id}
         if not sidecar_path.is_file():
             entry["staleness"] = "no-experiment-yml"
         else:
             try:
-                sidecar = _experiment.read_sidecar(sidecar_path)
-                st = _experiment.staleness(store.home, exp_dir, sidecar)
+                provenance.read_sidecar(exp_dir)  # validate (raises on a bad sidecar)
+                st = provenance.staleness(exp_dir, repo_root=store.home)
                 entry["staleness"] = st["state"]
                 if st["state"] == "stale":
                     for k in ("changed", "missing", "added", "artifact_changed", "reviewed_at"):
                         if st.get(k):
                             entry[k] = st[k]
-            except _experiment.SidecarError as e:
+            except provenance.SidecarError as e:
                 entry["staleness"] = "invalid-experiment-yml"
                 entry["error"] = str(e)
         # source files an agent should read to verify the prose semantically
@@ -561,7 +561,7 @@ async def cmd_audit(store: ArchivistStore, args: argparse.Namespace) -> None:
             print(f"    {e['error']}")
         if e.get("staleness") == "stale":
             if e.get("artifact_changed"):
-                print("    README edited since last review")
+                print("    an artifact (e.g. README) edited since last review")
             for p in e.get("changed", []):
                 print(f"    changed: {p}")
             for p in e.get("missing", []):
@@ -569,7 +569,7 @@ async def cmd_audit(store: ArchivistStore, args: argparse.Namespace) -> None:
             for p in e.get("added", []):
                 print(f"    added (unrecorded): {p}")
             print(f"    last reviewed {e.get('reviewed_at')}")
-    print("\nFor the semantic pass, run `arx audit --json` and fan out an agent per "
+    print("\nFor the semantic pass, run `sci audit --json` and fan out an agent per "
           "experiment to read its source_files and verify the README prose.")
 
 
@@ -581,7 +581,7 @@ async def cmd_meta(store: ArchivistStore, args: argparse.Namespace) -> None:
     if not found:
         die(f"no experiment matching {args.experiment!r}")
     exp_dir, parsed = found
-    sidecar = exp_dir / _experiment.SIDECAR_NAME
+    sidecar = exp_dir / provenance.SIDECAR_NAME
 
     if args.suggest:
         readme = exp_dir / "README.md"
@@ -594,19 +594,19 @@ async def cmd_meta(store: ArchivistStore, args: argparse.Namespace) -> None:
                 if guess.get(k):
                     draft[k] = guess[k]
         try:
-            draft = _experiment.validate(draft)
-        except _experiment.SidecarError:
+            draft = provenance.validate(draft)
+        except provenance.SidecarError:
             pass  # a draft is allowed to be imperfect; the reviewer fixes it
         print(f"# SUGGESTED draft for {sidecar} — REVIEW before saving; not authoritative.")
-        print(_experiment.dump_sidecar(draft))
+        print(provenance._dump_sidecar_text(draft))
         return
 
     if not sidecar.is_file():
-        die(f"no {_experiment.SIDECAR_NAME} for {parsed['exp_id']} — create one "
-            f"(see `arx meta {parsed['exp_id']} --suggest` for a draft)")
+        die(f"no {provenance.SIDECAR_NAME} for {parsed['exp_id']} — create one "
+            f"(see `sci meta {parsed['exp_id']} --suggest` for a draft)")
     try:
-        meta = _experiment.read_sidecar(sidecar)
-    except _experiment.SidecarError as e:
+        meta = provenance.read_sidecar(exp_dir)
+    except provenance.SidecarError as e:
         die(str(e))
     emit_json(meta)
 
@@ -619,15 +619,15 @@ async def cmd_fingerprint(store: ArchivistStore, args: argparse.Namespace) -> No
     if not found:
         die(f"no experiment matching {args.experiment!r}")
     exp_dir, parsed = found
-    sidecar = exp_dir / _experiment.SIDECAR_NAME
+    sidecar = exp_dir / provenance.SIDECAR_NAME
     declared = []
     if sidecar.is_file():
-        meta = _experiment.read_sidecar(sidecar)
+        meta = provenance.read_sidecar(exp_dir)
         exp_rel = exp_dir.resolve().relative_to(store.home.resolve()).as_posix()
-        entry = _experiment._provenance_entry(meta, _experiment.DEFAULT_ARTIFACT) or {}
+        entry = provenance.provenance_entry(meta, provenance.DEFAULT_ARTIFACT) or {}
         declared = [i["path"] for i in (entry.get("inputs") or [])
                     if not i["path"].startswith(exp_rel + "/")]
-    inputs, missing = _experiment.resolve_inputs(store.home, exp_dir, declared)
+    inputs, missing = provenance.resolve_inputs(store.home, exp_dir, declared)
     if args.json:
         emit_json({"exp_id": parsed["exp_id"], "inputs": inputs, "missing": missing})
         return
@@ -648,17 +648,17 @@ async def cmd_review(store: ArchivistStore, args: argparse.Namespace) -> None:
     if not found:
         die(f"no experiment matching {args.experiment!r}")
     exp_dir, parsed = found
-    sidecar = exp_dir / _experiment.SIDECAR_NAME
+    sidecar = exp_dir / provenance.SIDECAR_NAME
     if not sidecar.is_file():
-        die(f"no {_experiment.SIDECAR_NAME} for {parsed['exp_id']} — create one first")
+        die(f"no {provenance.SIDECAR_NAME} for {parsed['exp_id']} — create one first")
     try:
-        meta = _experiment.read_sidecar(sidecar)
-    except _experiment.SidecarError as e:
+        meta = provenance.read_sidecar(exp_dir)
+    except provenance.SidecarError as e:
         die(str(e))
-    updated, missing = _experiment.review(store.home, exp_dir, meta, today=args.date,
-                                          extra_inputs=args.input or [])
-    sidecar.write_text(_experiment.dump_sidecar(updated), encoding="utf-8")
-    entry = _experiment._provenance_entry(updated, _experiment.DEFAULT_ARTIFACT)
+    updated, missing = provenance.review(store.home, exp_dir, meta, today=args.date,
+                                         extra_inputs=args.input or [])
+    provenance.write_sidecar(exp_dir, updated)
+    entry = provenance.provenance_entry(updated, provenance.DEFAULT_ARTIFACT)
     if args.json:
         emit_json({"exp_id": parsed["exp_id"], "provenance": entry, "missing": missing})
     else:
@@ -727,14 +727,15 @@ COMMANDS = {
 }
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="arx", description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--home", help="managed data folder (default: $ARCHIVIST_HOME or cwd)")
-    sub = p.add_subparsers(dest="command", required=True)
+def register(sub: argparse._SubParsersAction) -> None:
+    """Register the store subcommands on an existing ``sci`` subparser action.
 
+    Each store subcommand carries a ``--home`` flag (managed data folder; default
+    ``$ARCHIVIST_HOME`` or cwd) and a ``--json`` flag, mirroring ``arx`` exactly.
+    """
     def add(name: str, help_: str) -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=help_)
+        sp.add_argument("--home", help="managed data folder (default: $ARCHIVIST_HOME or cwd)")
         sp.add_argument("--json", action="store_true", help="machine-readable output")
         return sp
 
@@ -773,7 +774,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("catalog", "export the experiment catalog (CATALOG.md + catalog.json)")
     sp = add("check", "structural integrity report (missing/unindexed files, layout, redundant archives)")
     sp.add_argument("experiment", nargs="?", help="limit to one experiment (default: all)")
-    sp = add("audit", "staleness of generated docs + a worklist for the semantic pass")
+    sp = add("audit", "provenance staleness of the experiment.yml ledger + a worklist for the semantic pass")
     sp.add_argument("experiment", nargs="?", help="limit to one experiment (default: all)")
     sp = add("meta", "show an experiment's structured metadata (experiment.yml)")
     sp.add_argument("experiment")
@@ -791,7 +792,6 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("paths", nargs="*", help="paths to include (default: all changes)")
     sp.add_argument("--body", help="PR body")
     sp.add_argument("--dry-run", action="store_true", help="show the git/gh steps, do nothing")
-    return p
 
 
 class _HomeOnly:
@@ -811,12 +811,12 @@ class _HomeOnly:
 async def _run(args: argparse.Namespace) -> None:
     home = _home(args)
     _load_dotenv(home)
-    handler = COMMANDS[args.command]
-    if args.command == "init":
+    handler = COMMANDS[args.cmd]
+    if args.cmd == "init":
         home.mkdir(parents=True, exist_ok=True)
     else:
         _require_initialized(home)
-    if args.command == "pr":            # pure git; no libkit store needed
+    if args.cmd == "pr":            # pure git; no libkit store needed
         await handler(_HomeOnly(home), args)  # type: ignore[arg-type]
         return
     try:
@@ -829,13 +829,10 @@ async def _run(args: argparse.Namespace) -> None:
         await store.close()
 
 
-def main() -> None:
-    args = build_parser().parse_args()
+def dispatch(args: argparse.Namespace) -> int:
+    """Run the selected store subcommand (sync wrapper over the async handler)."""
     try:
         asyncio.run(_run(args))
     except KeyboardInterrupt:
         die("interrupted", code=130)
-
-
-if __name__ == "__main__":
-    main()
+    return 0

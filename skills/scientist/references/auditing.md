@@ -1,17 +1,17 @@
 # Auditing the data folder
 
-Archivist's store drifts as experiments are added, re-analyzed, and re-summarized.
+The store drifts as experiments are added, re-analyzed, and re-summarized.
 Two complementary passes keep it honest — a fast deterministic one and a semantic
 one that actually reads the data. Both **only report**; fixes are applied through
-`arx` (and land as PRs).
+`sci` (and land as PRs).
 
-## 1. Structural — `arx check`
+## 1. Structural — `sci check`
 
 Deterministic, instant, no embeddings. Flags, per experiment:
 
 - `missing:readme` — no `README.md`.
 - `file-missing:<path>` — an indexed file is gone from disk.
-- `unindexed:N` — N on-disk files aren't in the index → run `arx index <exp>`.
+- `unindexed:N` — N on-disk files aren't in the index → run `sci index <exp>`.
 - `thin-metadata` — no CRO / study IDs / assays / ASOs extracted (often a stub or a
   README that needs filling).
 - `layout:root-file:<name>` — a stray file at the experiment root (only `README.*`
@@ -20,29 +20,29 @@ Deterministic, instant, no embeddings. Flags, per experiment:
   folder (the `raw.zip` pattern). Verify, then delete the zip (the originals also
   live in `Attic/`).
 
-Run `arx check --json` to get a worklist you can drive fixes from.
+Run `sci check --json` to get a worklist you can drive fixes from.
 
-## 2. Staleness — `arx review` + `arx audit`
+## 2. Staleness — `sci review` + `sci audit`
 
 Each `experiment.yml` records, under `provenance`, an **explicit list of the input
 files** the README was verified against — each with its `sha256` at review time, plus
-the README's own `sha256` and the `reviewed_at` date — written by **`arx review
+the README's own `sha256` and the `reviewed_at` date — written by **`sci review
 <exp>`** once you've confirmed the prose matches the data. Inputs are the experiment's
 in-folder data files plus any external dependency declared with `--input` (e.g. CRO
-slides under `Shared/`). `arx audit` re-hashes them and compares:
+slides under `Shared/`). `sci audit` re-hashes them and compares:
 
 - `up-to-date` — every input and the README unchanged since the last review.
 - `stale` — the report names each input that **changed** / went **missing** / was
   **added** (new in-folder data not yet recorded), and flags if the README itself was
-  edited since review. Run `arx fingerprint <exp>` to see the current input set +
-  hashes, re-verify the prose, then `arx review <exp>` to re-stamp.
+  edited since review. Run `sci fingerprint <exp>` to see the current input set +
+  hashes, re-verify the prose, then `sci review <exp>` to re-stamp.
 - `no-provenance` — never reviewed; warrants a semantic look.
-- `no-/invalid-experiment-yml` — create or fix the sidecar (`arx meta <exp> --suggest`).
+- `no-/invalid-experiment-yml` — create or fix the sidecar (`sci meta <exp> --suggest`).
 
 ## 3. Semantic — the parallel-agent pass (authoritative for content)
 
 Hashing tells you an input *changed*, not whether the *prose is still true*. For
-that, read the data. `arx audit --json` emits, per experiment, its `source_files`.
+that, read the data. `sci audit --json` emits, per experiment, its `source_files`.
 Fan out one agent per experiment:
 
 > Read this experiment's `README.md` and its `source_files` (and any other files it
@@ -54,9 +54,9 @@ Fan out one agent per experiment:
 
 The verdict is a **pointer to where to look**, not the truth — always re-verify against
 the primary data before changing prose (the agent can over-read; see the discipline
-below). For each confirmed contradiction, correct the README, run `arx review <exp>`
+below). For each confirmed contradiction, correct the README, run `sci review <exp>`
 (declaring every file you relied on as an input — see below), and open a one-experiment
-PR with `arx pr`. This is the **authoritative** content check — the fingerprint is a
+PR with `sci pr`. This is the **authoritative** content check — the fingerprint is a
 change signal, not proof of (in)correctness.
 
 ## 4. Correction discipline (learned doing real reviews)
@@ -94,10 +94,10 @@ leave what's defensible:
 
 When you verify or correct a README, **declare every file you consulted as a provenance
 input** so the prose's evidentiary basis is recorded and drift-tracked — not just the
-in-folder data. In-folder data files are auto-included by `arx review`; add external
+in-folder data. In-folder data files are auto-included by `sci review`; add external
 ones explicitly:
 
-    arx review <exp> --input "Shared/Vendor A/SOW1/TC Meetings/TC07 - Vendor A Sync.pptx"
+    sci review <exp> --input "Shared/Vendor A/SOW1/TC Meetings/TC07 - Vendor A Sync.pptx"
 
 If a corrected claim cites a TC deck or minutes, that file belongs in `inputs`. (The
 semantic-pass agent's "files relied on" list, above, is exactly this set.)
@@ -106,7 +106,7 @@ semantic-pass agent's "files relied on" list, above, is exactly this set.)
 declared provenance input are *independent* — provenance records a path + sha256, which
 needs no bytes in git. So a bulky source file kept out of git (over the 100 MB limit,
 Attic-only, LFS-excluded) must still be declared an input when the prose rests on it;
-don't let a size-based `.gitignore` silently drop it from the evidentiary record. `arx
+don't let a size-based `.gitignore` silently drop it from the evidentiary record. `sci
 review` auto-includes in-folder data files regardless of `.gitignore`, so a re-`review`
 folds them back in (this is what an `audit` `added:` flag for such a file is telling you).
 Caveat: `audit` can only re-hash an input where its bytes physically exist (the working
@@ -117,11 +117,11 @@ fine for a Drive-backed repo; know it before trusting `audit` in CI.
 another's file as an input (e.g. a study citing a sibling's README as precedent) and both
 are corrected in the same batch, the input sha can be captured *before* the sibling's fix
 lands — so `audit` flags it `changed` afterward even though nothing is actually wrong.
-After merging a batch where fixes reference each other, run `arx audit` and re-`review`
+After merging a batch where fixes reference each other, run `sci audit` and re-`review`
 any experiment whose flagged drift is just a stale cross-reference sha.
 
 ## Cadence
 
-Run `arx check` after every `intake` or big change, and a full `arx audit` (plus the
+Run `sci check` after every `intake` or big change, and a full `sci audit` (plus the
 semantic pass on anything flagged) periodically — especially after re-analyses that
 change results the summaries depend on.

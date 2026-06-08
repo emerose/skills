@@ -220,6 +220,8 @@ def input_entry(path: Path, repo_root: Path) -> dict[str, str]:
     return {"path": rel, "sha256": sha256_file(p)}
 
 
+DEFAULT_ARTIFACT = "README.md"
+
 _IN_FOLDER_DIRS = ("raw", "data", "reports", "analysis")
 
 
@@ -290,6 +292,81 @@ def edges(sidecar: dict[str, Any], prefix: str | None = None) -> list[dict]:
     return [e for e in prov if str(e.get("artifact", "")).startswith(prefix)]
 
 
+# --------------------------------------------------------------------------- #
+# README review (artifact provenance with declared external inputs)
+# --------------------------------------------------------------------------- #
+def provenance_entry(sidecar: dict[str, Any], artifact: str) -> dict[str, Any] | None:
+    """The provenance entry for ``artifact`` in a (raw or validated) sidecar, or None."""
+    for e in sidecar.get("provenance") or []:
+        if isinstance(e, dict) and e.get("artifact") == artifact:
+            return e
+    return None
+
+
+def in_folder_data_files(repo_root: Path, exp_dir: Path) -> list[str]:
+    """Repo-root-relative paths of the experiment's in-folder *data* files — every
+    file under ``raw/`` ``data/`` ``reports/`` ``analysis/`` except a root ``README.*``
+    and the ``experiment.yml`` sidecar (those are prose/metadata, not evidence). The
+    same set as :func:`in_folder_inputs`, rendered relative to ``repo_root``."""
+    out = []
+    for f in in_folder_inputs(exp_dir):
+        try:
+            out.append(f.resolve().relative_to(Path(repo_root).resolve()).as_posix())
+        except ValueError:
+            out.append(f.name)
+    return sorted(out)
+
+
+def resolve_inputs(repo_root: Path, exp_dir: Path,
+                   declared: list[str] | None = None) -> tuple[list[dict[str, str]], list[str]]:
+    """Build the input list for a review: the experiment's in-folder data files plus
+    any ``declared`` external paths (repo-root-relative). Returns ``(inputs, missing)``
+    where ``inputs`` is ``[{path, sha256}]`` sorted by path and ``missing`` lists any
+    declared path that doesn't exist on disk."""
+    paths = set(in_folder_data_files(repo_root, exp_dir)) | set(declared or [])
+    inputs, missing = [], []
+    for p in sorted(paths):
+        ap = Path(repo_root) / p
+        if ap.is_file():
+            inputs.append({"path": p, "sha256": sha256_file(ap)})
+        else:
+            missing.append(p)
+    return inputs, missing
+
+
+def review(repo_root: Path, exp_dir: Path, sidecar: dict[str, Any], *,
+           today: str | None = None, extra_inputs: list[str] | None = None,
+           artifact: str = DEFAULT_ARTIFACT) -> tuple[dict[str, Any], list[str]]:
+    """Record provenance for ``artifact`` (default ``README.md``): resolve its input
+    set (in-folder data + any previously-declared externals + ``extra_inputs``), hash
+    each, and stamp ``artifact_sha256`` + ``reviewed_at``. Returns
+    ``(updated_sidecar, missing)``.
+
+    Externally-declared inputs (paths outside the experiment folder) are carried over
+    from the existing entry so they survive re-reviews; in-folder data files are always
+    (re)discovered. This is the README-review wrapper over :func:`record_provenance`'s
+    ledger merge — the data/ and analysis/ edges are recorded the same way."""
+    exp_rel = Path(exp_dir).resolve().relative_to(Path(repo_root).resolve()).as_posix()
+    prev = provenance_entry(sidecar, artifact) or {}
+    prev_external = [i["path"] for i in (prev.get("inputs") or [])
+                     if isinstance(i, dict) and not str(i["path"]).startswith(exp_rel + "/")]
+    declared = sorted(set(prev_external) | set(extra_inputs or []))
+    inputs, missing = resolve_inputs(repo_root, exp_dir, declared)
+
+    art_abs = Path(exp_dir) / artifact
+    entry = {
+        "artifact": artifact,
+        "artifact_sha256": sha256_file(art_abs) if art_abs.is_file() else None,
+        "reviewed_at": today or date.today().isoformat(),
+        "inputs": inputs,
+    }
+    others = [e for e in (sidecar.get("provenance") or [])
+              if not (isinstance(e, dict) and e.get("artifact") == artifact)]
+    out = dict(sidecar)
+    out["provenance"] = others + [entry]
+    return out, missing
+
+
 def staleness(exp_dir: Path, repo_root: Path | None = None) -> dict[str, Any]:
     """Re-hash each artifact's recorded inputs + the artifact itself and report drift.
 
@@ -354,5 +431,9 @@ def staleness(exp_dir: Path, repo_root: Path | None = None) -> dict[str, Any]:
 
     if not (changed or missing or added or artifact_changed):
         return {"state": "up-to-date", "n_inputs": len(recorded)}
+    # Surface the most-recent review date among the recorded edges so callers can
+    # report "last reviewed <date>" without re-reading the sidecar.
+    reviewed = sorted(e.get("reviewed_at") for e in recorded_inputs if e.get("reviewed_at"))
     return {"state": "stale", "changed": sorted(changed), "missing": sorted(missing),
-            "added": added, "artifact_changed": artifact_changed}
+            "added": added, "artifact_changed": artifact_changed,
+            "reviewed_at": reviewed[-1] if reviewed else None}

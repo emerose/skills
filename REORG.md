@@ -107,10 +107,20 @@ once all phases share `provenance/`.
 ## Progress
 - [x] Stage A — committed 692e9ea. One `scientist` skill (router + references/), three old
       SKILL.mds removed, marketplace updated. Tests green.
-- [ ] Stage B1 — package skeleton + provenance/ core + labfiles/ + port extract; delete skills/extractor/
-- [ ] Stage B2 — port archivist → store/ on libkit + provenance core; delete skills/archivist/
+- [x] Stage B1 — committed 85ebb95. provenance/ core (already FULL archivist schema), labfiles/,
+      extraction/, sci.py CLI; skills/extractor/ deleted. 20 pass/1 skip + e2e verified.
+- [x] Stage B2 — store/ on libkit + provenance core (review/audit/check/fingerprint route through
+      provenance; arx subcommands folded into sci via store/cli.py); skills/archivist/ deleted.
+      DECISION DEFERRED to B5: keep ARCHIVIST_* env vars + `.archivist/` store dir for now (don't
+      break user's ~/.env / orphan their store); rename to SCIENTIST_*/.scientist in B5 w/ user OK.
 - [ ] Stage B3 — port analyst experiments/+analyst/; doc()→libkit; delete skills/analyst/
 - [ ] Stage B4 — unify sci CLI + add `sci trace`
+      MUST-FIX (from B2): merged `sci audit <exp>` runs data-extraction audit fine but its
+      provenance-staleness pass opens the libkit store and prints "error: no scientist store"
+      even though staleness is PURE (experiment.yml only). Decouple: single-exp staleness +
+      trace must walk provenance WITHOUT needing a store; store only for all-exp enumeration.
+      LINT sweep (B5): provenance:436 sorted-over-None type warn; cli.py:665 entry maybe-None
+      subscript; misc unused vars (_sha256_bytes, repo_root param, test locals).
 - [ ] Stage B5 — README, cross-links, prune REORG
 
 Package layout (skills/scientist/): top-level pkgs `provenance/` (core), `labfiles/` (pure
