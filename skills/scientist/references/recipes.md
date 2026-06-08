@@ -7,11 +7,11 @@ ddPCR/QuantiGene, and neuro-observation data. Read this before writing a recipe.
 ## The model in one line
 
 You write `<exp>/data/extract.py` defining `build(x)`. The skill's runner
-(`scripts/extract.py`) constructs an `Extraction` `x` bound to the experiment, calls
+(`scripts/sci.py extract`) constructs an `Extraction` `x` bound to the experiment, calls
 `build(x)`, then writes the files and records provenance. **Recipes are pure
 declarations** — no imports, file I/O, or git; just calls on `x`. Run via
-`uv run scripts/extract.py "<exp>"` (dry-run) / `--commit`; verify with
-`scripts/audit.py "<exp>"`.
+`uv run skills/scientist/scripts/sci.py extract "<exp>"` (dry-run) / `--commit`; verify with
+`uv run skills/scientist/scripts/sci.py audit "<exp>"`.
 
 ## Per-experiment workflow
 
@@ -153,8 +153,8 @@ files — *modulo shape*. The float-only `lost` count in the audit is necessary 
 sufficient; run the full cell-coverage check before deleting:
 
 ```
-scripts/cellcov.py "<exp>"   # every cell incl. integers AND text, numbers→float,
-                             # text casefolded, comma-decimals + dates by value
+uv run skills/scientist/scripts/sci.py cellcov "<exp>"   # every cell incl. integers AND text,
+                             # numbers→float, text casefolded, comma-decimals + dates by value
 ```
 
 It re-runs the recipe in-memory and, per legacy `data/*.csv` the recipe does NOT
@@ -185,7 +185,7 @@ value is genuinely recoverable from the extraction.
 
 ## Reading the audit
 
-`audit.py "<exp>"` re-extracts and reports:
+`uv run skills/scientist/scripts/sci.py audit "<exp>"` re-extracts and reports:
 - **determinism** — two runs byte-identical.
 - **grounding** — raw inputs exist; recorded input sha256s still match.
 - **recipe** — recorded recipe sha == current `data/extract.py` (else data is stale

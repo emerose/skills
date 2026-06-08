@@ -104,6 +104,22 @@ NEW capability: `sci trace <exp>` — walk a claim raw→data→analysis→claim
 provenance core, flag breaks. The end-to-end traceability the ROADMAP wants; only buildable
 once all phases share `provenance/`.
 
+## Progress
+- [x] Stage A — committed 692e9ea. One `scientist` skill (router + references/), three old
+      SKILL.mds removed, marketplace updated. Tests green.
+- [ ] Stage B1 — package skeleton + provenance/ core + labfiles/ + port extract; delete skills/extractor/
+- [ ] Stage B2 — port archivist → store/ on libkit + provenance core; delete skills/archivist/
+- [ ] Stage B3 — port analyst experiments/+analyst/; doc()→libkit; delete skills/analyst/
+- [ ] Stage B4 — unify sci CLI + add `sci trace`
+- [ ] Stage B5 — README, cross-links, prune REORG
+
+Package layout (skills/scientist/): top-level pkgs `provenance/` (core), `labfiles/` (pure
+tabular+doc-table readers), `extraction/` (Extraction `x` helper + run/audit/cellcov),
+`experiments/`, `analyst/`, `store/`. `scripts/sci.py` = PEP723 CLI (sys.path-inserts pkg dir,
+declares reader deps) for deterministic ops → preserves zero-install. Claims path =
+`uv run --with-editable skills/scientist pytest …`. PRESERVE public import names `experiments`
++ `analyst` and the `x`/`build(x)` recipe API — existing data-repo recipes/claims depend on them.
+
 ## Staged migration (each stage shippable, tests green, exercised on real data)
 - **Stage A — LLM-facing, fast, no code moves.** Write one `scientist` SKILL.md (thin router
   + references/ split from the 3 old SKILL.mds) that points at the EXISTING tools

@@ -1,38 +1,29 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["openpyxl>=3.1", "pyyaml>=6.0", "xlrd>=2.0", "python-docx>=1.1", "pdfplumber>=0.11"]
-# ///
-"""Run an experiment's data/extract.py to (re)generate its data/*.csv from raw/,
-recording per-file provenance in experiment.yml.
+"""The extraction engine: an :class:`Extraction` (``x``) bound to one experiment,
+the ``build(x)`` runner, and provenance recording for ``data/`` edges.
 
-The per-experiment script lives at <exp>/data/extract.py and defines:
+A per-experiment recipe lives at ``<exp>/data/extract.py`` and defines::
 
     def build(x):
         x.sheet("01_qpcr_cp_dcp.csv", "raw/...Cp-dCp....xlsx")
         x.sheet("02_qpcr_summary.csv", "raw/...qPCR....xlsx", sheet="Test guides")
         x.crc_long("03_crc_pct_kd.csv", "raw/...CRC graphs.pzfx")
 
-`x` (an Extraction) provides the shared, generic helpers; all experiment-specific
-config and tweaks live in that script, so this skill stays idiosyncrasy-free. For
-bespoke cases, read raw rows with x.xlsx(...) / x.pzfx(...) and emit with x.table().
-
-Usage:
-    extract.py "<exp dir>"            # dry run → writes previews to data/_preview/, no yml
-    extract.py "<exp dir>" --commit   # writes data/*.csv + updates experiment.yml provenance
-    extract.py "<exp dir>" --script /path/to/extract.py --preview /tmp/out   # overrides
+``x`` provides the shared, generic helpers; all experiment-specific config lives in
+the recipe so the engine stays idiosyncrasy-free. Readers come from ``labfiles``;
+``data/`` provenance edges are written via ``provenance.record_provenance`` (the
+recipe ``data/extract.py`` is recorded as the final input of every output).
 """
+
 from __future__ import annotations
-import argparse, csv, hashlib, io, runpy, sys
+
+import csv
+import io
+import runpy
 from datetime import date
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _readers as R  # noqa: E402
-
-
-def _sha256(b: bytes) -> str:
-    return hashlib.sha256(b).hexdigest()
+import labfiles as R
+import provenance as P
 
 
 def _rows_to_bytes(header, rows) -> bytes:
@@ -41,6 +32,10 @@ def _rows_to_bytes(header, rows) -> bytes:
     w.writerow(header)
     w.writerows(rows)
     return buf.getvalue().encode("utf-8")
+
+
+def _sha256(b: bytes) -> str:
+    return P._sha256_bytes(b)
 
 
 class Extraction:
@@ -113,35 +108,40 @@ class Extraction:
         self._emit(name, header, rows, [src])
 
 
-def _load_build(script: Path):
+def load_build(script: Path):
     ns = runpy.run_path(str(script))
     if "build" not in ns:
         raise SystemExit(f"{script} does not define build(x)")
     return ns["build"]
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("exp", help="experiment folder (path)")
-    ap.add_argument("--script", help="extract.py to run (default <exp>/data/extract.py)")
-    ap.add_argument("--commit", action="store_true", help="write data/*.csv + experiment.yml provenance")
-    ap.add_argument("--preview", help="dry-run output dir (default <exp>/data/_preview)")
-    args = ap.parse_args()
+def run_build(exp: Path, script: Path) -> Extraction:
+    """Instantiate an :class:`Extraction` for ``exp`` and run the recipe's ``build(x)``."""
+    x = Extraction(exp, exp.parent)
+    load_build(script)(x)
+    return x
 
-    exp = Path(args.exp).resolve()
+
+def extract(exp: Path, *, script: Path | None = None, commit: bool = False,
+            preview: Path | None = None) -> None:
+    """Run an experiment's recipe to (re)generate its ``data/*.csv`` from ``raw/``.
+
+    Dry run (default) writes previews to ``data/_preview/`` and leaves ``experiment.yml``
+    untouched. ``commit=True`` writes ``data/*.csv`` and records per-file provenance.
+    """
+    exp = Path(exp).resolve()
     if not exp.is_dir():
         raise SystemExit(f"no such experiment dir: {exp}")
     repo = exp.parent
-    script = Path(args.script) if args.script else exp / "data" / "extract.py"
+    script = Path(script) if script else exp / "data" / "extract.py"
     if not script.is_file():
         raise SystemExit(f"no extract script: {script}")
 
-    x = Extraction(exp, repo)
-    _load_build(script)(x)
+    x = run_build(exp, script)
 
-    out_dir = (exp / "data") if args.commit else Path(args.preview or exp / "data" / "_preview")
+    out_dir = (exp / "data") if commit else Path(preview or exp / "data" / "_preview")
     out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"{'COMMIT' if args.commit else 'DRY-RUN'} → {out_dir}\n")
+    print(f"{'COMMIT' if commit else 'DRY-RUN'} → {out_dir}\n")
     # the recipe that produced these files is itself a dependency → recorded as an input
     try:
         recipe_rel = str(script.resolve().relative_to(repo))
@@ -153,39 +153,16 @@ def main() -> None:
     for o in x.outputs:
         data = _rows_to_bytes(o["header"], o["rows"])
         (out_dir / o["name"]).write_bytes(data)
-        # Unified provenance entry — same shape archivist uses for README.md. The
-        # artifact path (data/…) marks this as an extraction; the recipe is an input.
+        # Unified provenance entry — same shape the README review uses. The artifact
+        # path (data/…) marks this as an extraction; the recipe is an input.
         prov.append({"artifact": f"data/{o['name']}", "artifact_sha256": _sha256(data),
                      "reviewed_at": today,
                      "inputs": [{"path": p, "sha256": s} for p, s in o["inputs"]] + [recipe]})
         print(f"  {o['name']:28} {len(o['rows']):>5} rows x {len(o['header']):>2} cols   "
               f"← {', '.join(Path(p).name for p, _ in o['inputs'])}")
 
-    if args.commit:
-        _write_provenance(exp / "experiment.yml", prov)
+    if commit:
+        P.record_provenance(exp, prov, repo_root=repo)
         print(f"\nrecorded provenance for {len(prov)} data files in experiment.yml")
     else:
-        print(f"\n(dry run — previews written, experiment.yml untouched)")
-
-
-def _write_provenance(sidecar: Path, entries: list[dict]) -> None:
-    """Merge data-file entries into the experiment's unified `provenance` list — one
-    entry per artifact, data files alongside README.md (artifact path is the kind
-    discriminator). Preserves entries owned by archivist (README.md, etc.) and
-    supersedes the legacy `data_provenance` key. Uses the same entry shape archivist
-    does, so `arx review`/`arx audit` read and preserve these natively."""
-    import yaml
-    doc = yaml.safe_load(sidecar.read_text(encoding="utf-8")) if sidecar.is_file() else {}
-    doc.pop("data_provenance", None)   # superseded by unified provenance
-    ours = {e["artifact"] for e in entries}
-    kept = [e for e in (doc.get("provenance") or [])
-            if isinstance(e, dict) and e.get("artifact") not in ours]
-    doc["provenance"] = sorted(kept + entries, key=lambda e: e["artifact"])
-    # width high so long paths (with spaces) aren't line-wrapped/folded
-    sidecar.write_text(
-        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, width=4096),
-        encoding="utf-8")
-
-
-if __name__ == "__main__":
-    main()
+        print("\n(dry run — previews written, experiment.yml untouched)")

@@ -1,8 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["openpyxl>=3.1", "pyyaml>=6.0", "xlrd>=2.0", "python-docx>=1.1", "pdfplumber>=0.11"]
-# ///
 """Comprehensive cell-coverage check used to justify deleting legacy data/ CSVs.
 
 Where the audit's `reconcile` counts only non-integer numerics (real measurements),
@@ -15,21 +10,17 @@ Normalization: numbers → float (so 11 == 11.0), text → casefold, comma-decim
 handled, dates compared by value; the header row of each legacy file and blank/NA
 cells are skipped.
 
-This proves *value* coverage — no value disappears, modulo shape (see
-references/recipes.md "information-coverage, not byte-coverage"). Run it before
-deleting any legacy file; CLEAN (0 uncovered) is the bar. Residuals it reports are
-either real loss (fix the recipe) or shape/redundancy/export artifacts you must
-confirm recoverable by hand.
-
-Exit 0 if every legacy file is fully covered, 1 if any cell is uncovered. Usage:
-    cellcov.py "<exp dir>" [--script PATH] [--examples N]
+Exit 0 if every legacy file is fully covered, 1 if any cell is uncovered.
 """
+
 from __future__ import annotations
-import argparse, csv, collections, math, sys
+
+import collections
+import csv
+import math
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import extract as EX  # reuse the extraction engine  # noqa: E402  # type: ignore[import-not-found]
+from .engine import Extraction, load_build
 
 _NA = {"", "nan", "none", "na", "n/a", "#n/a", "null", "."}
 
@@ -61,20 +52,14 @@ def _cells(path: Path, skip_header: bool) -> collections.Counter:
 
 
 def _build(exp: Path, script: Path):
-    x = EX.Extraction(exp, exp.parent)
-    EX._load_build(script)(x)
+    x = Extraction(exp, exp.parent)
+    load_build(script)(x)
     return x.outputs
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("exp")
-    ap.add_argument("--script")
-    ap.add_argument("--examples", type=int, default=8,
-                    help="show up to N example uncovered values per file (0 = none)")
-    args = ap.parse_args()
-    exp = Path(args.exp).resolve()
-    script = Path(args.script) if args.script else exp / "data" / "extract.py"
+def cellcov(exp: Path, script: Path | None = None, examples: int = 8) -> int:
+    exp = Path(exp).resolve()
+    script = Path(script) if script else exp / "data" / "extract.py"
     data = exp / "data"
 
     outputs = _build(exp, script)
@@ -105,17 +90,13 @@ def main() -> int:
         total_lost += n
         if n:
             kinds = collections.Counter(v[0] for v in lost)
-            ex = ", ".join(f"{v[1]!r}x{c}" for v, c in lost.most_common(args.examples))
+            ex = ", ".join(f"{v[1]!r}x{c}" for v, c in lost.most_common(examples))
             report.append(
                 f"  {f.name}: {n} uncovered (num={kinds.get('n', 0)} txt={kinds.get('t', 0)})"
-                + (f"\n      {ex}" if args.examples else ""))
+                + (f"\n      {ex}" if examples else ""))
 
     tag = "CLEAN" if total_lost == 0 else f"{total_lost} UNCOVERED across {len(report)} file(s)"
     print(f"### cellcov: {exp.name}: {tag}  (legacy files: {len(legacy)}, produced: {len(produced)})")
     for r in report:
         print(r)
     return 0 if total_lost == 0 else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

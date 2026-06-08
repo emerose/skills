@@ -4,9 +4,6 @@ Turn an experiment's `raw/` CRO deliverables into tidy, grounded `data/*.csv`, a
 grounding. The `raw → data` stage of the pipeline: every extracted value traces back to a specific
 raw file (+ sha256), recorded in `experiment.yml`'s unified `provenance` list.
 
-> Stage-A note: the runner currently lives at `skills/extractor/scripts/`. It consolidates into the
-> `sci` CLI in the target structure (see [../../../REORG.md](../../../REORG.md)); the workflow below is unchanged.
-
 ## Model: generic engine + per-experiment recipe
 
 - **The engine is generic.** Shared deterministic format readers (`.xlsx`, `.xls`, GraphPad
@@ -30,7 +27,7 @@ raw readers `xlsx(src, sheet=…)` / `pzfx(src)` for custom recipes, and `docx_t
 delivered only as a Word report.
 
 **Before writing a recipe, read the authoring playbook** —
-[skills/extractor/references/recipes.md](../../extractor/references/recipes.md): per-experiment
+[recipes.md](recipes.md): per-experiment
 workflow, bespoke patterns (multi-sheet merges, banner/multi-row headers, pzfx row-titles &
 analyte-in-subcolumn, in-vivo long tables, moving derived values to `analysis/`), how to read the
 audit, the faithful-superset + legacy rules, and how to orchestrate a multi-experiment wave.
@@ -38,17 +35,17 @@ audit, the faithful-superset + legacy rules, and how to orchestrate a multi-expe
 ## Commands
 
 ```
-extract.py "<exp>"            # dry run → previews in data/_preview/, repo untouched
-extract.py "<exp>" --commit   # write data/*.csv + record provenance in experiment.yml
-audit.py   "<exp>"            # re-extract and check data/ against raw/
-cellcov.py "<exp>"            # full cell-coverage: is every legacy-file value covered?
+uv run skills/scientist/scripts/sci.py extract "<exp>"            # dry run → previews in data/_preview/, repo untouched
+uv run skills/scientist/scripts/sci.py extract "<exp>" --commit   # write data/*.csv + record provenance in experiment.yml
+uv run skills/scientist/scripts/sci.py audit   "<exp>"            # re-extract and check data/ against raw/
+uv run skills/scientist/scripts/sci.py cellcov "<exp>"            # full cell-coverage: is every legacy-file value covered?
 ```
 
-Run with `uv run skills/extractor/scripts/extract.py …` (PEP 723 deps: openpyxl, pyyaml, xlrd,
-python-docx). Prism reader sniffs and routes `.pzfx` vs `.prism` by content; legacy binary Prism
-raises a clear "re-export" error.
+The `sci.py` script is zero-install (PEP 723 deps: openpyxl, pyyaml, xlrd, python-docx, pdfplumber) —
+`uv run` pulls them without a virtualenv. The Prism reader sniffs and routes `.pzfx` vs `.prism` by
+content; legacy binary Prism raises a clear "re-export" error.
 
-`cellcov.py` is the migration/deletion check: re-runs the recipe in-memory and, for each legacy
+`sci.py cellcov` is the migration/deletion check: re-runs the recipe in-memory and, for each legacy
 `data/*.csv` the recipe does NOT produce, counts cells (integers AND text) whose value is absent from
 produced output. `CLEAN` (exit 0) = every legacy value is recoverable, safe to delete; uncovered
 cells = real loss or shape/redundancy artifacts to confirm by hand.
@@ -64,7 +61,7 @@ vocabulary: [naming.md](naming.md).
 `--commit` records each output as an entry in the unified `provenance` list — a data entry is
 `artifact: data/<file>` with its raw sources **and the recipe (`data/extract.py`)** as `inputs`
 (path + sha256). The artifact path is the only thing distinguishing an extraction edge (`data/…`)
-from a review edge (`README.md`), so `raw → data → README` is one DAG. `audit.py` re-runs the recipe
+from a review edge (`README.md`), so `raw → data → README` is one DAG. `sci.py audit` re-runs the recipe
 and checks: **determinism** (byte-identical reruns), **grounding** (inputs exist, shas match),
 **data/ ↔ recipe** (every output present + byte-identical), **recipe sha** still current,
 **reconciliation** (no measurement value in any pre-existing `data/` file is missing, checked

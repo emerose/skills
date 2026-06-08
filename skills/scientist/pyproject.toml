@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scientist"
+version = "0.1.0"
+description = "scientist — consolidated scientific-data skill: shared provenance core + lab-file readers + the raw→data extractor"
+requires-python = ">=3.11"
+# Deterministic format readers (xlsx/xls, GraphPad Prism, Word/PDF report tables)
+# plus PyYAML for the experiment.yml sidecar. Pinned loosely; readers are pure
+# functions of the source bytes given a fixed library set.
+dependencies = [
+    "openpyxl>=3.1",
+    "pyyaml>=6.0",
+    "xlrd>=2.0",
+    "python-docx>=1.1",
+    "pdfplumber>=0.11",
+]
+
+[tool.setuptools]
+# Flat top-level packages. experiments / analyst / store land in later stages.
+packages = ["provenance", "labfiles", "extraction"]

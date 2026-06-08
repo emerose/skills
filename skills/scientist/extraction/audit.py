@@ -1,31 +1,30 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["openpyxl>=3.1", "pyyaml>=6.0", "xlrd>=2.0", "python-docx>=1.1", "pdfplumber>=0.11"]
-# ///
 """Audit an experiment's data/ against a fresh extraction from raw/.
 
 Checks, all mechanical:
   1. Determinism  — running the recipe twice yields byte-identical output.
   2. Grounding    — every raw input the recipe reads exists; if experiment.yml
-                    records data_provenance, the recorded input sha256s still match.
+                    records provenance, the recorded input sha256s still match.
   3. data/ ↔ recipe — each recipe output is present in data/ and byte-identical
                     (= data/ is exactly extract(raw)); data/ files the recipe does
                     NOT produce are flagged (legacy / hand-curated / non-conforming).
-  4. Reconciliation — no measurement value in data/ is missing from the extraction
-                    (lost data == finding); extras are reported (faithful rows the
-                    legacy curation dropped, or reshape bookkeeping).
+  4. Reconciliation — no measurement value in any pre-existing data/ file is missing
+                    from the extraction (lost data == finding), checked PER FILE so
+                    redundant legacy copies don't inflate "lost"; extras are reported.
   5. Naming       — data/ files follow NN_<assay>_<content>[__<partition>].csv.
 
-Exit 0 if clean, 1 if findings. Usage:
-    audit.py "<exp dir>" [--script PATH]
+Exit 0 if clean, 1 if findings.
 """
+
 from __future__ import annotations
-import argparse, csv, collections, math, re, sys
+
+import collections
+import csv
+import math
+import re
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import extract as EX  # reuse the extraction engine  # noqa: E402  # type: ignore[import-not-found]
+import provenance as P
+from .engine import Extraction, _rows_to_bytes, _sha256, load_build
 
 NAME_RE = re.compile(r"^\d\d_[a-z0-9]+_[a-z0-9_]+(__[a-z0-9_]+)?\.csv$")
 
@@ -48,18 +47,14 @@ def _meas(rows_iter) -> collections.Counter:
 
 
 def _build(exp: Path, script: Path):
-    x = EX.Extraction(exp, exp.parent)
-    EX._load_build(script)(x)
+    x = Extraction(exp, exp.parent)
+    load_build(script)(x)
     return x.outputs
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("exp")
-    ap.add_argument("--script")
-    args = ap.parse_args()
-    exp = Path(args.exp).resolve()
-    script = Path(args.script) if args.script else exp / "data" / "extract.py"
+def audit(exp: Path, script: Path | None = None) -> int:
+    exp = Path(exp).resolve()
+    script = Path(script) if script else exp / "data" / "extract.py"
     data_dir = exp / "data"
     findings: list[str] = []
     print(f"### audit: {exp.name}")
@@ -72,21 +67,17 @@ def main() -> int:
     if not det:
         findings.append("extraction is non-deterministic")
 
-    # 2. grounding (inputs exist; provenance sha match if recorded)
-    import yaml
-    sidecar = exp / "experiment.yml"
+    # 2. grounding (inputs exist; provenance sha match if recorded). Read leniently:
+    # the recorded provenance may sit on an exp_id-less sidecar (data committed before
+    # archivist metadata is authored), and audit must still check it.
+    sidecar = P._load_raw(exp)
     recorded, recorded_recipe = {}, {}
-    if sidecar.is_file():
-        doc = yaml.safe_load(sidecar.read_text(encoding="utf-8")) or {}
-        # unified provenance: data-file artifacts (the recipe is recorded as an input)
-        for e in (doc.get("provenance") or []):
-            art = e.get("artifact", "")
-            if not art.startswith("data/"):
-                continue
-            ins = {i["path"]: i.get("sha256") for i in e.get("inputs", [])
-                   if isinstance(i, dict) and i.get("path")}
-            recorded[art] = ins
-            recorded_recipe[art] = next((s for p, s in ins.items() if p.endswith("extract.py")), None)
+    for e in P.edges(sidecar, "data/"):
+        art = e.get("artifact", "")
+        ins = {i["path"]: i.get("sha256") for i in e.get("inputs", [])
+               if isinstance(i, dict) and i.get("path")}
+        recorded[art] = ins
+        recorded_recipe[art] = next((s for p, s in ins.items() if p.endswith("extract.py")), None)
     inputs_ok = True
     for o in o1:
         for path, sha in o["inputs"]:
@@ -96,7 +87,7 @@ def main() -> int:
                 findings.append(f"provenance drift: {path} sha changed since recorded")
     print(f"  [grounding]    raw inputs present: True; provenance sha match: "
           f"{'n/a (not recorded)' if not recorded else inputs_ok}")
-    cur_recipe = EX._sha256(script.read_bytes())
+    cur_recipe = _sha256(script.read_bytes())
     stale = sorted(a for a, s in recorded_recipe.items() if s and s != cur_recipe)
     print(f"  [recipe]       recorded recipe matches current extract.py: "
           f"{'n/a' if not any(recorded_recipe.values()) else (not stale)}")
@@ -104,7 +95,7 @@ def main() -> int:
         findings.append(f"recipe (data/extract.py) changed since {len(stale)} artifact(s) stamped — re-extract")
 
     # 3. data/ vs recipe output
-    produced = {o["name"]: EX._rows_to_bytes(o["header"], o["rows"]) for o in o1}
+    produced = {o["name"]: _rows_to_bytes(o["header"], o["rows"]) for o in o1}
     on_disk = {f.name for f in data_dir.glob("*.csv")}
     matched = missing = differ = 0
     for name, b in produced.items():
@@ -162,7 +153,3 @@ def main() -> int:
     for f in findings:
         print(f"     • {f}")
     return 0 if not findings else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

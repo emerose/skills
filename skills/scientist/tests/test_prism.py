@@ -8,7 +8,7 @@ the three table layouts the reader must handle:
 
 An opt-in parity test (`test_prism_matches_pzfx_pair`) asserts `read_prism` reproduces
 `read_pzfx` table-for-table on a real `.prism`/`.pzfx` pair of the same data, when one is
-supplied via the `EXTRACTOR_PRISM_PAIR` env var; it is skipped by default (CI included).
+supplied via the `SCIENTIST_PRISM_PAIR` env var; it is skipped by default (CI included).
 """
 
 import os
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import _readers as R
+import labfiles as R
 
 
 # --------------------------------------------------------------------------- #
@@ -143,10 +143,10 @@ def test_sniff(tmp_path):
 # --------------------------------------------------------------------------- #
 # real-pair parity (opt-in): read_prism reproduces read_pzfx table-for-table
 # --------------------------------------------------------------------------- #
-# Set EXTRACTOR_PRISM_PAIR="<file.prism>,<file.pzfx>" — two exports of the SAME data —
+# Set SCIENTIST_PRISM_PAIR="<file.prism>,<file.pzfx>" — two exports of the SAME data —
 # to check the readers agree on real data. Skipped by default; no data paths or values
 # are committed (keep any real test files out of this repo).
-_PAIR = os.environ.get("EXTRACTOR_PRISM_PAIR")
+_PAIR = os.environ.get("SCIENTIST_PRISM_PAIR")
 
 
 def _dedupe_redundant_x(header, rows):
@@ -166,7 +166,7 @@ def _dedupe_redundant_x(header, rows):
     return h, [[r[i] for i in keep] for r in rows]
 
 
-@pytest.mark.skipif(not _PAIR, reason="set EXTRACTOR_PRISM_PAIR=<prism>,<pzfx> to run")
+@pytest.mark.skipif(not _PAIR, reason="set SCIENTIST_PRISM_PAIR=<prism>,<pzfx> to run")
 def test_prism_matches_pzfx_pair():
     prism_path, pzfx_path = (Path(p) for p in _PAIR.split(","))
     prism = R.read_prism(prism_path)
