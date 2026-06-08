@@ -28,9 +28,12 @@ import analyst
 __all__ = ["Study", "Program", "program", "canonical_aso", "root", "resolve"]
 
 _STUDY_RE = re.compile(r"^k1_\d{6}$", re.IGNORECASE)
-# An ASO reference, possibly with a CRO client-id prefix: '[ASO][ _-]<client>[_-]<id>' or
-# '[ASO][ _-]<id>'. The trailing number is the canonical id; leading zeros are dropped.
-_ASO_RE = re.compile(r"(?:ASO)?\s*[ _-]*(?:\d+[_-])?0*(\d+)\s*$", re.IGNORECASE)
+# An ASO reference, ANCHORED so the whole label must be an ASO id form — a bare number,
+# 'ASO[ _-]NNN', or a CRO-client-prefixed 'ASO<client>[_-]NNN'. This is deliberately strict:
+# free-text that merely contains digits (e.g. the positive control 'UBE3A ASO1', a dose
+# label) does NOT match and resolves to None, rather than being silently mis-canonicalized.
+# The trailing number is the canonical id; an optional <client> prefix and leading zeros drop.
+_ASO_RE = re.compile(r"^\s*(?:ASO[ _-]?)?(?:\d+[_-])?0*(\d+)\s*$", re.IGNORECASE)
 
 
 def root() -> Path:
@@ -96,6 +99,21 @@ class Study:
         self.id = exp_id.upper().replace("_", "-")
         self.path = resolve(exp_id)
         self._cache: dict[str, tuple] = {}    # resolved path -> (df, sha)
+        self._aso_cols = None                 # declared ASO-id columns (lazy, from experiment.yml)
+
+    def _declared_aso_columns(self) -> list[str]:
+        """Column names this experiment declares as ASO-id fields (``aso_id_columns`` in
+        experiment.yml). Read once; not recorded as provenance (it's config, not data)."""
+        if self._aso_cols is None:
+            import yaml
+            p = self.path / "experiment.yml"
+            try:
+                m = yaml.safe_load(p.read_text(encoding="utf-8")) if p.is_file() else {}
+            except Exception:
+                m = {}
+            cols = (m or {}).get("aso_id_columns") or []
+            self._aso_cols = [cols] if isinstance(cols, str) else list(cols)
+        return self._aso_cols
 
     # --- table discovery ---
     def _data_files(self) -> dict[str, Path]:
@@ -115,6 +133,14 @@ class Study:
             analyst.record(kind, path, sha)   # re-record for this capture
             return df
         df = analyst.load(path, kind=kind)    # reads bytes, sha-pins, records, sets .attrs
+        # Boundary canonicalization: for any DECLARED ASO-id column present, add a canonical
+        # `aso_id` sibling — in-memory only, so data/ on disk stays faithful. The canonical
+        # value derives from the program registry/convention (recorded as provenance via
+        # canonical_aso); the original column is preserved untouched. Non-ASO values (controls,
+        # blanks) resolve to None, not a wrong id.
+        for col in self._declared_aso_columns():
+            if col in df.columns and "aso_id" not in df.columns:
+                df["aso_id"] = canonical_aso(df[col])
         self._cache[key] = (df, df.attrs["sha256"])
         return df
 
@@ -180,14 +206,18 @@ class Program:
 
     def __init__(self):
         self.path = root() / "program"
+        self._conv = None    # cached conventions dict (loaded + recorded once)
 
     @property
     def conventions(self) -> dict:
-        """``program/conventions.yml`` as a dict (recorded as a provenance input)."""
-        import yaml
-        p = self.path / "conventions.yml"
-        analyst.record("reference", p, analyst._sha256(p.read_bytes()))
-        return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        """``program/conventions.yml`` as a dict (recorded as a provenance input the first
+        time it is read — cached, so a vectorized canonicalize doesn't re-read it per value)."""
+        if self._conv is None:
+            import yaml
+            p = self.path / "conventions.yml"
+            analyst.record("reference", p, analyst._sha256(p.read_bytes()))
+            self._conv = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        return self._conv
 
     def table(self, name: str):
         """A reference table ``program/<name>[.csv]`` as a tracked DataFrame."""
@@ -228,10 +258,15 @@ def _get_program() -> Program:
     return _program
 
 
-def canonical_aso(name) -> int | None:
-    """Module-level shortcut for ``program.canonical(name)`` — resolve an ASO alias
-    (``ASO-154``, ``ASO 154``, ``ASO3607_154``, …) to its canonical numeric id."""
-    return _get_program().canonical(name)
+def canonical_aso(name):
+    """Resolve an ASO alias (``ASO-154``, ``ASO 154``, ``ASO3607_154``, …) to its canonical
+    numeric Kicho id via the program's documented convention. Scalar in -> ``int | None``;
+    a pandas Series in -> a Series of ``int | None`` (so it maps a whole column). Values that
+    aren't an ASO-id form (controls, blanks) resolve to ``None``."""
+    prog = _get_program()
+    if hasattr(name, "map") and hasattr(name, "index"):   # pandas Series -> vectorized
+        return name.map(prog.canonical)
+    return prog.canonical(name)
 
 
 def __getattr__(name: str):
