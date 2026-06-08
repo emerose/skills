@@ -1,10 +1,11 @@
 # Scientist reorg — running list
 
 ## STATUS: consolidation COMPLETE (Stages A + B1–B5 committed). Remaining follow-ups:
-- **doc()→libkit** (deferred): needs an upstream libkit OFFLINE deterministic `extract_text(path)`
-  for pdf/docx/pptx (current loaders need Datalab keys / soffice and return Markdown that breaks
-  verbatim quote-match). File a libkit issue+PR, then route DocRef.text() through it (TODO marked
-  in analyst/__init__.py). Until then the pure-Python readers stay.
+- **doc()→libkit: DECIDED — won't do.** Grounding (verbatim quote-match) and embedding are
+  different extraction contracts: claims need deterministic, verbatim (not Markdown), keyless/local
+  text — a pure function of the bytes. libkit's loaders (Datalab hosted+keys / soffice, Markdown
+  output) serve embedding, where those are features. The pinned pure-Python readers are the right
+  tool for grounding; keep them. Comment at the DocRef.text() dispatch records the rationale.
 - **env migration (user, no rush)**: ~/.env can move ARCHIVIST_*/EXPERIMENTS_ROOT → SCIENTIST_*
   (one SCIENTIST_HOME now drives store + experiments); old names still work as fallbacks.
 - **store reindex once**: store dir renamed .archivist/ → .scientist/ — run `sci reindex` to

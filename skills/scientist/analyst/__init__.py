@@ -270,13 +270,15 @@ class DocRef:
         Cached on the instance so repeated substring checks don't re-parse. Raises
         :class:`UnsupportedDocFormat` for any other suffix (e.g. legacy ``.doc``/``.ppt``)."""
         if self._text is None:
-            # TODO(libkit): route through libkit offline text extraction once available.
-            # As of libkit 0.2.x there is no clean offline/deterministic entry point: the
-            # office path (LibreOfficeLoader) needs `soffice` on PATH, the default PDF path
-            # (DatalabLoader) uploads bytes to a hosted API + needs DATALAB_API_KEY, and all
-            # loaders are async and emit reformatted Markdown (breaks verbatim quote-matching).
-            # Keep the pure-Python readers below until libkit exposes an `extract_text`-style
-            # offline API. See the module-level note above _text_from_pdf.
+            # Deliberately NOT libkit's loaders (decided, not a stopgap): grounding and
+            # embedding are different extraction contracts. Quote-matching needs raw text
+            # that is a *pure function of the bytes* — deterministic (a claim re-run must
+            # not flip because an extractor changed), verbatim (libkit loaders emit Markdown,
+            # which breaks substring matching), and keyless/local (claims run constantly in
+            # CI/fan-out with no secrets; libkit's PDF path uploads bytes to Datalab + needs
+            # a key, the office path needs `soffice`). The pinned pure-Python readers below
+            # satisfy that contract; libkit's structure-rich/OCR/hosted loaders serve the
+            # store/embedding side, where those are features, not liabilities.
             reader = _TEXT_READERS.get(self.path.suffix.lower())
             if reader is None:
                 raise UnsupportedDocFormat(
