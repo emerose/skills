@@ -36,12 +36,21 @@ _EXP_RE = re.compile(r"(K1-[0-9A-Za-z]+)")
 
 def _exp_of(path_or_nodeid: str) -> str | None:
     m = _EXP_RE.search(path_or_nodeid)
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    if "program/claims" in path_or_nodeid or path_or_nodeid.startswith("program"):
+        return "program"     # cross-cutting program-level claims
+    return None
 
 
 def find_claims_dirs(root: Path) -> list[str]:
-    return sorted(str(p) for p in root.glob("*/analysis/claims")
-                 if any(p.glob("test_*.py")))
+    """Every experiment's ``<exp>/analysis/claims`` plus the program-level
+    ``program/claims`` (cross-cutting claims), in path order."""
+    dirs = [p for p in root.glob("*/analysis/claims") if any(p.glob("test_*.py"))]
+    prog = root / "program" / "claims"
+    if any(prog.glob("test_*.py")):
+        dirs.append(prog)
+    return sorted(str(p) for p in dirs)
 
 
 def run_claims(dirs: list[str], out_dir: Path, check_drift: bool) -> dict:
