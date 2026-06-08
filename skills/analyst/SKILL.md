@@ -138,12 +138,21 @@ def test_pos_ctrl_below_criterion(experiment):    # `experiment` = this folder's
 pytest "<exp>/analysis/claims"                       # one experiment
 pytest <exp1>/analysis/claims <exp2>/... --grounding-out DIR   # combined report
 pytest <…>/analysis/claims --check-drift              # also flag stale claims (see below)
+EXPERIMENTS_ROOT=… scripts/rollup.py [--out DIR] [--no-drift]   # PROGRAM-WIDE rollup
 ```
 
 Emits `grounding_report.md` + `.json` (per claim: `{id, statement, outcome, kind,
 strength, caveats, evidence, inputs+shas, reconcile, drift?}`). `pip install -e .[reports]`
 adds `pdfplumber`/`python-docx`/`python-pptx` for `doc()`-based external claims that quote a
 CRO report (PDF/docx) or a TC slide deck (pptx).
+
+**Program rollup** — `scripts/rollup.py` runs *every* `<exp>/analysis/claims` under
+`$EXPERIMENTS_ROOT` in one session (so cross-experiment `cross()`/`uses()` links resolve)
+and aggregates into a `program_evidence.{md,json}` "state of the evidence": counts by
+outcome/kind/strength, a per-experiment table, the **cross-experiment claim graph** (every
+claim whose evidence spans >1 experiment), and the stale-claim (drift) list. It is the
+substrate for a semantic audit (checking the program's stated conclusions against the
+grounded claims).
 
 ### External claims — quoting a report or deck
 
