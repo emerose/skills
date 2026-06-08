@@ -24,6 +24,13 @@ of three *kinds*, distinguished by the ``kind`` metadata key:
 * ``kind="entity"`` — only for *curated* notes about an ASO/CRO/assay/model that
   a query can't reconstruct. Purely-derivable entity facts are NOT stored here;
   they come from a live filter query over experiment records (see the skill doc).
+* ``kind="claim"`` — one per grounded claim emitted by the analyst pytest harness
+  (``grounding_report.json``). The card leads with the claim's **statement** (the
+  primary searchable text) and carries its **outcome + strength + claim kind** so a
+  semantic hit is honest — a contradicted (``xfail``) or weak claim never reads as
+  plain positive evidence. Keyed by a STABLE ``claim_id`` derived from ``exp_id`` +
+  the test-file basename + the node name (the raw pytest nodeid embeds an absolute
+  path, so it's normalized to be reproducible across runs/machines).
 
 libkit owns byte-level identity (``document_id`` = SHA-256 of the ingested bytes).
 archivist layers logical identity on top: an experiment is keyed by ``exp_id``, a
@@ -40,7 +47,7 @@ from typing import Any
 # ``ingest(metadata=...)`` is free-form JSON. Never reuse these names for our data.
 LIBKIT_TOP_LEVEL = frozenset({"title", "date", "source_url", "content_type"})
 
-KINDS = ("experiment", "file", "entity")
+KINDS = ("experiment", "file", "entity", "claim")
 
 # How a file is represented in libkit's index.
 INDEXED_CONTENT = "content"      # the real file was ingested + embedded
@@ -107,6 +114,33 @@ def parse_experiment_dirname(dirname: str) -> dict[str, Any] | None:
         if any(ch.isdigit() for ch in cand) and len(cand) <= 24:
             cro_guess = cand
     return {"exp_id": m.group("id"), "name": name, "cro_study_id_guess": cro_guess}
+
+
+# A grounding-report outcome -> a short honest label for the card header, so a
+# search hit never reads a contradicted/unverifiable claim as plain support.
+CLAIM_OUTCOME_LABEL = {
+    "passed": "grounded",
+    "failed": "DRIFT (failed)",
+    "xfail": "contradicted",
+    "xpass": "unexpectedly grounded",
+    "skipped": "unverifiable",
+}
+
+
+def claim_id_for(exp_id: str, nodeid: str) -> str:
+    """A STABLE logical key for a claim, reproducible across runs and machines.
+
+    The raw pytest ``nodeid`` embeds the path the suite was invoked with (often an
+    absolute path, machine-specific), e.g.
+    ``/abs/K1-000000 - X/analysis/claims/test_kd.py::test_pos_ctrl[100]``. We key on
+    ``<exp_id>::<test-file basename>::<node name>`` so re-running from a different
+    cwd (or machine) yields the same id and the claim upsert/prune stays idempotent.
+    """
+    head, sep, rest = nodeid.partition("::")
+    basename = head.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or head
+    node = rest if sep else ""
+    parts = [p for p in (exp_id, basename, node) if p]
+    return "::".join(parts)
 
 
 def classify_ext(suffix: str) -> str:
@@ -208,6 +242,35 @@ def experiment_card_markdown(rec: dict[str, Any]) -> str:
     related = sorted(rec.get("related") or [])
     if related:
         lines += ["## Related experiments", ""] + [f"- {r}" for r in related] + [""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def claim_card_markdown(claim: dict[str, Any], exp_id: str) -> str:
+    """Deterministic Markdown for a grounded-claim card (``kind=claim``).
+
+    The body LEADS with the claim's ``statement`` (the primary thing search should
+    match on), under a header line carrying **outcome + strength + claim kind** so a
+    hit is honest. Then any caveats and the evidence dict. Determinism (sorted
+    evidence keys, no timestamps in the body) keeps re-ingest stable: the same claim
+    yields the same bytes, hence the same ``document_id``.
+    """
+    outcome = claim.get("outcome") or "unspecified"
+    label = CLAIM_OUTCOME_LABEL.get(outcome, outcome)
+    strength = claim.get("strength") or "unspecified"
+    claim_kind = claim.get("kind") or "unspecified"
+    statement = (claim.get("statement") or "").strip()
+
+    lines = [f"# Claim [{label}] · {exp_id}", ""]
+    lines += [f"_{label} · strength: {strength} · kind: {claim_kind}_", ""]
+    lines += [statement or "_(no statement)_", ""]
+    if claim.get("caveats"):
+        lines += ["**Caveats:** " + str(claim["caveats"]).strip(), ""]
+    evidence = claim.get("evidence") or {}
+    if evidence:
+        lines += ["## Evidence", ""]
+        for k in sorted(evidence):
+            lines.append(f"- `{k}` = {evidence[k]}")
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 

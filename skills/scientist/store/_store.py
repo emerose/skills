@@ -128,6 +128,16 @@ class ArchivistStore:
         docs = await self.lib.list_documents(filters={"kind": "entity", "entity_id": entity_id})
         return _meta.document_to_record(docs[0]) if docs else None
 
+    async def get_claim(self, claim_id: str) -> dict[str, Any] | None:
+        docs = await self.lib.list_documents(filters={"kind": "claim", "claim_id": claim_id})
+        return _meta.document_to_record(docs[0]) if docs else None
+
+    async def claims(self, exp_id: str | None = None) -> list[dict[str, Any]]:
+        filters: dict[str, Any] = {"kind": "claim"}
+        if exp_id:
+            filters["exp_id"] = exp_id
+        return await self.all_records(filters)
+
     async def query(self, text: str, *, limit: int = 8,
                     filters: dict[str, Any] | None = None) -> list[Any]:
         """Semantic + full-text search inside the indexed content (libkit hybrid)."""
@@ -255,6 +265,58 @@ class ArchivistStore:
             await self.lib.delete(existing["document_id"])
         return await self._record_for_id(result.document_id)
 
+    async def upsert_claim(self, rec: dict[str, Any]) -> dict[str, Any]:
+        """Create or update a grounded-claim card, keyed by a stable ``claim_id``.
+
+        Mirrors :meth:`upsert_experiment`: the card's bytes derive from the claim's
+        content (statement/outcome/strength/evidence), so any change yields a new
+        ``document_id``; we ingest the new card and delete the prior one (if its id
+        differs), preserving the logical ``claim_id`` identity and ``added_at``.
+        """
+        claim_id = rec.get("claim_id")
+        if not claim_id:
+            raise ValueError("claim record needs a claim_id")
+        exp_id = rec.get("exp_id")
+        if not exp_id:
+            raise ValueError("claim record needs an exp_id")
+        rec = dict(rec)
+        rec["kind"] = "claim"
+        existing = await self.get_claim(claim_id)
+        rec["added_at"] = (existing or {}).get("added_at") or rec.get("added_at") or _now_iso()
+        rec["updated_at"] = _now_iso()
+
+        card = _meta.claim_card_markdown(
+            {"statement": rec.get("statement"), "outcome": rec.get("outcome"),
+             "strength": rec.get("strength"), "kind": rec.get("claim_kind"),
+             "caveats": rec.get("caveats"),
+             "evidence": _claim_evidence_dict(rec.get("evidence_json"))},
+            exp_id)
+        result = await self._ingest_card(card, rec)
+        if existing and existing.get("document_id") and existing["document_id"] != result.document_id:
+            await self.lib.delete(existing["document_id"])
+        elif result.already_existed:
+            # Byte-identical card already stored (same statement/outcome/…). Refresh
+            # the logical metadata (outcome/strength/inputs may carry fresh shas).
+            await self._merge_metadata(result.document_id, _meta.record_to_metadata(rec))
+        return await self._record_for_id(result.document_id)
+
+    async def replace_experiment_claims(self, exp_id: str, claim_ids: list[str]) -> int:
+        """Prune ``kind=claim`` docs for ``exp_id`` whose ``claim_id`` is NOT in the
+        current set — so claims dropped from the grounding report don't linger.
+
+        Returns the number of stale claim documents deleted. Honors the
+        rebuildable-store principle: the store reflects exactly the latest report.
+        """
+        keep = set(claim_ids)
+        existing = await self.lib.list_documents(filters={"kind": "claim", "exp_id": exp_id})
+        pruned = 0
+        for doc in existing:
+            cid = (doc.metadata or {}).get("claim_id")
+            if cid not in keep:
+                await self.lib.delete(doc.document_id)
+                pruned += 1
+        return pruned
+
     async def set_tags(self, *, kind: str, key_field: str, key: str,
                        add: list[str], remove: list[str]) -> dict[str, Any]:
         docs = await self.lib.list_documents(filters={"kind": kind, key_field: key})
@@ -304,3 +366,19 @@ class ArchivistStore:
 
 def _meta_store_cards_dir() -> str:
     return f"{STORE_DIRNAME}/cards"
+
+
+def _claim_evidence_dict(evidence_json: Any) -> dict[str, Any]:
+    """Parse the stored ``evidence_json`` (a JSON string) back to a dict for the card
+    body. Tolerant: a non-string or unparseable value yields an empty dict."""
+    import json
+
+    if isinstance(evidence_json, dict):
+        return evidence_json
+    if not isinstance(evidence_json, str) or not evidence_json:
+        return {}
+    try:
+        val = json.loads(evidence_json)
+    except (ValueError, TypeError):
+        return {}
+    return val if isinstance(val, dict) else {}

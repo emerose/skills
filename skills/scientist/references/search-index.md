@@ -9,7 +9,7 @@ Deep reference: [auditing.md](auditing.md).
 ## The store: libkit (no separate database)
 
 libkit (≥ 0.2.3) **is** the store — `<home>/.archivist/catalog.duckdb` (gitignored), indexing every
-file + metadata. Three (soon four) document *kinds*, distinguished by the `kind` metadata key:
+file + metadata. Four document *kinds*, distinguished by the `kind` metadata key:
 
 - **`experiment`** — one card per experiment folder (keyed by `exp_id`, e.g. `K1-000000`). Structured
   fields come **only from `experiment.yml`** (never scraped from prose). Embedded, so an experiment
@@ -20,8 +20,12 @@ file + metadata. Three (soon four) document *kinds*, distinguished by the `kind`
   so an agent can **open the file to pull exact numbers**.
 - **`entity`** — only *curated* non-derivable notes about an ASO/CRO/assay/model (aliases, rationale,
   caveats). Derivable facts are answered by a **live query**, not stored.
-- **`claim`** *(target)* — each grounded claim from the pytest harness, embedded on its statement,
-  carrying outcome + strength + provenance. The highest-value searchable evidence (see
+- **`claim`** — each grounded claim from the pytest harness, embedded on its **statement** and
+  carrying its **outcome + strength + claim kind** so a hit is honest (a contradicted `xfail` or
+  weak claim never reads as plain positive evidence). Keyed by a stable `claim_id`
+  (`<exp_id>::<test-file>::<node>`, reproducible across runs/machines). Index with
+  **`sci index-claims <exp>`** (reads `grounding_report.json`); search with
+  **`sci query "…" --kind claim`**. The highest-value searchable evidence (see
   [derive-claims.md](derive-claims.md) and [review-audit.md](review-audit.md)).
 
 ## Setup: keys & the embedding backend
@@ -45,10 +49,12 @@ The managed folder is `--home`, `$ARCHIVIST_HOME`, or cwd. Run `init` once per f
 sci init                                    # create the store + .gitignore entry
 sci index "K1-000000"                        # index one experiment (by id or path)
 sci reindex                                 # (re)index every experiment folder
-sci list [--kind file --experiment K1-000000]
+sci index-claims "K1-000000"                 # index grounded claims from grounding_report.json
+sci list [--kind file|claim --experiment K1-000000]
 sci show K1-000000                           # one experiment + its files
 sci search "V1234567"                        # metadata search (ids/assays/ASOs/paths/tags)
 sci query "lumbar spinal cord knockdown"     # SEMANTIC + full-text search INSIDE the content
+sci query "gait deficit" --kind claim        # grounded claims only (shows outcome + strength)
 sci file  "K1-000000/data/quantigene.csv"    # one file's record (path, sha256, schema)
 sci read  "K1-000000/data/quantigene.csv"    # dump a csv/tsv/xlsx to pull exact values
 sci entity list | show "ASO-7"               # derived registry / every experiment involving ASO 7

@@ -126,8 +126,24 @@ uv run --with-editable skills/scientist pytest <…>/analysis/claims --check-dri
 Program-wide rollup: `EXPERIMENTS_ROOT=… uv run --with-editable skills/scientist python skills/scientist/scripts/rollup.py`.
 
 Emits `grounding_report.md` + `.json` (per claim: `{id, statement, outcome, kind, strength, caveats,
-evidence, inputs+shas, reconcile, drift?}`). **The grounding report is the source for indexing claims
-into libkit** (see [review-audit.md](review-audit.md) and [search-index.md](search-index.md)) — each
-claim becomes a searchable `kind=claim` card carrying its outcome + strength.
+evidence, inputs+shas, reconcile, drift?}`).
+
+### Claims feed the store
+
+The grounding report is the source for indexing claims into libkit as searchable `kind=claim` cards.
+Run the claims, then index them:
+
+```bash
+uv run --with-editable skills/scientist pytest "<exp>/analysis/claims"   # writes grounding_report.json
+sci index-claims "<exp>"                                                 # index those claims into the store
+```
+
+`sci index-claims` reads `<exp>/analysis/grounding_report.json` (or `<exp>/grounding_report.json`, or
+`--report PATH`), upserts each claim as a `kind=claim` document — embedded on its **statement**,
+carrying its **outcome + strength + claim kind** — keyed by a stable `claim_id`
+(`<exp_id>::<test-file>::<node>`, reproducible across runs/machines). It then prunes any claims dropped
+from the report, so the store mirrors the latest run. Search them with `sci query "…" --kind claim`,
+which surfaces the outcome + strength so a contradicted (`xfail`) or weak claim is never shown as plain
+positive evidence. See [search-index.md](search-index.md) and [review-audit.md](review-audit.md).
 
 Program-wide rollup, drift, and the traceability story live in [review-audit.md](review-audit.md).

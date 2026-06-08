@@ -35,8 +35,8 @@ MAX_EMBED_BYTES = 25 * 1024 * 1024
 
 # The set of subcommands this module owns (so sci can route them here).
 STORE_COMMANDS = (
-    "init", "index", "reindex", "list", "show", "search", "query", "file",
-    "read", "entity", "new", "intake", "meta", "review", "fingerprint",
+    "init", "index", "reindex", "index-claims", "list", "show", "search", "query",
+    "file", "read", "entity", "new", "intake", "meta", "review", "fingerprint",
     "catalog", "check", "audit", "pr",
 )
 
@@ -227,14 +227,90 @@ async def _index_experiment(store: ArchivistStore, exp_dir: Path,
     return summary
 
 
+def _load_grounding_report(exp_dir: Path, override: str | None) -> tuple[Path, list[dict[str, Any]]]:
+    """Locate + parse the grounding_report.json for an experiment.
+
+    Search order: ``--report PATH`` if given, else ``<exp>/analysis/grounding_report.json``
+    then ``<exp>/grounding_report.json``. Returns the resolved path + the claims list.
+    Dies with a clear, actionable error if no report is found or it's malformed.
+    """
+    import json
+
+    if override:
+        candidates = [Path(override)]
+    else:
+        candidates = [exp_dir / "analysis" / "grounding_report.json",
+                      exp_dir / "grounding_report.json"]
+    report_path = next((p for p in candidates if p.is_file()), None)
+    if report_path is None:
+        looked = ", ".join(str(p) for p in candidates)
+        die(f"no grounding report found (looked: {looked}). Run the claims first, e.g.\n"
+            f"  uv run --with-editable skills/scientist pytest "
+            f"\"{exp_dir / 'analysis' / 'claims'}\"")
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        die(f"could not read grounding report {report_path}: {e}")
+    claims = data.get("claims") if isinstance(data, dict) else data
+    if not isinstance(claims, list):
+        die(f"grounding report {report_path} has no 'claims' list")
+    return report_path, claims
+
+
+async def cmd_index_claims(store: ArchivistStore, args: argparse.Namespace) -> None:
+    """Index the grounded claims from an experiment's grounding_report.json into the
+    libkit store as ``kind=claim`` documents, then prune any claims that have been
+    removed from the report (rebuildable store)."""
+    import json
+
+    found = _find_experiment_dir(store.home, args.experiment)
+    if not found:
+        die(f"no experiment matching {args.experiment!r} under {store.home}")
+    exp_dir, parsed = found
+    exp_id = parsed["exp_id"]
+    report_path, claims = _load_grounding_report(exp_dir, args.report)
+
+    indexed_ids: list[str] = []
+    for claim in claims:
+        nodeid = claim.get("id") or ""
+        claim_id = _meta.claim_id_for(exp_id, nodeid)
+        rec: dict[str, Any] = {
+            "exp_id": exp_id,
+            "claim_id": claim_id,
+            "statement": claim.get("statement") or "",
+            "outcome": claim.get("outcome"),
+            "strength": claim.get("strength"),
+            "claim_kind": claim.get("kind"),
+            "caveats": claim.get("caveats"),
+            "evidence_json": json.dumps(claim.get("evidence") or {},
+                                        ensure_ascii=False, sort_keys=True, default=str),
+            "inputs": [{"path": i.get("path"), "sha256": i.get("sha256")}
+                       for i in (claim.get("inputs") or [])],
+            "source": nodeid,
+        }
+        await store.upsert_claim(rec)
+        indexed_ids.append(claim_id)
+
+    pruned = await store.replace_experiment_claims(exp_id, indexed_ids)
+    if args.json:
+        emit_json({"exp_id": exp_id, "report": store.relpath(report_path),
+                   "indexed": len(indexed_ids), "pruned": pruned})
+    else:
+        print(f"indexed {len(indexed_ids)} claims for {exp_id} "
+              f"(from {store.relpath(report_path)}); pruned {pruned} stale")
+
+
 async def cmd_list(store: ArchivistStore, args: argparse.Namespace) -> None:
     if args.kind == "file":
         recs = await store.files(args.experiment)
     elif args.kind == "entity":
         recs = await store.all_records({"kind": "entity"})
+    elif args.kind == "claim":
+        recs = await store.claims(args.experiment)
     else:
         recs = await store.experiments()
-    recs.sort(key=lambda r: r.get("exp_id") or r.get("path") or r.get("entity_id") or "")
+    recs.sort(key=lambda r: r.get("exp_id") or r.get("path")
+              or r.get("entity_id") or r.get("claim_id") or "")
     if args.json:
         emit_json(recs)
         return
@@ -246,6 +322,10 @@ async def cmd_list(store: ArchivistStore, args: argparse.Namespace) -> None:
             print(f"  [{r.get('role','?'):8}] {r.get('path')}  ({r.get('indexed_as','?')})")
         elif args.kind == "entity":
             print(f"  {r.get('entity_id')}  — {r.get('title') or ''}")
+        elif args.kind == "claim":
+            label = _meta.CLAIM_OUTCOME_LABEL.get(r.get("outcome"), r.get("outcome") or "?")
+            stmt = (r.get("statement") or "").strip().replace("\n", " ")[:90]
+            print(f"  [{label} · {r.get('strength','?')}] {r.get('exp_id')}  {stmt}")
         else:
             fc = r.get("file_counts") or {}
             print(f"  {r.get('exp_id')}  {r.get('name') or r.get('title') or ''}"
@@ -307,13 +387,22 @@ async def cmd_query(store: ArchivistStore, args: argparse.Namespace) -> None:
     for r in results:
         chunk = r.chunk
         meta = chunk.metadata or {}
-        out.append({
+        hit = {
             "score": r.score,
             "exp_id": meta.get("exp_id"),
             "path": meta.get("path"),
             "kind": meta.get("kind"),
             "text": chunk.text,
-        })
+        }
+        if meta.get("kind") == "claim":
+            # Surface the judgment so a contradicted/weak claim is never shown as
+            # plain positive evidence.
+            hit["outcome"] = meta.get("outcome")
+            hit["strength"] = meta.get("strength")
+            hit["claim_kind"] = meta.get("claim_kind")
+            hit["statement"] = meta.get("statement")
+            hit["claim_id"] = meta.get("claim_id")
+        out.append(hit)
     if args.json:
         emit_json(out)
         return
@@ -321,6 +410,12 @@ async def cmd_query(store: ArchivistStore, args: argparse.Namespace) -> None:
         print("(no results)")
         return
     for h in out:
+        if h.get("kind") == "claim":
+            label = _meta.CLAIM_OUTCOME_LABEL.get(h.get("outcome"), h.get("outcome") or "?")
+            stmt = (h.get("statement") or h.get("text") or "").strip().replace("\n", " ")[:200]
+            print(f"  [claim · {label} · strength: {h.get('strength','?')}] {h.get('exp_id')}\n"
+                  f"      {stmt}")
+            continue
         loc = h.get("path") or h.get("exp_id") or "?"
         snippet = (h.get("text") or "").strip().replace("\n", " ")[:200]
         print(f"  {loc}\n      {snippet}")
@@ -777,6 +872,7 @@ COMMANDS = {
     "init": cmd_init,
     "index": cmd_index,
     "reindex": cmd_reindex,
+    "index-claims": cmd_index_claims,
     "list": cmd_list,
     "show": cmd_show,
     "search": cmd_search,
@@ -812,9 +908,13 @@ def register(sub: argparse._SubParsersAction) -> None:
     sp = add("index", "index one experiment folder (by exp_id or path)")
     sp.add_argument("experiment")
     add("reindex", "index every experiment folder under the data folder")
-    sp = add("list", "list experiments (default), files, or entities")
-    sp.add_argument("--kind", choices=["experiment", "file", "entity"], default="experiment")
-    sp.add_argument("--experiment", help="when --kind file: limit to this exp_id")
+    sp = add("index-claims", "index grounded claims from an experiment's grounding_report.json")
+    sp.add_argument("experiment")
+    sp.add_argument("--report", help="grounding_report.json to index "
+                    "(default <exp>/analysis/grounding_report.json then <exp>/grounding_report.json)")
+    sp = add("list", "list experiments (default), files, entities, or claims")
+    sp.add_argument("--kind", choices=["experiment", "file", "entity", "claim"], default="experiment")
+    sp.add_argument("--experiment", help="when --kind file/claim: limit to this exp_id")
     sp = add("show", "show one experiment and its files")
     sp.add_argument("experiment")
     sp = add("search", "metadata search across experiments and files")
@@ -822,7 +922,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     sp = add("query", "semantic + full-text search inside indexed content")
     sp.add_argument("text")
     sp.add_argument("--limit", type=int, default=8)
-    sp.add_argument("--kind", choices=["experiment", "file", "entity"], default=None)
+    sp.add_argument("--kind", choices=["experiment", "file", "entity", "claim"], default=None)
     sp = add("file", "show one file record (by relative path)")
     sp.add_argument("path")
     sp = add("read", "dump a tabular file (csv/tsv/xlsx) to stdout")

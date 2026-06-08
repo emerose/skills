@@ -192,3 +192,141 @@ def test_curated_entity_note(store):
         e = await store.get_entity("aso-7")
         assert e is not None and "Lead candidate" in e["note"]
     _run(store, go)
+
+
+# --------------------------------------------------------------------------- #
+# claims (kind=claim) — index grounded claims so semantic search returns evidence
+# --------------------------------------------------------------------------- #
+import json  # noqa: E402
+
+
+def _claim_rec(exp_id, nodeid, *, statement, outcome, strength, kind, caveats=None,
+               evidence=None, inputs=None):
+    """Mirror cli.cmd_index_claims's per-claim record shape from a report entry."""
+    return {
+        "exp_id": exp_id,
+        "claim_id": _meta.claim_id_for(exp_id, nodeid),
+        "statement": statement,
+        "outcome": outcome,
+        "strength": strength,
+        "claim_kind": kind,
+        "caveats": caveats,
+        "evidence_json": json.dumps(evidence or {}, sort_keys=True),
+        "inputs": [{"path": i["path"], "sha256": i["sha256"]} for i in (inputs or [])],
+        "source": nodeid,
+    }
+
+
+# A synthetic grounding_report.json: one strong/passed result, one weak/xfail
+# (contradicted), one moderate skipped.
+_GROUNDED = "/abs/K1-000000 - Dose/analysis/claims/test_kd.py::test_pos_ctrl_strong"
+_CONTRA = "/abs/K1-000000 - Dose/analysis/claims/test_kd.py::test_high_dose_xfail"
+_SKIP = "/abs/K1-000000 - Dose/analysis/claims/test_kd.py::test_unverifiable_skip"
+
+
+def _index_synthetic(store, exp_id="K1-000000"):
+    return [
+        _claim_rec(exp_id, _GROUNDED,
+                   statement="Lumbar knockdown reached 78% at the 100 nM top dose.",
+                   outcome="passed", strength="strong", kind="result",
+                   evidence={"kd_pct": 78.0, "criterion_pct": 60},
+                   inputs=[{"path": "K1-000000/data/02_assay.csv", "sha256": "deadbeef"}]),
+        _claim_rec(exp_id, _CONTRA,
+                   statement="The high-dose group showed dose-dependent gait deficits.",
+                   outcome="xfail", strength="weak", kind="result",
+                   caveats="single series; n=2 wells at the top dose",
+                   evidence={"observed": "no effect"}),
+        _claim_rec(exp_id, _SKIP,
+                   statement="Off-target liver expression cannot be assessed from this data.",
+                   outcome="skipped", strength="unverifiable", kind="interpretive"),
+    ]
+
+
+def test_upsert_claim_keyed_and_metadata_roundtrips(store):
+    async def go():
+        for rec in _index_synthetic(store):
+            await store.upsert_claim(rec)
+        claims = await store.claims("K1-000000")
+        assert len(claims) == 3
+        by_stmt = {c["statement"]: c for c in claims}
+        strong = by_stmt["Lumbar knockdown reached 78% at the 100 nM top dose."]
+        assert strong["kind"] == "claim"
+        assert strong["outcome"] == "passed" and strong["strength"] == "strong"
+        assert strong["exp_id"] == "K1-000000"
+        assert strong["claim_id"] == "K1-000000::test_kd.py::test_pos_ctrl_strong"
+        assert strong["claim_kind"] == "result"
+        assert json.loads(strong["evidence_json"])["kd_pct"] == 78.0
+        assert strong["inputs"][0]["sha256"] == "deadbeef"
+        # the contradicted claim carries its honest xfail/weak status
+        contra = by_stmt["The high-dose group showed dose-dependent gait deficits."]
+        assert contra["outcome"] == "xfail" and contra["strength"] == "weak"
+        assert contra["caveats"]
+    _run(store, go)
+
+
+def test_claim_stable_id_idempotent_across_cwd(store):
+    """The stable claim_id strips the invocation path, so re-indexing the same claim
+    from a different absolute path collapses to one record (no duplicate)."""
+    async def go():
+        rec = _claim_rec("K1-000000",
+                         "/abs/A/K1-000000 - Dose/analysis/claims/test_kd.py::test_x",
+                         statement="A claim.", outcome="passed", strength="moderate", kind="result")
+        await store.upsert_claim(rec)
+        # same claim, different invocation path -> same claim_id
+        rec2 = _claim_rec("K1-000000",
+                          "/somewhere/else/K1-000000 - Dose/analysis/claims/test_kd.py::test_x",
+                          statement="A claim.", outcome="passed", strength="moderate", kind="result")
+        assert rec2["claim_id"] == rec["claim_id"]
+        await store.upsert_claim(rec2)
+        assert len(await store.claims("K1-000000")) == 1
+    _run(store, go)
+
+
+def test_claim_queryable_by_statement_with_kind_filter(store):
+    async def go():
+        for rec in _index_synthetic(store):
+            await store.upsert_claim(rec)
+        hits = await store.query("lumbar knockdown top dose", limit=8,
+                                 filters={"kind": "claim"})
+        assert hits, "claim should be retrievable via kind=claim query"
+        assert all((h.chunk.metadata or {}).get("kind") == "claim" for h in hits)
+        assert any("knockdown" in h.chunk.text.lower() for h in hits)
+        # the matched claim's metadata carries its honest judgment
+        top = hits[0].chunk.metadata
+        assert top.get("outcome") and top.get("strength")
+    _run(store, go)
+
+
+def test_replace_experiment_claims_prunes_removed(store):
+    async def go():
+        recs = _index_synthetic(store)
+        for rec in recs:
+            await store.upsert_claim(rec)
+        all_ids = [r["claim_id"] for r in recs]
+        # full set kept -> nothing pruned
+        assert await store.replace_experiment_claims("K1-000000", all_ids) == 0
+        assert len(await store.claims("K1-000000")) == 3
+        # drop the contradicted claim from the report -> it's pruned
+        kept = [r["claim_id"] for r in recs if r["claim_id"] != _meta.claim_id_for("K1-000000", _CONTRA)]
+        pruned = await store.replace_experiment_claims("K1-000000", kept)
+        assert pruned == 1
+        remaining = await store.claims("K1-000000")
+        assert len(remaining) == 2
+        assert all(c["claim_id"] != _meta.claim_id_for("K1-000000", _CONTRA) for c in remaining)
+    _run(store, go)
+
+
+def test_replace_experiment_claims_scoped_to_exp(store):
+    """Pruning one experiment's claims never touches another experiment's claims."""
+    async def go():
+        await store.upsert_claim(_claim_rec("K1-000000", "/x/K1-000000 - A/analysis/claims/t.py::a",
+                                            statement="exp0 claim", outcome="passed",
+                                            strength="strong", kind="result"))
+        await store.upsert_claim(_claim_rec("K1-111111", "/x/K1-111111 - B/analysis/claims/t.py::b",
+                                            statement="exp1 claim", outcome="passed",
+                                            strength="strong", kind="result"))
+        # prune everything from K1-000000; K1-111111 untouched
+        assert await store.replace_experiment_claims("K1-000000", []) == 1
+        assert len(await store.claims("K1-000000")) == 0
+        assert len(await store.claims("K1-111111")) == 1
+    _run(store, go)

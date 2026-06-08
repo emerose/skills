@@ -70,9 +70,10 @@ EXPERIMENTS_ROOT=… rollup.py [--out DIR] [--no-drift]   # PROGRAM-WIDE rollup
 - **Temporal ledger = git.** Editing a `@strength` or a statement across commits is a belief change;
   `git blame` + the commit message is the "as-of" rationale. No YAML.
 
-**Claims feed the store.** The grounding report is the source for indexing each claim into libkit as a
-`kind=claim` card (statement embedded; outcome + strength as metadata), so `sci query` surfaces grounded
-evidence directly — and never surfaces a contradicted (`xfail`) or weak claim as fact without its status.
+**Claims feed the store.** After running the claims, `sci index-claims <exp>` indexes each claim from the
+grounding report into libkit as a `kind=claim` card (statement embedded; outcome + strength + claim kind
+as metadata; stale claims pruned), so `sci query "…" --kind claim` surfaces grounded evidence directly —
+and never surfaces a contradicted (`xfail`) or weak claim as fact without its status.
 
 ## Trace — end-to-end
 
