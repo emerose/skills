@@ -84,11 +84,11 @@ If `data/extract.py` *computes* a table (mean/SEM/KD%/a fit), move it here:
 1. If the computation needs geometry the faithful dump dropped, **enrich the dump** so it
    is recoverable (e.g. K1-000001's `02` gained a `row` column to keep slot A/B) — this
    keeps `02` a faithful *superset*, not a new computation.
-2. Re-extract: `uv run skills/extractor/scripts/extract.py "<exp>" --commit`.
+2. Re-extract: `uv run skills/scientist/scripts/sci.py extract "<exp>" --commit`.
 3. Delete the computed `data/NN_*.csv` and strip its `experiment.yml` provenance entry.
 4. Re-derive it in `analysis/derive.py` from the (enriched) faithful dump; confirm it
    reproduces the old values (diff against the git copy).
-5. **Re-verify**: `audit.py "<exp>"` and `cellcov.py "<exp>"` must stay CLEAN.
+5. **Re-verify**: `sci audit "<exp>"` and `sci cellcov "<exp>"` must stay CLEAN.
 
 If this ripples too far (large README rewrites, many consumers), **leave `extract.py`
 as-is and recommend the de-overload as a follow-up** instead.

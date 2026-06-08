@@ -24,18 +24,20 @@ Because libkit embeds every document, an embedding backend is required: set
 local embeddings. See [`skills/bibliographer/SKILL.md`](skills/bibliographer/SKILL.md)
 and [`.env.example`](.env.example) for the available keys.
 
-### [archivist](skills/archivist/)
+### [scientist](skills/scientist/)
 
-Organize, index, and search a tree of scientific experiments kept as one folder
-per experiment — raw lab/CRO measurements, cleaned data, protocols, reports,
-analysis notebooks, and internal summaries. Indexes every file for full-text +
-semantic search inside a **libkit** store (narrative files embedded whole, tabular
-files as schema/preview cards, binaries as descriptors), catalogs each experiment
-with its CRO study IDs / assays / ASOs / models, cross-references related studies,
-reads exact values out of source spreadsheets, and keeps internal README/summary
-write-ups current as the underlying data changes. Driven by a bundled `arx` CLI;
-uses the same embedding backend as bibliographer. See
-[`skills/archivist/SKILL.md`](skills/archivist/SKILL.md).
+Manage a tree of scientific experiments — one folder per experiment — end to end as
+a single **provenance-tracked pipeline** `raw → data → analysis → claims`. Extract raw
+measurements out of CRO files (Excel, GraphPad Prism, Word/PDF/PowerPoint) into tidy
+deterministic `data/` CSVs; re-derive analysis (EC50/Hill fits, stats, summaries,
+figures) from that data; assert **grounded scientific claims** (each a re-runnable
+pytest spec linking a statement to sha-pinned evidence with a strength); index
+everything — **claims and internal summaries first** — into a **libkit** store for
+semantic + full-text search; and trace any result back to the original measurements.
+One `sci` CLI for the deterministic ops, plus a pytest plugin for claims. Subsumes the
+former extractor, archivist, and analyst skills. See
+[`skills/scientist/SKILL.md`](skills/scientist/SKILL.md); for the per-phase detail, the
+files under [`skills/scientist/references/`](skills/scientist/references/).
 
 ## Install
 
@@ -44,10 +46,11 @@ uses the same embedding backend as bibliographer. See
 ```text
 /plugin marketplace add emerose/skills
 /plugin install bibliographer@emerose-skills
+/plugin install scientist@emerose-skills
 ```
 
-Claude Code clones this repo, discovers the `bibliographer` skill, and invokes it
-automatically when relevant (or manually via `/bibliographer:bibliographer`).
+Claude Code clones this repo, discovers the skills, and invokes them automatically
+when relevant (or manually via `/bibliographer:bibliographer` / `/scientist:scientist`).
 
 ### The `bib` CLI, as a standalone tool
 
@@ -76,6 +79,16 @@ uv run skills/bibliographer/scripts/bib.py init
 uv run skills/bibliographer/scripts/bib.py add arXiv:1706.03762
 uv run skills/bibliographer/scripts/bib.py import ~/papers --dry-run
 uv run skills/bibliographer/scripts/bib.py query "why do transformers scale"
+```
+
+The `scientist` skill works the same way — the `sci` CLI for the deterministic ops
+(zero-install via PEP 723), and the claims harness via an ephemeral editable install:
+
+```bash
+uv run skills/scientist/scripts/sci.py extract "K1-000000 - Potency"   # raw → tidy data/
+uv run skills/scientist/scripts/sci.py query "dose-dependent gait effect"   # semantic search
+uv run skills/scientist/scripts/sci.py trace "K1-000000 - Potency"     # claim → … → raw
+uv run --with-editable skills/scientist pytest "K1-000000 - Potency/analysis/claims"
 ```
 
 ## Layout

@@ -8,7 +8,7 @@ Deep reference: [auditing.md](auditing.md).
 
 ## The store: libkit (no separate database)
 
-libkit (≥ 0.2.3) **is** the store — `<home>/.archivist/catalog.duckdb` (gitignored), indexing every
+libkit (≥ 0.2.3) **is** the store — `<home>/.scientist/catalog.duckdb` (gitignored), indexing every
 file + metadata. Four document *kinds*, distinguished by the `kind` metadata key:
 
 - **`experiment`** — one card per experiment folder (keyed by `exp_id`, e.g. `K1-000000`). Structured
@@ -33,7 +33,7 @@ file + metadata. Four document *kinds*, distinguished by the `kind` metadata key
 Opening the library constructs an embedder (libkit fixes the vector dimension at creation), so
 **every command needs an embedding backend**. Keys in `~/.env`:
 - **`DEEPINFRA_API_KEY`** (default) — remote embeddings (Qwen3-Embedding-0.6B, dim 1024), no local
-  download. `ARCHIVIST_EMBEDDING` defaults to `remote`; set `local` with `libkit[fancychunk-*]` for on-device.
+  download. `SCIENTIST_EMBEDDING` defaults to `remote`; set `local` with `libkit[fancychunk-*]` for on-device.
 - **`DATALAB_API_KEY`** — optional; high-quality PDF parse + OCR for scanned reports.
 - The embedder identity is enforced on open — don't switch model on an existing library (silent
   vector corruption); libkit's content-addressed cache makes re-indexing cheap.
@@ -43,7 +43,8 @@ Opening the library constructs an embedder (libkit fixes the vector dimension at
 ```bash
 uv run skills/scientist/scripts/sci.py <command> [args] --home "<data folder>"
 ```
-The managed folder is `--home`, `$ARCHIVIST_HOME`, or cwd. Run `init` once per folder.
+The managed folder is `--home`, `$SCIENTIST_HOME` (one var drives the store + the `experiments`
+root; `$ARCHIVIST_HOME` / `$EXPERIMENTS_ROOT` still work as fallbacks), or cwd. Run `init` once per folder.
 
 ```bash
 sci init                                    # create the store + .gitignore entry
@@ -58,7 +59,7 @@ sci query "gait deficit" --kind claim        # grounded claims only (shows outco
 sci file  "K1-000000/data/quantigene.csv"    # one file's record (path, sha256, schema)
 sci read  "K1-000000/data/quantigene.csv"    # dump a csv/tsv/xlsx to pull exact values
 sci entity list | show "ASO-7"               # derived registry / every experiment involving ASO 7
-sci catalog                                 # export CATALOG.md + .archivist/catalog.json
+sci catalog                                 # export CATALOG.md + .scientist/catalog.json
 sci meta K1-000000 [--suggest]               # show experiment.yml metadata (--suggest = a draft)
 ```
 
@@ -83,7 +84,7 @@ you review). Unknown fields / bad status raise a clear error.
 
 **Private vocabulary (your real CRO names).** `--suggest` canonicalizes CRO names + study-id formats
 from a controlled vocabulary. The public repo ships only generic placeholders (`Vendor A`, …); keep
-real vendor names in a private `vocab.yml` at your data-folder root (or `$ARCHIVIST_VOCAB`). See
+real vendor names in a private `vocab.yml` at your data-folder root (or `$SCIENTIST_VOCAB`). See
 [vocab.example.yml](vocab.example.yml).
 
 ## Scaffold an experiment / file a delivery
@@ -106,4 +107,4 @@ OS cruft, preserves any `raw/Run 2/…` substructure. **Review the dry-run befor
 
 Changes land as reviewable PRs (`sci pr "title" <paths>`): the data folder is a git repo with a
 private remote; edits are made in the working tree, then branched/committed/pushed/opened as a PR.
-The libkit store (`.archivist/`) is gitignored. See [review-audit.md](review-audit.md) for `pr`.
+The libkit store (`.scientist/`) is gitignored. See [review-audit.md](review-audit.md) for `pr`.

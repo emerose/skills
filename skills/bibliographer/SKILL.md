@@ -14,7 +14,9 @@ description: >-
   "bibliographer." Triggers include "add this paper," "save this arXiv link,"
   "what papers do I have on X," "import these PDFs," "make a bibliography,"
   "find the DOI/metadata for these PDFs," "search my papers for X," "check my
-  library for duplicates," or "export BibTeX."
+  library for duplicates," or "export BibTeX." For a tree of internal scientific
+  experiments (raw lab/CRO data, extracted measurements, analysis, grounded claims),
+  use the scientist skill instead.
 ---
 
 # Bibliographer

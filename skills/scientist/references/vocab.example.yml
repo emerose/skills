@@ -1,4 +1,4 @@
-# Private vocabulary for archivist's metadata extractor — EXAMPLE.
+# Private vocabulary for scientist's metadata extractor — EXAMPLE.
 #
 # The public skills repo ships only generic placeholder vendors ("Vendor A", …)
 # and vendor-neutral study-id shapes. Your real CRO/vendor names and any
@@ -6,7 +6,8 @@
 # your (private) data repo — never in the public skills repo.
 #
 # Place this file at the root of your data folder as `vocab.yml` (or point
-# $ARCHIVIST_VOCAB at it). `arx` loads it automatically and MERGES it over the
+# $SCIENTIST_VOCAB at it; $ARCHIVIST_VOCAB still works as a fallback). `sci` loads
+# it automatically and MERGES it over the
 # generic defaults, so the extractor canonicalizes your real names and recognizes
 # your study-id formats. Values are case-insensitive regex fragments.
 

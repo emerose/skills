@@ -1,5 +1,20 @@
 # Scientist reorg — running list
 
+## STATUS: consolidation COMPLETE (Stages A + B1–B5 committed). Remaining follow-ups:
+- **doc()→libkit** (deferred): needs an upstream libkit OFFLINE deterministic `extract_text(path)`
+  for pdf/docx/pptx (current loaders need Datalab keys / soffice and return Markdown that breaks
+  verbatim quote-match). File a libkit issue+PR, then route DocRef.text() through it (TODO marked
+  in analyst/__init__.py). Until then the pure-Python readers stay.
+- **env migration (user, no rush)**: ~/.env can move ARCHIVIST_*/EXPERIMENTS_ROOT → SCIENTIST_*
+  (one SCIENTIST_HOME now drives store + experiments); old names still work as fallbacks.
+- **store reindex once**: store dir renamed .archivist/ → .scientist/ — run `sci reindex` to
+  rebuild (the old dir is orphaned; rebuildable by design).
+- **main-checkout env hygiene**: a stale pre-consolidation editable install `experiments_analyst`
+  lives in /Users/sq/Development/skills/.venv — `uv pip uninstall experiments_analyst` (conftest
+  already guards the tests against it).
+- minor: residual Pyright cosmetics in analyst (read_csv Optional typing, token reset) left as-is.
+
+
 Working notes for reorganizing extractor / archivist / analyst (bibliographer stays separate).
 Goal: maximally useful + discoverable to an LLM (the *only* caller — humans never run these
 by hand). Token-conscious; avoid context pollution from over-broad skills.
@@ -128,7 +143,8 @@ once all phases share `provenance/`.
       trace must walk provenance WITHOUT needing a store; store only for all-exp enumeration.
       LINT sweep (B5): provenance:436 sorted-over-None type warn; cli.py:665 entry maybe-None
       subscript; misc unused vars (_sha256_bytes, repo_root param, test locals).
-- [ ] Stage B5 — README, cross-links, prune REORG
+- [x] Stage B5 — code (8499ca8): SCIENTIST_* naming + fallback, symlink path fix, lint. docs:
+      README → scientist section + install/no-install examples; bibliographer↔scientist cross-link.
 
 Package layout (skills/scientist/): top-level pkgs `provenance/` (core), `labfiles/` (pure
 tabular+doc-table readers), `extraction/` (Extraction `x` helper + run/audit/cellcov),

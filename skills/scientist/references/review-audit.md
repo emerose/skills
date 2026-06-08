@@ -107,7 +107,7 @@ DAG + drift walk).
 sci pr "title" <paths…> [--dry-run]   # branch, commit, push, open a PR for you to review & merge
 ```
 The data folder is a git repo with a private GitHub remote; scientist never writes silently to `main`.
-The libkit store (`.archivist/`) is gitignored. `--dry-run` shows the git/gh steps first.
+The libkit store (`.scientist/`) is gitignored. `--dry-run` shows the git/gh steps first.
 
 ## Maintaining (for agents working ON scientist)
 
