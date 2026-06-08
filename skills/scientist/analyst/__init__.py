@@ -31,8 +31,11 @@ import hashlib
 import io
 import os
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
+
+from provenance import record_provenance as _record_provenance
 
 __all__ = [
     "load", "data", "doc", "evidence", "uses", "cross", "record",
@@ -266,6 +269,13 @@ class DocRef:
         Cached on the instance so repeated substring checks don't re-parse. Raises
         :class:`UnsupportedDocFormat` for any other suffix (e.g. legacy ``.doc``/``.ppt``)."""
         if self._text is None:
+            # TODO(libkit): route through libkit offline text extraction once available.
+            # As of libkit 0.2.x there is no clean offline/deterministic entry point: the
+            # office path (LibreOfficeLoader) needs `soffice` on PATH, the default PDF path
+            # (DatalabLoader) uploads bytes to a hosted API + needs DATALAB_API_KEY, and all
+            # loaders are async and emit reformatted Markdown (breaks verbatim quote-matching).
+            # Keep the pure-Python readers below until libkit exposes an `extract_text`-style
+            # offline API. See the module-level note above _text_from_pdf.
             reader = _TEXT_READERS.get(self.path.suffix.lower())
             if reader is None:
                 raise UnsupportedDocFormat(
@@ -278,8 +288,9 @@ class DocRef:
             except ImportError as exc:
                 name = getattr(exc, "name", None) or "a reader"
                 raise ImportError(
-                    f"{name} is required to read {self.path.suffix} — install the analyst "
-                    f"[reports] extra: pip install -e 'skills/analyst[reports]'") from exc
+                    f"{name} is required to read {self.path.suffix} — install the scientist "
+                    f"[reports] extra: pip install -e 'skills/scientist[reports]' "
+                    f"(or run via: uv run --with-editable 'skills/scientist[reports]' pytest …)") from exc
         return self._text
 
     def contains(self, phrase: str, *, normalize_ws: bool = True) -> bool:
@@ -480,8 +491,9 @@ class Derivation:
     Inside the ``with`` block, every table read via ``experiments`` is captured as an input.
     ``write_table``/``write_fig`` write the artifact under ``analysis/`` and record a
     provenance entry (artifact + sha, inputs = the captured data files + the deriving
-    recipe) into the experiment's unified ``provenance`` list — the same shape the
-    extractor uses, so ``raw -> data -> analysis`` is one DAG in one place.
+    recipe) into the experiment's unified ``provenance`` list via
+    :func:`provenance.record_provenance` — the SAME ledger writer the extractor's
+    ``data/`` edges use, so ``raw -> data -> analysis`` is one DAG in one place.
     """
 
     def __init__(self, study, recipe):
@@ -534,20 +546,16 @@ class Derivation:
         self.entries.append({
             "artifact": f"analysis/{out.relative_to(self.exp / 'analysis')}".replace("\\", "/"),
             "artifact_sha256": _sha256(out.read_bytes()),
+            "reviewed_at": date.today().isoformat(),
             "inputs": inputs,
         })
 
     def _write_provenance(self) -> None:
-        import yaml
-        sidecar = self.exp / "experiment.yml"
-        doc_y = yaml.safe_load(sidecar.read_text(encoding="utf-8")) if sidecar.is_file() else {}
-        ours = {e["artifact"] for e in self.entries}
-        kept = [e for e in (doc_y.get("provenance") or [])
-                if isinstance(e, dict) and e.get("artifact") not in ours]
-        doc_y["provenance"] = sorted(kept + self.entries, key=lambda e: e["artifact"])
-        sidecar.write_text(
-            yaml.safe_dump(doc_y, sort_keys=False, allow_unicode=True, width=4096),
-            encoding="utf-8")
+        # Route through the shared ledger writer: it dedups by artifact, preserves
+        # entries for OTHER artifacts (data/ extractions, the README review), and
+        # writes the deterministic sidecar — identical merge semantics this method
+        # used to reimplement, now in one place.
+        _record_provenance(self.exp, self.entries, repo_root=self.exp.parent)
 
 
 def derivation(study, recipe) -> Derivation:

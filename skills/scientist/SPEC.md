@@ -94,7 +94,7 @@ def test_pos_ctrl_below_criterion(k1_000000):
 - **Bypass guard:** during a claim run, patch `open`/`pandas.read_csv` so untracked source
   reads fail (or are captured) — guarantees the captured input set is complete.
 - **Reconcile lint:** if a claim also declares inputs (fixtures), warn when declared ≠ captured.
-- **Audit/report:** `pytest analysis/claims/` → a grounding report per claim
+- **Audit/report:** `uv run --with-editable skills/scientist pytest <exp>/analysis/claims` → a grounding report per claim
   `{id, statement, pass/fail/xfail/skip, evidence, inputs+shas, strength, caveats}`, with a
   markdown/JSON export.
 - **Drift:** compare a claim's captured input shas to the shas at the commit where its
@@ -109,9 +109,10 @@ hand-maintained beyond the specs themselves.
 
 ## Layout
 ```
-skills/analyst/
-  experiments/__init__.py            # typed, tracked data access
-  analyst/__init__.py          # data/uses/doc/evidence/strength + pytest plugin
+skills/scientist/
+  experiments/__init__.py      # typed, tracked data access
+  analyst/__init__.py          # data/uses/doc/evidence/strength
+  analyst/plugin.py            # pytest11 plugin: capture, reconcile, grounding report
   SPEC.md
 <data repo>/<exp>/analysis/
   derive.py  (or per-assay *.py)   # derivation CODE (importable, IPython-friendly)

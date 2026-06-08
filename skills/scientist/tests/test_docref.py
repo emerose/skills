@@ -6,7 +6,7 @@ its PDF backend embeds real, extractable text). The point is to lock the contrac
 ``doc().text()/.contains()`` works uniformly so external claims stop hand-rolling
 per-format extraction — and that ``.pptx`` (TC decks) is now groundable at all.
 
-Run: ``uv run --extra reports pytest skills/analyst/tests/ -q`` (or with the venv's pytest).
+Run: ``uv run --with-editable skills/scientist pytest skills/scientist/tests/test_docref.py -q``.
 """
 from __future__ import annotations
 

@@ -5,7 +5,7 @@ Maintains the link between what the experiment *claims* and the data that justif
 **provenance review**, **staleness/structural audit**, and (target) end-to-end **traceability**.
 
 > review/audit/check/fingerprint run via `sci` (this skill's CLI); program rollup + drift via
-> `skills/analyst/scripts/rollup.py` and `pytest --check-drift` — these fold into `sci` in a later
+> `skills/scientist/scripts/rollup.py` and `pytest --check-drift` — these fold into `sci` in a later
 > stage, where `sci trace` ties them together.
 
 ## Provenance: the one ledger

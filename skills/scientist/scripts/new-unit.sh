@@ -14,7 +14,7 @@
 #   new-unit.sh --remove <exp-id>     # tear the worktree down once the PR is merged
 #
 # Typical call (sets EXPERIMENTS_ROOT in your shell):
-#   eval "$(skills/analyst/scripts/new-unit.sh k1-221101)"
+#   eval "$(skills/scientist/scripts/new-unit.sh k1-221101)"
 #
 # Env overrides:
 #   KICHO_REPO    repo URL          default https://github.com/emerose/kicho-science.git

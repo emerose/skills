@@ -113,7 +113,13 @@ once all phases share `provenance/`.
       provenance; arx subcommands folded into sci via store/cli.py); skills/archivist/ deleted.
       DECISION DEFERRED to B5: keep ARCHIVIST_* env vars + `.archivist/` store dir for now (don't
       break user's ~/.env / orphan their store); rename to SCIENTIST_*/.scientist in B5 w/ user OK.
-- [ ] Stage B3 — port analyst experiments/+analyst/; doc()→libkit; delete skills/analyst/
+- [x] Stage B3 — analyst/+experiments/ ported into package; Derivation provenance writer routed
+      through the core (3rd duplicate gone); pytest11 entry point; rollup/new-unit/SPEC/playbook
+      moved; skills/analyst/ deleted. 78 pass/1 skip under editable install. doc()→libkit DEFERRED:
+      libkit has NO offline deterministic text API (PDF=Datalab/keys, Office=soffice, all→Markdown
+      breaking quote-match) → KEPT pure-Python + TODO; needs upstream libkit `extract_text`. Notes:
+      analysis entries now carry reviewed_at (intentional DAG unification); pre-existing
+      Derivation._rel() emits absolute paths when EXPERIMENTS_ROOT is under a symlink (/tmp) — B5 fix.
 - [ ] Stage B4 — unify sci CLI + add `sci trace`
       MUST-FIX (from B2): merged `sci audit <exp>` runs data-extraction audit fine but its
       provenance-staleness pass opens the libkit store and prints "error: no scientist store"

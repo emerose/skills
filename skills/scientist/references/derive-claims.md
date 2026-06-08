@@ -5,11 +5,10 @@ to `data/`, and (2) **grounded claims** — every scientific assertion linked to
 that justifies it, re-runnable for audit, with non-binary support (strength) and a git-based
 temporal history. Closes the pipeline `raw → data → analysis → claims`.
 
-> Stage-A note: the machinery currently installs from `skills/analyst/` (the `analyst` + `experiments`
-> packages + pytest plugin). It folds into the `scientist` package in the target (zero-install via
-> `uv run --with-editable`), and `doc()` text extraction will delegate to libkit's readers. Workflow below is unchanged.
-> Full design: [skills/analyst/SPEC.md](../../analyst/SPEC.md). Step-by-step authoring:
-> [skills/analyst/references/playbook.md](../../analyst/references/playbook.md).
+> The machinery lives in the `scientist` package as the top-level `analyst` + `experiments`
+> packages plus the pytest plugin (auto-loaded via the `pytest11` entry point). Run claims
+> zero-install with `uv run --with-editable skills/scientist pytest <exp>/analysis/claims`.
+> Full design: [SPEC.md](../SPEC.md). Step-by-step authoring: [references/playbook.md](playbook.md).
 
 ## Two packages (the generic machinery)
 
@@ -28,7 +27,7 @@ temporal history. Closes the pipeline `raw → data → analysis → claims`.
 
 **Work in an isolated worktree, never the Drive checkout** — the Drive checkout is one shared
 working tree/HEAD that GitSync owns; concurrent fan-out racing it corrupts commits. Provision an
-off-Drive worktree: `eval "$(skills/analyst/scripts/new-unit.sh k1-000000)"`.
+off-Drive worktree: `eval "$(skills/scientist/scripts/new-unit.sh k1-000000)"`.
 
 ## Per-experiment layout
 
@@ -115,11 +114,16 @@ def test_report_no_mortality(experiment):
 
 ## Run it
 
+Claims auto-load the plugin via the `pytest11` entry point; run them zero-install with
+`uv run --with-editable skills/scientist` (no persistent install):
+
 ```
-pytest "<exp>/analysis/claims"                                  # one experiment
-pytest <exp1>/analysis/claims <exp2>/... --grounding-out DIR    # combined report
-pytest <…>/analysis/claims --check-drift                        # also flag stale claims
+uv run --with-editable skills/scientist pytest "<exp>/analysis/claims"                 # one experiment
+uv run --with-editable skills/scientist pytest <exp1>/analysis/claims <exp2>/... --grounding-out DIR   # combined
+uv run --with-editable skills/scientist pytest <…>/analysis/claims --check-drift       # also flag stale claims
 ```
+
+Program-wide rollup: `EXPERIMENTS_ROOT=… uv run --with-editable skills/scientist python skills/scientist/scripts/rollup.py`.
 
 Emits `grounding_report.md` + `.json` (per claim: `{id, statement, outcome, kind, strength, caveats,
 evidence, inputs+shas, reconcile, drift?}`). **The grounding report is the source for indexing claims
