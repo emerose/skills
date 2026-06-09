@@ -13,7 +13,7 @@ temporal history. Closes the pipeline `raw → data → analysis → claims`.
 ## Two packages (the generic machinery)
 
 - **`experiments`** — typed, tracked data access. `from experiments import k1_000000 as k` resolves
-  the `K1-000000 *` folder under `$EXPERIMENTS_ROOT` and returns a `Study`. Tidy `data/` tables are
+  the `K1-000000 *` folder under `$SCIENTIST_HOME` (fallback `$EXPERIMENTS_ROOT`) and returns a `Study`. Tidy `data/` tables are
   attributes (`02_assay_summary.csv` → `k.assay_summary`, drop the `NN_`). Lazy, cached,
   **sha-pinned**, recorded as provenance on every read. `k.meta` = `experiment.yml`; `k.analysis.<name>`
   = a derived table; `k.derive` = the experiment's `analysis/derive.py`. DataFrames carry
@@ -24,6 +24,23 @@ temporal history. Closes the pipeline `raw → data → analysis → claims`.
   `derivation(study, __file__)`, and the `@strength`/`@caveats`/`@kind` markers. The plugin captures
   provenance per claim, **bypass-guards** untracked reads, runs a **reconcile lint**, and emits the
   **grounding report**.
+
+### Cross-experiment: the `program` accessor & canonical ids
+
+`from experiments import program` exposes **cross-experimental reference facts** under
+`$SCIENTIST_HOME/program/` (entity registries, naming conventions, constants) the same tracked way:
+`program.table(name)` / `program.conventions`, and `canonical(name)` resolves an entity alias (e.g. a
+CRO-client-prefixed label) to its canonical id via the documented convention — a value that doesn't
+match (a control, a free-text label) resolves to `None`, **not** a wrong id. `program/claims/test_*.py`
+is the home for grounded **cross-cutting** claims (collected by the same plugin; `rollup.py` includes them).
+
+**Canonical ids at the read boundary (not in `data/`).** An experiment can declare its id columns in
+`experiment.yml` (`id_columns: [...]`); the accessor then adds an in-memory **`canonical_id`** column
+whenever it loads a table containing one — the original column is preserved and `data/` on disk stays
+faithful (the canonical value derives from the program convention, so it's an analysis-layer value, not
+a raw cell). Claims/derivations read `canonical_id` to join across experiments; messy cases (a compound
+key, a free-text label) instead apply `canonical()` in `derive.py`. The resolution rule (the regex +
+overrides) lives in the program's `conventions.yml`, not in the skill.
 
 **Work in an isolated worktree, never the Drive checkout** — the Drive checkout is one shared
 working tree/HEAD that GitSync owns; concurrent fan-out racing it corrupts commits. Provision an
