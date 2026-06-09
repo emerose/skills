@@ -23,7 +23,7 @@ import math
 import re
 from pathlib import Path
 
-import provenance as P
+from .. import provenance as P
 from .engine import Extraction, _rows_to_bytes, _sha256, load_build
 
 NAME_RE = re.compile(r"^\d\d_[a-z0-9]+_[a-z0-9_]+(__[a-z0-9_]+)?\.csv$")

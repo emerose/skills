@@ -7,7 +7,7 @@ loaded privately at runtime (see test_load_vocab_*).
 
 import json
 
-from store import _extract
+from scientist.store import _extract
 
 README = """# K1-000000: Rat IT Dose-Response Study (V1234567)
 

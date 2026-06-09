@@ -77,8 +77,8 @@ only source (provenance records whatever path you read).
   group+sub header; cytokine MSD banner row.)
 - **Derived values live in `analysis/`, not `raw/` — but check version authority first.**
   Means/SEM/EC50 fits/curve params that aren't in any raw instrument file usually come from
-  an analyst workbook under `analysis/`. Distinguish two cases:
-  - **CRO-authored analyst workbook** (a Prism-exported summary, a CRO's own
+  an analysis workbook under `analysis/`. Distinguish two cases:
+  - **CRO-authored analysis workbook** (a Prism-exported summary, a CRO's own
     means/SEM rollup, etc.): this is an authoritative deliverable — extract **that workbook**
     and record it as the input. Recomputing instead isn't faithful and won't reconcile.
   - **AI/derived workbook** (e.g. `*-generated_by_claude.xlsx`, or anything we synthesized):

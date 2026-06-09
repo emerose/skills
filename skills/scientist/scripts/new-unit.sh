@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# new-unit.sh — provision an isolated, off-Drive git worktree for one analyst fan-out unit.
+# new-unit.sh — provision an isolated, off-Drive git worktree for one grounding fan-out unit.
 #
 # WHY (read this once): the scientific-data repo (emerose/kicho-science) is checked out on a
 # Google-Drive mount that GitSync keeps fast-forwarded to origin/main. Working there directly
@@ -40,12 +40,12 @@ if [ "$1" = "--remove" ]; then
   git -C "$BASE" worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"
   git -C "$BASE" worktree prune 2>/dev/null || true
   echo "new-unit: removed worktree $wt" >&2
-  echo "          (branch analyst/$id kept; delete with: git -C \"$BASE\" branch -D analyst/$id)" >&2
+  echo "          (branch grounding/$id kept; delete with: git -C \"$BASE\" branch -D grounding/$id)" >&2
   exit 0
 fi
 
 id="$(norm "$1")"
-branch="${2:-analyst/$id}"
+branch="${2:-grounding/$id}"
 wt="$WT_DIR/$id"
 
 # 1. local base clone (once) — cloning from GitHub sidesteps the Drive .git entirely.

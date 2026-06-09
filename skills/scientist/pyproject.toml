@@ -24,7 +24,7 @@ dependencies = [
     # store layer (libkit-backed index/search/catalog)
     "libkit>=0.2.3",
     "platformdirs>=4.0",
-    # analyst (claim-grounding + analysis-provenance) core. Scientific deps are
+    # grounding (claim-grounding + analysis-provenance) core. Scientific deps are
     # version-pinned for fit determinism: a 4-parameter Hill fit (scipy.optimize)
     # is a pure function of its inputs given a fixed library set, so claims pin to a
     # tested set and compare derived floats within tolerance (never byte-identical).
@@ -45,8 +45,10 @@ reports = ["pdfplumber>=0.11", "python-docx>=1.1", "python-pptx>=1.0"]
 # Auto-load the grounding plugin: a bare `pytest <exp>/analysis/claims` works once
 # the package is on the path (e.g. `uv run --with-editable skills/scientist pytest …`).
 [project.entry-points.pytest11]
-analyst = "analyst.plugin"
+scientist = "scientist.grounding.plugin"
 
-[tool.setuptools]
-# Flat top-level packages.
-packages = ["provenance", "labfiles", "extraction", "store", "analyst", "experiments"]
+[tool.setuptools.packages.find]
+# The single top-level `scientist` package and its subpackages
+# (provenance, labfiles, extraction, store, experiments, grounding).
+where = ["."]
+include = ["scientist*"]

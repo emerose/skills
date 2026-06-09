@@ -5,20 +5,20 @@ to `data/`, and (2) **grounded claims** — every scientific assertion linked to
 that justifies it, re-runnable for audit, with non-binary support (strength) and a git-based
 temporal history. Closes the pipeline `raw → data → analysis → claims`.
 
-> The machinery lives in the `scientist` package as the top-level `analyst` + `experiments`
+> The machinery lives in the `scientist` package as the top-level `grounding` + `experiments`
 > packages plus the pytest plugin (auto-loaded via the `pytest11` entry point). Run claims
 > zero-install with `uv run --with-editable skills/scientist pytest <exp>/analysis/claims`.
 > Full design: [SPEC.md](../SPEC.md). Step-by-step authoring: [references/playbook.md](playbook.md).
 
 ## Two packages (the generic machinery)
 
-- **`experiments`** — typed, tracked data access. `from experiments import k1_000000 as k` resolves
+- **`experiments`** — typed, tracked data access. `from scientist.experiments import k1_000000 as k` resolves
   the `K1-000000 *` folder under `$SCIENTIST_HOME` and returns a `Study`. Tidy `data/` tables are
   attributes (`02_assay_summary.csv` → `k.assay_summary`, drop the `NN_`). Lazy, cached,
   **sha-pinned**, recorded as provenance on every read. `k.meta` = `experiment.yml`; `k.analysis.<name>`
   = a derived table; `k.derive` = the experiment's `analysis/derive.py`. DataFrames carry
   `.attrs["source"]`/`["sha256"]`.
-- **`analyst`** — the harness + pytest plugin: `load()/data()` (tracked loader), `doc()` (record a CRO
+- **`grounding`** — the harness + pytest plugin: `load()/data()` (tracked loader), `doc()` (record a CRO
   report PDF/docx **or a .pptx deck**; `DocRef.text()`/`.contains()` extract + quote-match it),
   `evidence(**kv)`, `uses(claim_id)` (compose, transitive provenance), `cross(study)`,
   `derivation(study, __file__)`, and the `@strength`/`@caveats`/`@kind` markers. The plugin captures
@@ -27,7 +27,7 @@ temporal history. Closes the pipeline `raw → data → analysis → claims`.
 
 ### Cross-experiment: the `program` accessor & canonical ids
 
-`from experiments import program` exposes **cross-experimental reference facts** under
+`from scientist.experiments import program` exposes **cross-experimental reference facts** under
 `$SCIENTIST_HOME/program/` (entity registries, naming conventions, constants) the same tracked way:
 `program.table(name)` / `program.conventions`, and `canonical(name)` resolves an entity alias (e.g. a
 CRO-client-prefixed label) to its canonical id via the documented convention — a value that doesn't
@@ -72,9 +72,9 @@ def ec50_table(k):
     return df
 
 def main():
-    import analyst
-    from experiments import k1_000000 as k
-    with analyst.derivation(k, __file__) as d:
+    from scientist import grounding
+    from scientist.experiments import k1_000000 as k
+    with grounding.derivation(k, __file__) as d:
         d.write_table("ec50_summary.csv", ec50_table(k))
         d.write_fig("dose_response_fits.png", plot_fits(k))
 ```
@@ -85,7 +85,7 @@ Request the `experiment` fixture (ships with the plugin; resolves the Study from
 
 ```python
 import pytest
-from analyst import strength, caveats, kind, evidence, uses
+from scientist.grounding import strength, caveats, kind, evidence, uses
 
 @kind("result")                                   # result | design | external | interpretive
 @strength("strong")                               # strong | moderate | weak | unverifiable | ...
@@ -102,7 +102,7 @@ def test_pos_ctrl_below_criterion(experiment):
   = justification · **assert** = grounding/drift check · **markers** = the non-binary judgment (kept
   *out* of the assert).
 - **bulk** via `@pytest.mark.parametrize`. **compose** via `uses("other_claim_id")`. **cross-experiment**:
-  `from experiments import k1_000000; other = cross(k1_000000)` (reads captured, sha-pinned).
+  `from scientist.experiments import k1_000000; other = cross(k1_000000)` (reads captured, sha-pinned).
 - **lifecycle** = pytest states: `@pytest.mark.xfail(strict=True)` = contradicted but on record;
   `pytest.skip(reason=…)` = unverifiable.
 - **identifiers**: id columns that only look numeric (leading zeros) are preserved as **strings** —

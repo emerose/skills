@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-import provenance as P
-from provenance import trace as T
+import scientist.provenance as P
+from scientist.provenance import trace as T
 
 
 # --------------------------------------------------------------------------- #
@@ -66,7 +66,7 @@ def _exp(tmp_path: Path, name: str = "K1-230101 - kd study") -> Path:
 
 def _report(exp: Path, *, table: str = "analysis/tables/kd.csv") -> Path:
     """A grounding_report.json with one claim citing ``table`` (path absolute, as the
-    analyst plugin records it). ``table`` is experiment-relative."""
+    grounding plugin records it). ``table`` is experiment-relative."""
     art = exp / table
     sha = P.sha256_file(art) if art.is_file() else "0" * 64
     report = {"claims": [{
@@ -205,7 +205,7 @@ def test_no_report_walks_artifacts(tmp_path):
 # --------------------------------------------------------------------------- #
 def test_audit_without_store(tmp_path):
     exp = _exp(tmp_path)
-    from store import cli as STORE_CLI
+    from scientist.store import cli as STORE_CLI
 
     # no .scientist store under tmp_path -> store_exists is False
     args = type("A", (), {"home": str(tmp_path), "experiment": str(exp), "json": True})()

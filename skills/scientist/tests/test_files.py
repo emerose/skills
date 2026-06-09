@@ -1,6 +1,6 @@
 """Unit tests for _files: walking + classification + tabular schema (stdlib only)."""
 
-from store import _files
+from scientist.store import _files
 
 
 def _make_experiment(root):

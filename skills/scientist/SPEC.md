@@ -1,4 +1,4 @@
-# analyst — analysis + claim-grounding layer (draft spec)
+# grounding — analysis + claim-grounding layer (draft spec)
 
 Closes the provenance pipeline `raw → data → analysis → claims`. The extract stage already
 produces trustworthy `data/`. This layer adds (1) **comprehensive, re-derivable
@@ -38,7 +38,7 @@ faithfulness; the computed tables become analysis outputs (exposed via `k.analys
 ## Components
 
 ### 1. `experiments` — typed, tracked data access (one generic module)
-`from experiments import k1_000000 as k` → a `Study` bound to the experiment folder (resolved by
+`from scientist.experiments import k1_000000 as k` → a `Study` bound to the experiment folder (resolved by
 glob on the id). Attributes are the tidy tables as pandas DataFrames; lazy, cached,
 **sha-pinned**, and every access routes through the tracked loader so it is recorded as
 provenance.
@@ -84,8 +84,8 @@ def test_pos_ctrl_below_criterion(k1_000000):
     assert kd == pytest.approx(45, abs=3) and kd < 60
 ```
 
-## Harness (`analyst` package + pytest plugin)
-- API: `data()/load()` (tracked loader, via `experiments`), `uses(claim_id)`,
+## Harness (`scientist.grounding` package + pytest plugin)
+- API: `data()/load()` (tracked loader, via `scientist.experiments`), `uses(claim_id)`,
   `doc(path)` (→ `DocRef`; `.text()`/`.contains()` extract + quote-match a PDF/docx/pptx),
   `evidence(**kv)`, and the `strength`/`caveats`/`kind` markers.
 - **Provenance capture:** a per-claim context records every `(kind, path, sha)` loaded;
@@ -110,9 +110,9 @@ hand-maintained beyond the specs themselves.
 ## Layout
 ```
 skills/scientist/
-  experiments/__init__.py      # typed, tracked data access
-  analyst/__init__.py          # data/uses/doc/evidence/strength
-  analyst/plugin.py            # pytest11 plugin: capture, reconcile, grounding report
+  scientist/experiments/__init__.py   # typed, tracked data access
+  scientist/grounding/__init__.py     # data/uses/doc/evidence/strength
+  scientist/grounding/plugin.py       # pytest11 plugin: capture, reconcile, grounding report
   SPEC.md
 <data repo>/<exp>/analysis/
   derive.py  (or per-assay *.py)   # derivation CODE (importable, IPython-friendly)
@@ -141,5 +141,5 @@ Build the harness + `experiments` + the pytest plugin, then author derivations +
 
 **Success criteria:** `pytest` emits a grounding report; provenance is auto-captured and
 bypass-guarded; at least one claim of each kind exists; the K1-000001 strength change is
-legible in git; and everything runs cleanly in IPython (`from experiments import k1_000000 as k`).
+legible in git; and everything runs cleanly in IPython (`from scientist.experiments import k1_000000 as k`).
 Refine the API on these three, then fan out comprehensively (one experiment per session).

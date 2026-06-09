@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any, NoReturn
 
-import provenance
+from .. import provenance
 
 from . import _audit, _extract, _files, _generate, _intake, _meta, _pr
 from ._store import STORE_DIRNAME, Store, EmbedderConfigError

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-import analyst
-from analyst import DocRef, UnsupportedDocFormat, doc
+import scientist.grounding as grounding
+from scientist.grounding import DocRef, UnsupportedDocFormat, doc
 
 QUOTE = "no mortality was observed nor did any animal reach the humane endpoint"
 NOTE = "speaker-note prose lives off-slide"
@@ -108,11 +108,11 @@ def test_unsupported_suffix_raises(tmp_path):
 
 def test_doc_records_provenance(pdf_report):
     """doc() sha-pins the cited bytes into the active capture, like any tracked read."""
-    cap = analyst.Capture(claim_id="t")
-    token = analyst._CURRENT.set(cap)
+    cap = grounding.Capture(claim_id="t")
+    token = grounding._CURRENT.set(cap)
     try:
         ref = doc(pdf_report)
     finally:
-        analyst._CURRENT.reset(token)
+        grounding._CURRENT.reset(token)
     assert any(inp["path"] == str(pdf_report) and inp["sha256"] == ref.sha256
                for inp in cap.inputs)

@@ -1,13 +1,13 @@
-"""analyst — the claim-grounding + analysis-provenance harness.
+"""scientist.grounding — the claim-grounding + analysis-provenance harness.
 
 This package provides the small runtime that turns plain pytest tests into
 *grounded claims* and plain Python functions into *provenance-tracked
 derivations*. It owns one thing: a per-run **capture context** that records every
 source file read while it is active (its kind, path and sha256), plus the headline
 numbers a claim chooses to surface. Everything else (typed table access) lives in
-the companion `experiments` package, which simply calls :func:`record` whenever it loads
-a table — so provenance is captured automatically from one tracked accessor rather
-than hand-maintained.
+the companion `scientist.experiments` package, which simply calls :func:`record`
+whenever it loads a table — so provenance is captured automatically from one tracked
+accessor rather than hand-maintained.
 
 Public API (imported by claim specs and derivations):
 
@@ -19,9 +19,9 @@ Public API (imported by claim specs and derivations):
     derivation(study, recipe)          context for an analysis derivation (writes + records)
     strength(...) / caveats(...) / kind(...)   pytest markers carrying the judgment
 
-The pytest plugin (``analyst.plugin``, auto-loaded via the ``pytest11`` entry point)
-wraps every test in a capture, enforces the bypass guard, runs the reconcile lint,
-and emits the grounding report.
+The pytest plugin (``scientist.grounding.plugin``, auto-loaded via the ``pytest11``
+entry point) wraps every test in a capture, enforces the bypass guard, runs the
+reconcile lint, and emits the grounding report.
 """
 from __future__ import annotations
 
@@ -35,8 +35,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from provenance import record_provenance as _record_provenance
-from labfiles import read_docx_text, read_pdf_text, read_pptx_text
+from ..provenance import record_provenance as _record_provenance
+from ..labfiles import read_docx_text, read_pdf_text, read_pptx_text
 
 __all__ = [
     "load", "data", "doc", "evidence", "uses", "cross", "record",
@@ -282,7 +282,7 @@ def cross(study):
     reconcile lint as an accidental cross-read unless declared. Wrap a second study in
     ``cross(...)`` to register it as expected and return it for use:
 
-        from experiments import k1_000000        # some other experiment
+        from scientist.experiments import k1_000000   # some other experiment
         other = cross(k1_000000)                  # declares the cross-experiment dep
         tbl = other.analysis.some_summary         # ...then read it, captured as usual
 

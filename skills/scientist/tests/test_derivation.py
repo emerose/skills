@@ -15,8 +15,8 @@ import os
 
 import pytest
 
-import analyst
-import provenance as P
+import scientist.grounding as grounding
+import scientist.provenance as P
 
 
 def _build_repo(root):
@@ -45,12 +45,12 @@ def test_derivation_records_repo_relative_inputs_under_symlinked_root(tmp_path, 
     # Point the harness's data-root at the SYMLINKED path (as a checkout under /tmp would be).
     monkeypatch.setenv("SCIENTIST_HOME", str(link_root))
 
-    import experiments as E
+    from scientist import experiments as E
 
     # Reach the study through the symlinked root and run a derivation that reads a data
     # table and writes a derived table — exactly the path the recorder takes.
     study = E.k1_000000
-    with analyst.derivation(study, str(recipe_real)) as d:
+    with grounding.derivation(study, str(recipe_real)) as d:
         src = study.assay                      # tracked read -> captured input
         d.write_table("derived.csv", src.assign(value2=src["value"] * 10))
 

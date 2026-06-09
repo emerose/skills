@@ -1,7 +1,7 @@
 """End-to-end traceability over the one provenance DAG — ``sci trace``.
 
 A *pure* provenance walk: it reads only the experiment's ``experiment.yml`` ledger and,
-when present, its ``grounding_report.json`` (the analyst claims). It re-hashes the
+when present, its ``grounding_report.json`` (the grounding claims). It re-hashes the
 recorded inputs on disk (reusing :func:`provenance.staleness`) but NEVER opens the libkit
 store and never re-runs an analysis — reproduction is out of scope. It answers one
 question per terminal: *does this claim / artifact chain back to a raw measurement, and

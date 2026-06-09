@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import labfiles as R
+from scientist import labfiles as R
 
 
 # --------------------------------------------------------------------------- #

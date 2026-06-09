@@ -21,7 +21,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-import provenance
+from .. import provenance
 
 from . import _files
 

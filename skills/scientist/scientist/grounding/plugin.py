@@ -8,8 +8,8 @@ contradicted/retracted, ``skip`` = unverifiable).
 
 This plugin:
   * registers the markers (no "unknown mark" warnings),
-  * wraps each test in an :class:`analyst.Capture` (autouse fixture) so every
-    ``experiments``/``load``/``doc`` read is recorded, and installs the bypass guard,
+  * wraps each test in a :class:`scientist.grounding.Capture` (autouse fixture) so every
+    ``scientist.experiments``/``load``/``doc`` read is recorded, and installs the bypass guard,
   * runs the reconcile lint (declared fixtures vs captured inputs),
   * collects ``{id, statement, outcome, evidence, inputs+shas, strength, caveats,
     kind}`` per claim and writes ``grounding_report.md`` + ``.json``.
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-import analyst
+from .. import grounding
 
 _MARKERS = {
     "strength": "strength(level): how strongly the evidence supports the claim",
@@ -36,12 +36,12 @@ _MARKERS = {
 def pytest_configure(config):
     for name, help_ in _MARKERS.items():
         config.addinivalue_line("markers", help_)
-    analyst.install_guard()
-    config._analyst_records = []
+    grounding.install_guard()
+    config._grounding_records = []
 
 
 def pytest_addoption(parser):
-    g = parser.getgroup("analyst")
+    g = parser.getgroup("grounding")
     g.addoption("--grounding-out", action="store", default=None,
                 help="directory for grounding_report.{md,json} (default: rootdir)")
     g.addoption("--check-drift", action="store_true", default=False,
@@ -69,8 +69,8 @@ def experiment(request):
     """The :class:`Study` whose ``analysis/claims/`` this test lives in — resolved from
     the test file's path, so **no per-experiment conftest is needed**. Use as
     ``def test_x(experiment): ...``. (Cross-experiment claims still import a specific
-    other study via ``from experiments import k1_NNNNNN``.)"""
-    import experiments as _exp
+    other study via ``from scientist.experiments import k1_NNNNNN``.)"""
+    from .. import experiments as _exp
     code = _home_exp(request.node.path)
     if code is None:
         raise RuntimeError(
@@ -83,12 +83,12 @@ def experiment(request):
 # Per-claim capture
 # --------------------------------------------------------------------------- #
 @pytest.fixture(autouse=True)
-def _analyst_capture(request):
+def _grounding_capture(request):
     """Set up a fresh capture for each claim and attach it to the item so the report
     hook can read it. ``declared`` = the experiment codes the claim is expected to
     touch: its home experiment (from the test path) + any explicitly-named
     ``k1_NNNNNN`` fixtures (cross-experiment claims)."""
-    cap = analyst.Capture(claim_id=request.node.nodeid)
+    cap = grounding.Capture(claim_id=request.node.nodeid)
     exps = set()
     home = _home_exp(request.node.path)
     if home:
@@ -97,12 +97,12 @@ def _analyst_capture(request):
         if f.lower().startswith("k1_"):
             exps.add(f.upper().replace("_", "-"))
     cap.declared = exps
-    token = analyst._CURRENT.set(cap)
-    request.node._analyst_cap = cap
+    token = grounding._CURRENT.set(cap)
+    request.node._grounding_cap = cap
     try:
         yield cap
     finally:
-        analyst._CURRENT.reset(token)
+        grounding._CURRENT.reset(token)
 
 
 def _marker_val(item, name, default=None):
@@ -118,7 +118,7 @@ def pytest_runtest_makereport(item, call):
     rep = out.get_result()
     if rep.when != "call":
         return
-    cap = getattr(item, "_analyst_cap", None)
+    cap = getattr(item, "_grounding_cap", None)
     # outcome: passed | failed | xfail | xpass | skipped
     outcome = rep.outcome
     if hasattr(rep, "wasxfail"):
@@ -151,8 +151,8 @@ def pytest_runtest_makereport(item, call):
     }
     if cap is not None and item.config.getoption("--check-drift"):
         rec["drift"] = _compute_drift(item, cap)
-    item.config._analyst_records.append(rec)
-    analyst.registry[item.nodeid] = rec  # enables uses(claim_id) for later claims
+    item.config._grounding_records.append(rec)
+    grounding.registry[item.nodeid] = rec  # enables uses(claim_id) for later claims
 
 
 # --------------------------------------------------------------------------- #
@@ -184,7 +184,7 @@ def _compute_drift(item, cap) -> dict:
     """Compare each captured input to its state at the commit that last set this claim's
     @strength marker. Any changed input => the evidence moved since the belief was
     affirmed => stale (re-judge). Pure git; degrades gracefully when unavailable."""
-    root = analyst._data_root()
+    root = grounding._data_root()
     if root is None or not (Path(root) / ".git").exists():
         return {"checked": False, "note": "SCIENTIST_HOME is not a git repo"}
     loc = _strength_line(item)
@@ -215,7 +215,7 @@ def _compute_drift(item, cap) -> dict:
             "strength_commit": commit[:10], "changed_inputs": changed}
 
 
-def _reconcile(cap: analyst.Capture, skipped: bool = False) -> list[str]:
+def _reconcile(cap: grounding.Capture, skipped: bool = False) -> list[str]:
     """Warn when the claim's declared experiments != the experiments it actually read
     from. ``cap.declared`` already holds experiment codes (home + named fixtures).
     Cheap, advisory. A ``skipped`` claim reads nothing by design, so the "empty claim?"
@@ -263,7 +263,7 @@ _OUTCOME_LABEL = {
 
 def pytest_sessionfinish(session):
     config = session.config
-    records = getattr(config, "_analyst_records", [])
+    records = getattr(config, "_grounding_records", [])
     if not records:
         return
     out_dir = Path(config.getoption("--grounding-out") or config.rootpath)
@@ -272,13 +272,13 @@ def pytest_sessionfinish(session):
         json.dumps({"claims": records}, indent=2, ensure_ascii=False, default=_json_default),
         encoding="utf-8")
     (out_dir / "grounding_report.md").write_text(_render_md(records), encoding="utf-8")
-    config._analyst_report_path = out_dir / "grounding_report.md"
+    config._grounding_report_path = out_dir / "grounding_report.md"
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    p = getattr(config, "_analyst_report_path", None)
+    p = getattr(config, "_grounding_report_path", None)
     if p is not None:
-        terminalreporter.write_sep("-", "analyst grounding report")
+        terminalreporter.write_sep("-", "grounding report")
         terminalreporter.write_line(f"  {p}")
 
 

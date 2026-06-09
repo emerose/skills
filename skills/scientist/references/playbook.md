@@ -1,4 +1,4 @@
-# Analyst authoring playbook
+# Grounding authoring playbook
 
 How to add the analysis + claims layer to one experiment. Mirror the three pilot
 experiments (`K1-000000`, `K1-000001`, `K1-000002`) — they cover the common shapes.
@@ -22,11 +22,11 @@ eval "$(skills/scientist/scripts/new-unit.sh k1-000000)"
 ```
 
 Do all edits, `python derive.py`, and `pytest` in that worktree; commit there (scoped to
-your experiment dir) and `git -C "$SCIENTIST_HOME" push origin analyst/k1-000000` straight
+your experiment dir) and `git -C "$SCIENTIST_HOME" push origin grounding/k1-000000` straight
 to GitHub; open one PR. After it merges, `skills/scientist/scripts/new-unit.sh --remove
 k1-000000`. (See the header of `scripts/new-unit.sh` for env overrides + teardown.)
 
-Smoke test: `python -c "from experiments import k1_000000 as k; print(dir(k), k.assay_summary.shape)"`.
+Smoke test: `python -c "from scientist.experiments import k1_000000 as k; print(dir(k), k.assay_summary.shape)"`.
 
 ## 1. Understand the experiment
 
@@ -53,7 +53,7 @@ Smoke test: `python -c "from experiments import k1_000000 as k; print(dir(k), k.
 
 - Plain importable functions, reading via `experiments` (provenance auto). Put **choices** in
   code + comments (fit model, point exclusions, normalization, which probe/replicate).
-- A `main()` writes artifacts through `analyst.derivation(k, __file__)`:
+- A `main()` writes artifacts through `grounding.derivation(k, __file__)`:
   `d.write_table(name, df)` and `d.write_fig(name, fig)`. This records analysis provenance
   into `experiment.yml` (artifact + sha, inputs = data files read + the recipe).
 - **Fit determinism**: fix `p0`/bounds, pin versions (pyproject); the pilot's refit
@@ -72,7 +72,7 @@ Smoke test: `python -c "from experiments import k1_000000 as k; print(dir(k), k.
   `analysis/derive.py` collision-free) — never `sys.path.insert` + `import derive` (every
   experiment's file is named `derive`, so they collide in `sys.modules` when run together).
 - Cross-experiment claims import another study and wrap it in `cross(...)`:
-  `from experiments import k1_000000; other = cross(k1_000000)`.
+  `from scientist.experiments import k1_000000; other = cross(k1_000000)`.
 - `pytest "<exp>/analysis/claims"` → check the grounding report renders and the reconcile
   lint is quiet (no empty claims / undeclared reads / bypasses). Add `--check-drift` to
   flag claims whose inputs changed since their `@strength` was last set.

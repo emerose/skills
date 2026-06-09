@@ -1,6 +1,6 @@
-"""experiments — typed, tracked access to an experiment's tidy data.
+"""scientist.experiments — typed, tracked access to an experiment's tidy data.
 
-    from experiments import k1_000000 as k
+    from scientist.experiments import k1_000000 as k
     k.assay_summary          # data/02_assay_summary.csv as a DataFrame (sha-pinned)
     k.meta                  # experiment.yml as a dict
     k.analysis.ec50_summary  # analysis/tables/ec50_summary.csv (a derived output)
@@ -9,7 +9,7 @@ A ``k1_NNNNNN`` attribute resolves to the experiment folder ``K1-NNNNNN *`` unde
 ``$SCIENTIST_HOME`` (the scientific-data checkout) and returns a :class:`Study`. Tidy tables
 under ``data/`` become attributes: ``NN_<assay>_<content>.csv`` -> drop the ``NN_``
 prefix and ``.csv`` -> ``k.<assay>_<content>``. Access is lazy, cached, and sha-pinned,
-and **every access is recorded as provenance** through ``analyst.record`` — so a claim
+and **every access is recorded as provenance** through ``scientist.grounding.record`` — so a claim
 or derivation that touches ``k.assay_summary`` has that input captured automatically.
 
 This module is the one tracked accessor the spec calls for: it knows nothing about
@@ -23,7 +23,7 @@ import os
 import re
 from pathlib import Path
 
-import analyst
+from .. import grounding
 
 __all__ = ["Study", "Program", "program", "canonical", "root", "resolve"]
 
@@ -124,9 +124,9 @@ class Study:
         key = str(path)
         if key in self._cache:
             df, sha = self._cache[key]
-            analyst.record(kind, path, sha)   # re-record for this capture
+            grounding.record(kind, path, sha)   # re-record for this capture
             return df
-        df = analyst.load(path, kind=kind)    # reads bytes, sha-pins, records, sets .attrs
+        df = grounding.load(path, kind=kind)    # reads bytes, sha-pins, records, sets .attrs
         # Boundary canonicalization: for any DECLARED id column present, add a `canonical_id`
         # sibling — in memory only, so data/ on disk stays faithful. The canonical value
         # derives from the program registry/convention (recorded as provenance via canonical());
@@ -143,8 +143,8 @@ class Study:
         """``experiment.yml`` as a dict (recorded as a provenance input)."""
         import yaml
         p = self.path / "experiment.yml"
-        sha = analyst._sha256(p.read_bytes())
-        analyst.record("meta", p, sha)
+        sha = grounding._sha256(p.read_bytes())
+        grounding.record("meta", p, sha)
         return yaml.safe_load(p.read_text(encoding="utf-8"))
 
     @property
@@ -190,7 +190,7 @@ class Program:
     generic. Reads route through the tracked loader, so referencing a program fact from a
     claim/derivation is captured as provenance like any other input.
 
-        from experiments import program
+        from scientist.experiments import program
         program.table("entities")          # a reference table (tracked, sha-pinned)
         program.conventions                # program/conventions.yml — naming rules, constants
         program.canonical("<prefixed-alias>")   # resolve an alias to its canonical id
@@ -209,14 +209,14 @@ class Program:
         if self._conv is None:
             import yaml
             p = self.path / "conventions.yml"
-            analyst.record("reference", p, analyst._sha256(p.read_bytes()))
+            grounding.record("reference", p, grounding._sha256(p.read_bytes()))
             self._conv = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         return self._conv
 
     def table(self, name: str):
         """A reference table ``program/<name>[.csv]`` as a tracked DataFrame."""
         p = self.path / (name if name.endswith(".csv") else f"{name}.csv")
-        return analyst.load(p, kind="reference")
+        return grounding.load(p, kind="reference")
 
     def canonical(self, name) -> int | None:
         """Resolve an entity alias to its canonical numeric id using the program's documented
@@ -240,7 +240,7 @@ class Program:
         return None
 
 
-# Module-level attribute access (PEP 562): `from experiments import k1_000000`, `program`.
+# Module-level attribute access (PEP 562): `from scientist.experiments import k1_000000`, `program`.
 _studies: dict[str, Study] = {}
 _program: Program | None = None
 
@@ -268,9 +268,9 @@ def __getattr__(name: str):
         if name not in _studies:
             _studies[name] = Study(name)
         return _studies[name]
-    if name == "program":            # `from experiments import program` -> the Program accessor
+    if name == "program":            # `from scientist.experiments import program` -> the Program accessor
         return _get_program()
-    raise AttributeError(f"module 'experiments' has no attribute '{name}'")
+    raise AttributeError(f"module 'scientist.experiments' has no attribute '{name}'")
 
 
 def __dir__():

@@ -1,6 +1,6 @@
 """Unit tests for _intake: incoming-file classification + placement plan."""
 
-from store import _intake
+from scientist.store import _intake
 
 
 def test_classify_incoming_keywords_win():

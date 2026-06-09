@@ -22,8 +22,8 @@ import runpy
 from datetime import date
 from pathlib import Path
 
-import labfiles as R
-import provenance as P
+from .. import labfiles as R
+from .. import provenance as P
 
 
 def _rows_to_bytes(header, rows) -> bytes:

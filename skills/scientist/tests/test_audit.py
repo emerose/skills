@@ -2,7 +2,7 @@
 
 import zipfile
 
-from store import _audit
+from scientist.store import _audit
 
 
 def _exp(tmp_path):

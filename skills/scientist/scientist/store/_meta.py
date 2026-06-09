@@ -24,7 +24,7 @@ of three *kinds*, distinguished by the ``kind`` metadata key:
 * ``kind="entity"`` — only for *curated* notes about an ASO/CRO/assay/model that
   a query can't reconstruct. Purely-derivable entity facts are NOT stored here;
   they come from a live filter query over experiment records (see the skill doc).
-* ``kind="claim"`` — one per grounded claim emitted by the analyst pytest harness
+* ``kind="claim"`` — one per grounded claim emitted by the grounding pytest harness
   (``grounding_report.json``). The card leads with the claim's **statement** (the
   primary searchable text) and carries its **outcome + strength + claim kind** so a
   semantic hit is honest — a contradicted (``xfail``) or weak claim never reads as

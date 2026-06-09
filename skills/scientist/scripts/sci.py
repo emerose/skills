@@ -45,13 +45,13 @@ import argparse
 import sys
 from pathlib import Path
 
-# Put skills/scientist (the package root) onto sys.path so the flat top-level
-# packages (provenance, labfiles, extraction) and the store subpackage import.
+# Put skills/scientist (the dir containing the `scientist` package) onto sys.path so
+# `import scientist` and its subpackages (provenance, labfiles, extraction, store) resolve.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import extraction as EXT  # noqa: E402
-from provenance import trace as TRACE  # noqa: E402
-from store import cli as STORE_CLI  # noqa: E402
+from scientist import extraction as EXT  # noqa: E402
+from scientist.provenance import trace as TRACE  # noqa: E402
+from scientist.store import cli as STORE_CLI  # noqa: E402
 
 
 def main() -> int:

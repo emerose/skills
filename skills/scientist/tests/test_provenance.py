@@ -7,7 +7,7 @@ and staleness detection of changed/missing/added inputs.
 
 import pytest
 
-import provenance as P
+import scientist.provenance as P
 
 
 # --------------------------------------------------------------------------- #
