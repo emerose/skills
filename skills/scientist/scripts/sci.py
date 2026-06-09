@@ -34,6 +34,16 @@ data/ ↔ raw/ AND provenance staleness of the experiment.yml ledger. With no
 experiment, it runs the store staleness pass across the whole data folder. Use
 `sci check` for the structural-integrity report.
 
+`trace` statically walks the provenance DAG (recorded shas still match); `reproduce`
+is its executable complement — it RE-RUNS <exp>/analysis/derive.py in the pinned
+environment and checks the regenerated analysis/tables|fig/* reproduce the recorded
+artifacts (within tolerance) and that the derivation read only from data/. Because it
+re-executes derive.py it needs the pinned analysis runtime, so run it via the editable
+install (which carries pandas/scipy/matplotlib), not the bare PEP723 env:
+
+    SCIENTIST_HOME=… uv run --with-editable skills/scientist \
+        skills/scientist/scripts/sci.py reproduce "<exp dir>"
+
 `extract`'s recipe lives at <exp>/data/extract.py and defines build(x); see the
 extraction package and references/extract.md. The data-tree root is $SCIENTIST_HOME,
 the private vocab is $SCIENTIST_VOCAB, and the store lives at
@@ -51,6 +61,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scientist import extraction as EXT  # noqa: E402
 from scientist.provenance import trace as TRACE  # noqa: E402
+from scientist.provenance import reproduce as REPRODUCE  # noqa: E402
 from scientist.store import cli as STORE_CLI  # noqa: E402
 
 
@@ -82,6 +93,17 @@ def main() -> int:
     p_tr.add_argument("--report", help="grounding_report.json to use "
                       "(default <exp>/analysis/grounding_report.json then <exp>/grounding_report.json)")
 
+    # ---- reproduce: re-run analysis/derive.py and check it reproduces the recorded artifacts ----
+    p_rp = sub.add_parser("reproduce",
+                          help="re-run analysis/derive.py and check it reproduces the recorded "
+                               "artifacts (reads only data/) — the executable complement to trace")
+    p_rp.add_argument("exp", help="experiment folder (path)")
+    p_rp.add_argument("--json", action="store_true", help="machine-readable output")
+    p_rp.add_argument("--rtol", type=float, default=REPRODUCE.DEFAULT_RTOL,
+                      help=f"relative tolerance for derived floats (default {REPRODUCE.DEFAULT_RTOL})")
+    p_rp.add_argument("--atol", type=float, default=REPRODUCE.DEFAULT_ATOL,
+                      help=f"absolute tolerance for derived floats (default {REPRODUCE.DEFAULT_ATOL})")
+
     # ---- store subcommands (init/index/reindex/list/show/search/query/file/read/
     #      entity/new/intake/meta/review/fingerprint/catalog/check/audit/pr) ----
     STORE_CLI.register(sub)
@@ -101,6 +123,8 @@ def main() -> int:
         return EXT.cellcov(args.exp, args.script, args.examples)
     if args.cmd == "trace":
         return _trace(args)
+    if args.cmd == "reproduce":
+        return _reproduce(args)
     if args.cmd == "audit":
         return _audit_both(args)
     return STORE_CLI.dispatch(args)
@@ -117,6 +141,20 @@ def _trace(args: argparse.Namespace) -> int:
     else:
         print(TRACE.render(result))
     return 0 if result["status"] == "GROUNDED" else 1
+
+
+def _reproduce(args: argparse.Namespace) -> int:
+    """`sci reproduce <exp>`: re-run analysis/derive.py and check it reproduces the
+    recorded artifacts within tolerance and read only from data/. Pure re-run (scratch
+    output only); no libkit store. Exit 0 if REPRODUCES, 1 otherwise."""
+    import json
+
+    result = REPRODUCE.reproduce(Path(args.exp), rtol=args.rtol, atol=args.atol)
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    else:
+        print(REPRODUCE.render(result))
+    return 0 if result["status"] == "REPRODUCES" else 1
 
 
 def _audit_both(args: argparse.Namespace) -> int:

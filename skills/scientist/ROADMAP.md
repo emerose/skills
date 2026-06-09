@@ -13,16 +13,24 @@ without a grounded backing).
 - **Claims** `analysis → claims` — each a pytest spec; grounding report; indexed into libkit as
   `kind=claim` carrying honest outcome + strength.
 - **End-to-end traceability** (`sci trace`) — a static walk of the DAG plus drift detection.
+- **Analysis reproduction audit** (`sci reproduce`) — the *executable* complement to `trace`:
+  re-runs each `analysis/derive.py` in the pinned environment and checks the regenerated
+  `analysis/tables|fig/*` reproduce the recorded artifacts (within tolerance) and that the
+  derivation read only from `data/` (the bypass guard, extended to derivations). See §1.
 
-## 1. Analysis reproduction audit — do the analyses actually re-run?
+## 1. Analysis reproduction audit — do the analyses actually re-run? *(shipped)*
 
-`sci trace` checks the chain *statically* (inputs exist, recorded shas still match); it executes
-nothing. Add an audit that **re-runs each `analysis/derive.py`** in a pinned environment and
-checks the regenerated `analysis/tables|fig/*` reproduce the recorded artifacts (within fit
-tolerance), and that the derivation read only from `data/`. The claim-time bypass guard already
-flags out-of-`data/` reads — extend it to derivations executed under audit. Flag analyses that
-don't run, don't reproduce, or pull inputs from outside `data/`. This turns "the recipe sha still
-matches" into "the recipe still produces the numbers."
+**Shipped** as `sci reproduce <exp>` (`provenance/reproduce.py`; docs in
+[references/review-audit.md](references/review-audit.md)). `sci trace` checks the chain
+*statically* (inputs exist, recorded shas still match); it executes nothing. `sci reproduce`
+**re-runs each `analysis/derive.py main()`** in the pinned environment under a derivation-audit
+context (writes to scratch, never over the recorded artifacts; no provenance written), and checks
+the regenerated `analysis/tables|fig/*` reproduce the recorded artifacts (tables: exact sha then a
+numeric/log tolerance; figures: regenerated + tolerant PNG-dimension check, not byte-compared), and
+that the derivation read only from `data/`. The claim-time bypass guard was extended to wrap a
+derivation execution, so an out-of-`data/` read is flagged for a derivation exactly as for a claim.
+Emits three independent verdicts per experiment — **runs / reproduces / reads_only_data** — and an
+overall REPRODUCES / BROKEN status.
 
 ## 2. Finer-grained provenance — beyond file + sha
 
