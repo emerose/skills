@@ -17,6 +17,10 @@ dependencies = [
     "xlrd>=2.0",
     "python-docx>=1.1",
     "pdfplumber>=0.11",
+    # python-pptx completes the doc-text readers (labfiles.read_pptx_text); core
+    # alongside pdfplumber/python-docx so the claims path (editable install, no extras)
+    # can quote .pptx TC decks without the [reports] extra.
+    "python-pptx>=1.0",
     # store layer (libkit-backed index/search/catalog)
     "libkit>=0.2.3",
     "platformdirs>=4.0",
