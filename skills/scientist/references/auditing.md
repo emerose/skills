@@ -39,23 +39,31 @@ slides under `Shared/`). `sci audit` re-hashes them and compares:
 - `no-provenance` — never reviewed; warrants a semantic look.
 - `no-/invalid-experiment-yml` — create or fix the sidecar (`sci meta <exp> --suggest`).
 
-## 2b. Quantitative prose ↔ claims (the deterministic gate before the semantic pass)
+## 2b. Quantitative prose ↔ claims — `sci enforce-prose` (part of the semantic pass)
 
-Between the cheap hash check and the expensive agent pass sits a deterministic
-enforcement: `sci audit` scans each `README.md` / `reports/*.md` for **quantitative
-assertions** (a result-like number — percentage, fold-change, p-value, `n=`, IC50/EC50,
-concentration, mass dose, ±/CI) and requires each to **map to a grounded `kind=claim`**.
-Cite the result inline with **`[claim:<id>]`** (full stable `claim_id` or its trailing
+A quantitative result asserted in prose must map to a grounded `kind=claim`. The split:
+**you (the semantic-pass agent) detect the assertions; `sci enforce-prose` decides if
+they're backed.** Deciding *whether a sentence asserts a quantitative result* is a
+judgment call, so it's left to you — `sci audit` only lists the `prose_docs` to read,
+it doesn't regex them. As part of the per-experiment pass below, pull out each
+quantitative sentence (a result-like number — %, fold-change, p-value, `n=`, dose,
+IC50…; ignore bare counts, dates, refs, and method time/temperature) and feed them to
+the deterministic gate:
+
+```bash
+echo '[{"text":"Knockdown reached 82% [claim:test_kd_lumbar].","line":12}]' \
+  | sci enforce-prose "<exp>" --source README.md
+```
+
+Cite a result inline with **`[claim:<id>]`** (full stable `claim_id` or its trailing
 node name). An assertion clears only if its citation resolves to a `passed`/`xpass`,
-strong/moderate claim; otherwise it's flagged `unbacked` (no citation),
-`weak-backing` (cited only to a contradicted/drifted/unverifiable/weak claim — surfaced
-*with* its outcome+strength), or `unknown-claim` (citation resolves to nothing). The
-detector is conservative — bare counts, dates, figure/section refs, version strings, and
-method time/temperature don't trigger, and code spans / the deps comment are ignored —
-so a flag is a real "prose got ahead of the evidence" signal, not noise. Backing comes
-from the live `kind=claim` index when a store exists, else the per-experiment
-`grounding_report.json`. (Core: `scientist.store._prose.enforce_prose` — the same gate
-the report phase will run on generated report Markdown.)
+strong/moderate claim; otherwise it's flagged `unbacked` (no citation; carries an
+advisory `suggestion`), `weak-backing` (cited only to a contradicted/drifted/
+unverifiable/weak claim — surfaced *with* its outcome+strength), or `unknown-claim`
+(citation resolves to nothing). Exit 1 if anything is flagged. It's **store-free** —
+backed by the experiment's `grounding_report.json`, like `sci trace`. (Core:
+`scientist.store._prose.enforce_prose(assertions, claims)` — the same gate the report
+phase will run on generated report Markdown.)
 
 ## 3. Semantic — the parallel-agent pass (authoritative for content)
 
@@ -69,6 +77,11 @@ Fan out one agent per experiment:
 > **framing/labeling**. Report only genuine contradictions, stale numbers, and missing
 > major caveats — classify each as `contradiction` vs `imprecision`. Also return the
 > exact list of files you actually relied on. Don't rewrite; report.
+>
+> Then, for the prose↔claims gate: extract every quantitative assertion from each
+> `prose_docs` entry as `[{"text", "line"}]` and pipe it to
+> `sci enforce-prose "<exp>" --source <doc> --json`. Report whatever it flags
+> (`unbacked` / `weak-backing` / `unknown-claim`) alongside your content findings.
 
 The verdict is a **pointer to where to look**, not the truth — always re-verify against
 the primary data before changing prose (the agent can over-read; see the discipline

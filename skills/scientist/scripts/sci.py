@@ -30,11 +30,14 @@ Store (a libkit-backed index/search/catalog over a tree of experiments):
     uv run skills/scientist/scripts/sci.py review K1-000000 --home "<data folder>"
 
 `audit` runs BOTH passes on one experiment: the extraction re-extraction check of
-data/ ↔ raw/ AND provenance staleness of the experiment.yml ledger. It also enforces
-quantitative prose ↔ claims — every result asserted in a README/reports sentence must
-map to a grounded `kind=claim` (cite it `[claim:<id>]`) or it is flagged. With no
-experiment, it runs the store staleness pass across the whole data folder. Use
-`sci check` for the structural-integrity report.
+data/ ↔ raw/ AND provenance staleness of the experiment.yml ledger; with no experiment
+it runs the store staleness pass across the whole data folder. Use `sci check` for the
+structural-integrity report.
+
+`enforce-prose <exp>` is the quantitative-prose ↔ claims gate: the caller (the
+semantic-pass agent) extracts the quantitative assertions from a README/reports doc and
+pipes them in as JSON; each must cite a grounded `kind=claim` with `[claim:<id>]` or it
+is flagged. Store-free (backed by grounding_report.json); exit 1 if anything is flagged.
 
 `extract`'s recipe lives at <exp>/data/extract.py and defines build(x); see the
 extraction package and references/extract.md. The data-tree root is $SCIENTIST_HOME,
@@ -84,6 +87,18 @@ def main() -> int:
     p_tr.add_argument("--report", help="grounding_report.json to use "
                       "(default <exp>/analysis/grounding_report.json then <exp>/grounding_report.json)")
 
+    # ---- enforce-prose: deterministic prose↔claims gate over agent-supplied assertions ----
+    p_ep = sub.add_parser("enforce-prose",
+                          help="map agent-extracted quantitative prose assertions to grounded claims")
+    p_ep.add_argument("exp", help="experiment folder (path)")
+    p_ep.add_argument("--assertions", help="JSON file of the assertions to check "
+                      "(list of strings or [{text, line}]); default: read from stdin")
+    p_ep.add_argument("--source", help="label for the prose doc the assertions came from "
+                      "(e.g. the README path), echoed in the output")
+    p_ep.add_argument("--report", help="grounding_report.json to back the check with "
+                      "(default <exp>/analysis/grounding_report.json then <exp>/grounding_report.json)")
+    p_ep.add_argument("--json", action="store_true", help="machine-readable output")
+
     # ---- store subcommands (init/index/reindex/list/show/search/query/file/read/
     #      entity/new/intake/meta/review/fingerprint/catalog/check/audit/pr) ----
     STORE_CLI.register(sub)
@@ -103,6 +118,8 @@ def main() -> int:
         return EXT.cellcov(args.exp, args.script, args.examples)
     if args.cmd == "trace":
         return _trace(args)
+    if args.cmd == "enforce-prose":
+        return _enforce_prose(args)
     if args.cmd == "audit":
         return _audit_both(args)
     return STORE_CLI.dispatch(args)
@@ -119,6 +136,28 @@ def _trace(args: argparse.Namespace) -> int:
     else:
         print(TRACE.render(result))
     return 0 if result["status"] == "GROUNDED" else 1
+
+
+def _enforce_prose(args: argparse.Namespace) -> int:
+    """`sci enforce-prose <exp>`: deterministic prose↔claims gate. The caller (the
+    semantic-pass agent) decides which prose sentences are quantitative assertions and
+    feeds them in as JSON; this maps each to a grounded claim or flags it. Store-free
+    (backed by the grounding report). Exit 1 if anything is flagged."""
+    import json
+
+    raw = (Path(args.assertions).read_text(encoding="utf-8") if args.assertions
+           else sys.stdin.read())
+    try:
+        assertions = json.loads(raw) if raw.strip() else []
+    except ValueError as e:
+        print(f"error: could not parse assertions JSON: {e}", file=sys.stderr)
+        return 2
+    if not isinstance(assertions, list):
+        print("error: assertions must be a JSON list (of strings or {text, line} objects)",
+              file=sys.stderr)
+        return 2
+    return STORE_CLI.run_enforce_prose(args.exp, assertions, report=args.report,
+                                       source=args.source, as_json=args.json)
 
 
 def _audit_both(args: argparse.Namespace) -> int:

@@ -33,16 +33,17 @@ a drifted input would point at *which* number moved.
 
 ## 3. Claims ⟷ prose enforcement — no ungrounded narrative ✅ shipped
 
-`sci audit` now enforces this: it scans each `README.md` / `reports/*.md` for **quantitative
-assertions** (a result-like number — %, fold, p-value, `n=`, IC50/EC50, concentration, dose, ±/CI;
-conservative, so bare counts/dates/refs/method time-temp don't trigger) and **requires** each to map
-to a grounded `kind=claim`. Cite a result inline with `[claim:<id>]`; an assertion clears only when
-that resolves to a `passed`/`xpass`, strong/moderate claim, else it's flagged `unbacked`,
-`weak-backing` (cited only to a contradicted/weak claim — surfaced *with* its outcome+strength), or
-`unknown-claim`. Backing comes from the live claim index, or the per-experiment `grounding_report.json`
-store-free. The core check `scientist.store._prose.enforce_prose(markdown, claims)` is reusable on any
-Markdown — the planned report phase (`sci report`) will run the same gate on generated report Markdown. See
-[references/review-audit.md](references/review-audit.md) and [references/auditing.md](references/auditing.md).
+`sci enforce-prose` enforces this, with control **inverted to the semantic-pass agent**: deciding
+whether a sentence asserts a quantitative result is a language task, so the agent extracts the
+assertions (`sci audit --json` just lists the `prose_docs` to read) and pipes them in; the deterministic
+gate does the part worth pinning down — parse the `[claim:<id>]` citation, resolve the claim, check it's
+grounded. An assertion clears only when its citation resolves to a `passed`/`xpass`, strong/moderate
+claim, else it's flagged `unbacked`, `weak-backing` (cited only to a contradicted/weak claim — surfaced
+*with* its outcome+strength), or `unknown-claim`. Store-free, backed by `grounding_report.json` like
+`sci trace`; exit 1 if anything is flagged. The core `scientist.store._prose.enforce_prose(assertions,
+claims)` is pure and reusable — the planned report phase (`sci report`) runs the same gate, its
+generating agent emitting the assertions it wrote. See [references/review-audit.md](references/review-audit.md)
+and [references/auditing.md](references/auditing.md).
 
 ## 4. Program-level traceability
 
