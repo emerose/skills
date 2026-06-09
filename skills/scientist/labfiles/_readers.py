@@ -399,3 +399,60 @@ def read_pdf_pages(path: Path, pages: list[int] | None = None) -> list[list[str]
             txt = pdf.pages[i].extract_text() or ""
             out.append(txt.splitlines())
     return out
+
+
+# ---- document PROSE text (for verbatim quote-matching, e.g. claim grounding) -------
+# Distinct from the *table* readers above: these return the document's flowing text,
+# joined, for substring/quote checks. Deliberately NOT routed through libkit's loaders:
+# its office path needs LibreOffice (soffice) on PATH and its default PDF loader uploads
+# bytes to a hosted API (datalab) — a heavyweight system dep + a confidentiality risk for
+# CRO deliverables — and it emits reformatted Markdown, which makes verbatim matching
+# *more* flaky. These are offline, deterministic, and quote-faithful.
+def read_pdf_text(path: Path) -> str:
+    """All page text of a PDF, newline-joined (pdfplumber). Pure function of the bytes."""
+    import pdfplumber
+
+    with pdfplumber.open(str(path)) as pdf:
+        return "\n".join((page.extract_text() or "") for page in pdf.pages)
+
+
+def read_docx_text(path: Path) -> str:
+    """All paragraph + table-cell text of a .docx, newline-joined (python-docx)."""
+    import docx
+
+    d = docx.Document(str(path))
+    parts = [p.text for p in d.paragraphs]
+    for table in d.tables:
+        for row in table.rows:
+            parts.extend(cell.text for cell in row.cells)
+    return "\n".join(parts)
+
+
+def read_pptx_text(path: Path) -> str:
+    """All deck prose, newline-joined (python-pptx). Deck text is scattered: title/body
+    text frames, table cells, *grouped* shapes, and speaker notes — pull them all so a
+    quote that lives in any of them is matchable."""
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    def walk(shapes):
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                yield from walk(shape.shapes)
+            else:
+                yield shape
+
+    prs = Presentation(str(path))
+    parts: list[str] = []
+    for slide in prs.slides:
+        for shape in walk(slide.shapes):
+            if shape.has_text_frame:
+                parts.append(shape.text_frame.text)
+            if shape.has_table:
+                for row in shape.table.rows:
+                    parts.extend(cell.text for cell in row.cells)
+        if slide.has_notes_slide:
+            notes = slide.notes_slide.notes_text_frame
+            if notes is not None:
+                parts.append(notes.text)
+    return "\n".join(parts)

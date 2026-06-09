@@ -17,7 +17,10 @@ Public surface (names preserved from the extractor's ``_readers``):
 
 from ._readers import (  # noqa: F401
     read_docx_tables,
+    read_docx_text,
     read_pdf_pages,
+    read_pdf_text,
+    read_pptx_text,
     read_prism,
     read_prism_structured,
     read_pzfx,
@@ -35,4 +38,7 @@ __all__ = [
     "read_prism_structured",
     "read_docx_tables",
     "read_pdf_pages",
+    "read_pdf_text",
+    "read_docx_text",
+    "read_pptx_text",
 ]

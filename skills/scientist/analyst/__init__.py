@@ -37,6 +37,7 @@ from typing import Any
 
 from provenance import env_first
 from provenance import record_provenance as _record_provenance
+from labfiles import read_docx_text, read_pdf_text, read_pptx_text
 
 __all__ = [
     "load", "data", "doc", "evidence", "uses", "cross", "record",
@@ -180,64 +181,14 @@ def _collapse_ws(s: str) -> str:
 
 
 # --- per-format text readers (pure-Python; the [reports] extra) ------------- #
-# Deliberately NOT routed through libkit's loader registry: its office path needs
-# LibreOffice (soffice) on PATH and its default PDF loader uploads bytes to a hosted
-# API (datalab) — a heavyweight system dep + a confidentiality risk for CRO
-# deliverables — and it emits Markdown (reformatted), which makes verbatim matching
-# *more* flaky. These readers are offline, deterministic, and quote-faithful.
-def _text_from_pdf(path: Path) -> str:
-    import pdfplumber
-
-    with pdfplumber.open(str(path)) as pdf:
-        return "\n".join((page.extract_text() or "") for page in pdf.pages)
-
-
-def _text_from_docx(path: Path) -> str:
-    import docx
-
-    d = docx.Document(str(path))
-    parts = [p.text for p in d.paragraphs]
-    for table in d.tables:
-        for row in table.rows:
-            parts.extend(cell.text for cell in row.cells)
-    return "\n".join(parts)
-
-
-def _text_from_pptx(path: Path) -> str:
-    """Deck prose is scattered: title/body text frames, table cells, *grouped* shapes,
-    and speaker notes. Pull them all so a quote that lives in any of them is matchable."""
-    from pptx import Presentation
-    from pptx.enum.shapes import MSO_SHAPE_TYPE
-
-    def walk(shapes):
-        for shape in shapes:
-            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                yield from walk(shape.shapes)
-            else:
-                yield shape
-
-    prs = Presentation(str(path))
-    parts: list[str] = []
-    for slide in prs.slides:
-        for shape in walk(slide.shapes):
-            if shape.has_text_frame:
-                parts.append(shape.text_frame.text)
-            if shape.has_table:
-                for row in shape.table.rows:
-                    parts.extend(cell.text for cell in row.cells)
-        if slide.has_notes_slide:
-            notes = slide.notes_slide.notes_text_frame
-            if notes is not None:
-                parts.append(notes.text)
-    return "\n".join(parts)
-
-
-# suffix -> reader. Pure-Python formats only; legacy .doc/.ppt (which would need
-# LibreOffice) are intentionally absent and raise UnsupportedDocFormat.
+# suffix -> reader. The actual parsers live in `labfiles` (the one document-parsing
+# layer, alongside the table readers). Pure-Python formats only; legacy .doc/.ppt
+# (which would need LibreOffice) are intentionally absent and raise UnsupportedDocFormat.
+# See labfiles.read_*_text for why these are NOT routed through libkit's loaders.
 _TEXT_READERS = {
-    ".pdf": _text_from_pdf,
-    ".docx": _text_from_docx,
-    ".pptx": _text_from_pptx,
+    ".pdf": read_pdf_text,
+    ".docx": read_docx_text,
+    ".pptx": read_pptx_text,
 }
 
 _PRESENTATION_SUFFIXES = {".pptx", ".ppt", ".odp"}
@@ -276,9 +227,9 @@ class DocRef:
             # not flip because an extractor changed), verbatim (libkit loaders emit Markdown,
             # which breaks substring matching), and keyless/local (claims run constantly in
             # CI/fan-out with no secrets; libkit's PDF path uploads bytes to Datalab + needs
-            # a key, the office path needs `soffice`). The pinned pure-Python readers below
-            # satisfy that contract; libkit's structure-rich/OCR/hosted loaders serve the
-            # store/embedding side, where those are features, not liabilities.
+            # a key, the office path needs `soffice`). The pinned pure-Python readers in
+            # `labfiles` satisfy that contract; libkit's structure-rich/OCR/hosted loaders
+            # serve the store/embedding side, where those are features, not liabilities.
             reader = _TEXT_READERS.get(self.path.suffix.lower())
             if reader is None:
                 raise UnsupportedDocFormat(
