@@ -75,4 +75,6 @@ Private CRO vocabulary (your real vendor names): [references/vocab.example.yml](
 Read the repo-wide [AGENTS.md](../../AGENTS.md) first: improve-as-you-go, push rote work into code,
 **PR your changes back** to the skills repo, contribute generic fixes **upstream to libkit** by PR
 (libkit is the store substrate; this is how bibliographer/archivist drove several libkit features),
-and verify changes on throwaway data. Per-phase maintenance notes live in each `references/` file.
+and verify changes on throwaway data. Per-phase maintenance notes live in each `references/` file;
+the open direction (reproduction audit, finer-grained provenance, claim/prose enforcement) is in
+[ROADMAP.md](ROADMAP.md).
