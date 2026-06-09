@@ -1,19 +1,24 @@
 # Scientist reorg — running list
 
-## STATUS: consolidation COMPLETE (Stages A + B1–B5 committed). Remaining follow-ups:
+## STATUS: COMPLETE — all 8 fix-list items done; consolidation + follow-ups closed.
+Fix-list verification (see list at bottom): #1 thin router+refs ✓ · #2 one trigger ✓ ·
+#3 readers in one `labfiles` layer (extractor readers + analyst doc-text consolidated; libkit
+route rejected by design) ✓ · #4 shared `provenance/` core ✓ · #5 `sci trace` ✓ · #6 zero-
+(persistent-)install ✓ · #7 marketplace/README ✓ · #8 cross-links ✓.
+
+Closed follow-ups:
 - **doc()→libkit: DECIDED — won't do.** Grounding (verbatim quote-match) and embedding are
   different extraction contracts: claims need deterministic, verbatim (not Markdown), keyless/local
-  text — a pure function of the bytes. libkit's loaders (Datalab hosted+keys / soffice, Markdown
-  output) serve embedding, where those are features. The pinned pure-Python readers are the right
-  tool for grounding; keep them. Comment at the DocRef.text() dispatch records the rationale.
-- **env migration (user, no rush)**: ~/.env can move ARCHIVIST_*/EXPERIMENTS_ROOT → SCIENTIST_*
-  (one SCIENTIST_HOME now drives store + experiments); old names still work as fallbacks.
-- **store reindex once**: store dir renamed .archivist/ → .scientist/ — run `sci reindex` to
-  rebuild (the old dir is orphaned; rebuildable by design).
-- **main-checkout env hygiene**: a stale pre-consolidation editable install `experiments_analyst`
-  lives in /Users/sq/Development/skills/.venv — `uv pip uninstall experiments_analyst` (conftest
-  already guards the tests against it).
-- minor: residual Pyright cosmetics in analyst (read_csv Optional typing, token reset) left as-is.
+  text. libkit's loaders (Datalab hosted+keys / soffice, Markdown) serve embedding. Pure-Python
+  readers (now in `labfiles`) are the right tool; rationale recorded at the readers + DocRef dispatch.
+- **env migration: nothing to do.** ~/.env (and shell rc) have NO ARCHIVIST_*/EXPERIMENTS_ROOT —
+  they're passed per-invocation. SCIENTIST_* + fallbacks are in place regardless.
+- **store reindex: ELIMINATED.** store-dir resolution falls back to a legacy `.archivist/` and
+  reuses it in place (verified: `sci list` opened the real 8.4 GB store under new code). No re-embed.
+- **venv hygiene: DONE.** Uninstalled the stale `experiments_analyst` editable install from the
+  main checkout's .venv; conftest also guards the tests.
+- minor: residual Pyright cosmetics in analyst (read_csv Optional typing, token reset) left as-is —
+  pre-existing, non-functional.
 
 
 Working notes for reorganizing extractor / archivist / analyst (bibliographer stays separate).
