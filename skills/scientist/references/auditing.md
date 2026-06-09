@@ -39,6 +39,24 @@ slides under `Shared/`). `sci audit` re-hashes them and compares:
 - `no-provenance` — never reviewed; warrants a semantic look.
 - `no-/invalid-experiment-yml` — create or fix the sidecar (`sci meta <exp> --suggest`).
 
+## 2b. Quantitative prose ↔ claims (the deterministic gate before the semantic pass)
+
+Between the cheap hash check and the expensive agent pass sits a deterministic
+enforcement: `sci audit` scans each `README.md` / `reports/*.md` for **quantitative
+assertions** (a result-like number — percentage, fold-change, p-value, `n=`, IC50/EC50,
+concentration, mass dose, ±/CI) and requires each to **map to a grounded `kind=claim`**.
+Cite the result inline with **`[claim:<id>]`** (full stable `claim_id` or its trailing
+node name). An assertion clears only if its citation resolves to a `passed`/`xpass`,
+strong/moderate claim; otherwise it's flagged `unbacked` (no citation),
+`weak-backing` (cited only to a contradicted/drifted/unverifiable/weak claim — surfaced
+*with* its outcome+strength), or `unknown-claim` (citation resolves to nothing). The
+detector is conservative — bare counts, dates, figure/section refs, version strings, and
+method time/temperature don't trigger, and code spans / the deps comment are ignored —
+so a flag is a real "prose got ahead of the evidence" signal, not noise. Backing comes
+from the live `kind=claim` index when a store exists, else the per-experiment
+`grounding_report.json`. (Core: `scientist.store._prose.enforce_prose` — the same gate
+the report phase will run on generated report Markdown.)
+
 ## 3. Semantic — the parallel-agent pass (authoritative for content)
 
 Hashing tells you an input *changed*, not whether the *prose is still true*. For

@@ -30,7 +30,9 @@ Store (a libkit-backed index/search/catalog over a tree of experiments):
     uv run skills/scientist/scripts/sci.py review K1-000000 --home "<data folder>"
 
 `audit` runs BOTH passes on one experiment: the extraction re-extraction check of
-data/ ↔ raw/ AND provenance staleness of the experiment.yml ledger. With no
+data/ ↔ raw/ AND provenance staleness of the experiment.yml ledger. It also enforces
+quantitative prose ↔ claims — every result asserted in a README/reports sentence must
+map to a grounded `kind=claim` (cite it `[claim:<id>]`) or it is flagged. With no
 experiment, it runs the store staleness pass across the whole data folder. Use
 `sci check` for the structural-integrity report.
 

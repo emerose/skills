@@ -30,10 +30,40 @@ sci audit  [K1-000000] [--json]          # staleness vs recorded provenance + a 
   External inputs persist across re-reviews.
 - **`audit`** — re-hashes every recorded input + the README and reports `up-to-date`, `stale` (naming
   each input that **changed** / went **missing** / was **added**, and whether the README itself was
-  edited since review), `no-provenance` (never reviewed), or `no-/invalid-experiment-yml`. `--json` adds
-  a per-experiment `source_files` worklist for the **semantic pass**: fan out an agent per experiment to
-  read the data and verify the prose — the authoritative content check (see
-  [auditing.md](auditing.md)).
+  edited since review), `no-provenance` (never reviewed), or `no-/invalid-experiment-yml`. It **also
+  enforces quantitative prose ↔ claims** (see below). `--json` adds a per-experiment `source_files`
+  worklist for the **semantic pass**: fan out an agent per experiment to read the data and verify the
+  prose — the authoritative content check (see [auditing.md](auditing.md)).
+
+### Quantitative prose ↔ claims enforcement (the deterministic gate)
+
+`audit` tightens the prose↔data link so a `README.md` / `reports/*.md` sentence **can't assert a
+quantitative result without a grounded `kind=claim` backing it**. Per experiment it scans the prose for
+**quantitative assertions** and maps each to a claim, flagging the gaps:
+
+- **What counts as a quantitative assertion** — a sentence with a *result-like* number: a percentage,
+  fold-change, p-value, `n=`, ± error, a potency metric (IC50/EC50/Ki…), a 95% CI, a concentration
+  (nM/µM/mM/M), a mass dose (mg/kg…), or a molecular size (kDa/bp/kb). The detector is deliberately
+  **conservative to avoid false positives**: bare integers, dates, figure/section refs, version
+  strings, and plain method time/temperature (`30 min`, `37 °C`, `3 days`) do **not** trigger, and
+  numbers inside code spans / fenced blocks / the `scientist:deps` comment are ignored.
+- **How backing works** — cite a result in prose with **`[claim:<id>]`** (the full stable
+  `claim_id`, `<exp>::<test-file>::<node>`, or just its trailing node name). An assertion is **cleared**
+  only when a citation resolves to a claim that is *grounded* (`passed`/`xpass`) **and** *strong/moderate*
+  strength. Otherwise the assertion is flagged:
+  - `unbacked` — no `[claim:…]` citation (carries an advisory best-overlap `suggestion`, never an
+    auto-clear — a coincidental match must not mask missing evidence);
+  - `weak-backing` — cited only to a claim that is contradicted (`xfail`), drifted (`failed`),
+    unverifiable (`skipped`), or weak/unspecified — **surfaced with its `outcome`+`strength`**, so prose
+    leaning on a contradicted result is caught, not silently passed;
+  - `unknown-claim` — a citation that resolves to no indexed claim.
+- **Backing source** — with a store present the check runs against the **live `kind=claim` index**
+  (authoritative + pruned); store-free (`sci audit` on a lone folder) it falls back to the
+  per-experiment `grounding_report.json`. Both reduce to the same claim shape and key on the same stable
+  `claim_id`, so `[claim:…]` citations resolve identically either way.
+- **Reusable entry point** — the core check is `scientist.store._prose.enforce_prose(markdown, claims)`,
+  free of README- or store-specific plumbing. The planned report phase (`sci report`) reuses it
+  verbatim to enforce the same gate on generated report Markdown.
 
 ## Structural check
 

@@ -25,7 +25,7 @@ from typing import Any, NoReturn
 
 from .. import provenance
 
-from . import _audit, _extract, _files, _generate, _intake, _meta, _pr
+from . import _audit, _extract, _files, _generate, _intake, _meta, _pr, _prose
 from ._store import STORE_DIRNAME, Store, EmbedderConfigError
 
 # Narrative files larger than this are catalogued as descriptors rather than
@@ -640,6 +640,72 @@ def _staleness_entry(home: Path, exp_dir: Path, exp_id: str) -> dict[str, Any]:
     return entry
 
 
+def _claims_from_report(exp_dir: Path, exp_id: str) -> list[dict[str, Any]]:
+    """Claims for the store-free prose pass: read the per-experiment grounding report
+    (if present) and key each claim by its STABLE ``claim_id`` (so prose ``[claim:…]``
+    citations resolve identically with or without a store). Returns ``[]`` when no
+    report exists — every quantitative assertion then flags as unbacked, which is the
+    honest verdict for an experiment whose claims were never run."""
+    import json
+
+    candidates = [exp_dir / "analysis" / "grounding_report.json",
+                  exp_dir / "grounding_report.json"]
+    report_path = next((p for p in candidates if p.is_file()), None)
+    if report_path is None:
+        return []
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    raw = data.get("claims") if isinstance(data, dict) else data
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for c in raw:
+        if not isinstance(c, dict):
+            continue
+        out.append({"claim_id": _meta.claim_id_for(exp_id, c.get("id") or ""),
+                    "statement": c.get("statement") or "",
+                    "outcome": c.get("outcome"), "strength": c.get("strength"),
+                    "claim_kind": c.get("kind")})
+    return out
+
+
+def _prose_entries(exp_dir: Path, home: Path,
+                   claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Enforce quantitative-prose ↔ claims over an experiment's README + reports/*.md.
+
+    Returns one :func:`_prose.enforce_prose` result per prose doc that contains any
+    quantitative assertion (docs with none are omitted — nothing to enforce). The
+    check itself is the reusable, store-agnostic :func:`_prose.enforce_prose`."""
+    entries = []
+    for label, text in _prose.iter_prose_docs(exp_dir, home):
+        res = _prose.enforce_prose(text, claims, source=label)
+        if res["assertions"]:
+            entries.append(res)
+    return entries
+
+
+def _print_prose(entries: list[dict[str, Any]] | None) -> None:
+    """Human render of the per-experiment prose-enforcement results."""
+    for res in entries or []:
+        n_flag = len(res["flags"])
+        status = "✓ all backed" if not n_flag else f"{n_flag} unbacked/weak"
+        print(f"    prose {res['source']}: {res['backed']}/{res['assertions']} backed "
+              f"({status})")
+        for f in res["flags"]:
+            print(f"      [{f['status']}] L{f['line']}: {f['text'][:100]}")
+            for b in f.get("backing", []):
+                lbl = _meta.CLAIM_OUTCOME_LABEL.get(b.get("outcome"), b.get("outcome") or "?")
+                print(f"          ↳ {b.get('claim_id')}  ({lbl} · strength: {b.get('strength','?')})")
+            if f.get("cited"):
+                print(f"          ↳ unresolved citation(s): {', '.join(f['cited'])}")
+            sugg = f.get("suggestion")
+            if sugg:
+                print(f"          ↳ maybe: {sugg.get('claim_id')} "
+                      f"(overlap {sugg.get('score')}) — cite with [claim:…] if it backs this")
+
+
 def _source_files_on_disk(exp_dir: Path, home: Path) -> list[str]:
     """The data/report/raw/analysis files an agent should read for the semantic pass,
     as home-relative paths — derived by walking the folder, no store required."""
@@ -671,6 +737,11 @@ def audit_report(home: Path, only: str | None = None) -> list[dict[str, Any]]:
     for exp_dir, exp_id in pairs:
         entry = _staleness_entry(home, exp_dir, exp_id)
         entry["source_files"] = _source_files_on_disk(exp_dir, home)
+        # Prose ↔ claims enforcement. Store-free, so back the check with the
+        # per-experiment grounding_report.json (the live index is unavailable here).
+        prose = _prose_entries(exp_dir, home, _claims_from_report(exp_dir, exp_id))
+        if prose:
+            entry["prose"] = prose
         report.append(entry)
     return report
 
@@ -694,8 +765,11 @@ def print_audit_report(report: list[dict[str, Any]], as_json: bool) -> None:
             for p in e.get("added", []):
                 print(f"    added (unrecorded): {p}")
             print(f"    last reviewed {e.get('reviewed_at')}")
+        _print_prose(e.get("prose"))
     print("\nFor the semantic pass, run `sci audit --json` and fan out an agent per "
-          "experiment to read its source_files and verify the README prose.")
+          "experiment to read its source_files and verify the README prose.\n"
+          "Quantitative prose ↔ claims is enforced above: cite a result with "
+          "[claim:<id>] so it maps to a grounded claim, else it is flagged.")
 
 
 async def cmd_audit(store: Store, args: argparse.Namespace) -> None:
@@ -715,6 +789,12 @@ async def cmd_audit(store: Store, args: argparse.Namespace) -> None:
         # source files an agent should read to verify the prose semantically
         entry["source_files"] = [fr["path"] for fr in files
                                  if fr.get("role") in ("data", "report", "raw", "analysis")]
+        # Prose ↔ claims enforcement, backed by the LIVE claim index (authoritative,
+        # pruned) — so a quantitative result in the README/reports must map to a
+        # grounded kind=claim or be flagged.
+        prose = _prose_entries(exp_dir, store.home, await store.claims(exp_id))
+        if prose:
+            entry["prose"] = prose
         report.append(entry)
     if args.json:
         emit_json(report)
@@ -733,8 +813,11 @@ async def cmd_audit(store: Store, args: argparse.Namespace) -> None:
             for p in e.get("added", []):
                 print(f"    added (unrecorded): {p}")
             print(f"    last reviewed {e.get('reviewed_at')}")
+        _print_prose(e.get("prose"))
     print("\nFor the semantic pass, run `sci audit --json` and fan out an agent per "
-          "experiment to read its source_files and verify the README prose.")
+          "experiment to read its source_files and verify the README prose.\n"
+          "Quantitative prose ↔ claims is enforced above: cite a result with "
+          "[claim:<id>] so it maps to a grounded claim, else it is flagged.")
 
 
 async def cmd_meta(store: Store, args: argparse.Namespace) -> None:
@@ -947,7 +1030,8 @@ def register(sub: argparse._SubParsersAction) -> None:
     add("catalog", "export the experiment catalog (CATALOG.md + catalog.json)")
     sp = add("check", "structural integrity report (missing/unindexed files, layout, redundant archives)")
     sp.add_argument("experiment", nargs="?", help="limit to one experiment (default: all)")
-    sp = add("audit", "provenance staleness of the experiment.yml ledger + a worklist for the semantic pass")
+    sp = add("audit", "provenance staleness + quantitative-prose↔claims enforcement "
+             "+ a worklist for the semantic pass")
     sp.add_argument("experiment", nargs="?", help="limit to one experiment (default: all)")
     sp = add("meta", "show an experiment's structured metadata (experiment.yml)")
     sp.add_argument("experiment")
