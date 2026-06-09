@@ -101,6 +101,49 @@ DAG + drift walk).
   with `--json`, `{experiment, chains:[{terminal, kind, path_to_raw, breaks}], breaks, status}`. Exit 0 if
   fully grounded, 1 if any break. (Lives in `provenance/trace.py` — provenance-level and store-free.)
 
+## Reproduce — does the analysis actually re-run?
+
+```bash
+# the editable install brings the PINNED analysis runtime (pandas/scipy/matplotlib);
+# the bare `uv run sci.py …` PEP723 env does NOT have it — `reproduce` re-executes derive.py.
+SCIENTIST_HOME=… uv run --with-editable skills/scientist \
+  skills/scientist/scripts/sci.py reproduce <exp> [--json] [--rtol R] [--atol A]
+```
+
+`sci trace` is *static* — it checks recorded shas still match but executes nothing. `sci reproduce`
+is the **executable** complement: it **re-runs `<exp>/analysis/derive.py main()`** in the pinned
+environment and checks the regenerated `analysis/tables|fig/*` reproduce the recorded artifacts, and
+that the derivation read only from `data/`. It turns "the recipe sha still matches" into "the recipe
+still produces the numbers." (Lives in `provenance/reproduce.py`; store-free, like `trace`.)
+
+- **Pure re-run, never destructive.** The derivation re-runs under a *derivation-audit* context
+  (`grounding.audit_derivations`): `write_table`/`write_fig` are redirected to a temp scratch dir, **no**
+  provenance is written, and the recorded `analysis/` artifacts + `experiment.yml` are never touched.
+- **Three independent verdicts** per experiment:
+  - **runs** — `derive.main()` executed without raising (a recipe that errors is flagged);
+  - **reproduces** — every recorded `analysis/` artifact regenerated within tolerance;
+  - **reads_only_data** — every input the derivation read is the experiment's own `data/` (plus
+    `experiment.yml` config + the program convention/reference facts the canonical-id boundary uses).
+- **Extends the bypass guard to derivations.** The same capture/guard that flags untracked or
+  out-of-`data/` reads during *claims* (`grounding.plugin`) stays live for the whole re-run, so a
+  derivation that reaches into `raw/`, into a derived `analysis/` artifact, into another experiment, or
+  does any untracked read is flagged as an **off-data read** — naming the file and why.
+- **How artifacts are compared:**
+  - **tables (`.csv`)** — exact sha first (a deterministic table reproduces byte-for-byte), else a
+    numeric-tolerant cell-by-cell compare (identical columns + shape; numeric cells within `--rtol`
+    `--atol`, mirroring the `pytest.approx` convention claims use for Hill/EC50 fits; both-NaN equal;
+    non-numeric cells exact). Mismatches name the first differing cells.
+  - **figures (`analysis/fig/*`)** — figures are **not** byte-compared: a PNG embeds
+    matplotlib/freetype/libpng versions (and the *numbers* a figure draws are already covered by the
+    table check), so bytes differ across pinned-but-distinct environments without anything having moved.
+    Instead we confirm the figure **regenerated** and that its decoded pixel dimensions match the
+    recorded figure within a few px (read straight from the PNG `IHDR`, stdlib only). A different format
+    degrades to an existence-only "regenerated" verdict.
+- **Output.** Human-readable per-artifact verdicts (`exact` / `approx` / `regenerated` / `MISMATCH` /
+  `NOT REGENERATED`) + any off-data reads + an overall **REPRODUCES / BROKEN** (or `NO-DERIVATION`)
+  status; with `--json`, `{experiment, recipe, runs, reproduces, reads_only_data, artifacts,
+  off_data_reads, status}`. Exit 0 if `REPRODUCES`, 1 otherwise.
+
 ## Changes land as reviewable PRs
 
 ```bash
