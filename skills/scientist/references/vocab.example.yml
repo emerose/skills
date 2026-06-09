@@ -6,9 +6,8 @@
 # your (private) data repo — never in the public skills repo.
 #
 # Place this file at the root of your data folder as `vocab.yml` (or point
-# $SCIENTIST_VOCAB at it; $ARCHIVIST_VOCAB still works as a fallback). `sci` loads
-# it automatically and MERGES it over the
-# generic defaults, so the extractor canonicalizes your real names and recognizes
+# $SCIENTIST_VOCAB at it). `sci` loads it automatically and MERGES it over the
+# generic defaults, so metadata extraction canonicalizes your real names and recognizes
 # your study-id formats. Values are case-insensitive regex fragments.
 
 # canonical CRO/vendor name -> alias regex fragments

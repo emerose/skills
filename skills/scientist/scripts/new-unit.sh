@@ -13,7 +13,7 @@
 #   new-unit.sh <exp-id> [branch]     # provision; e.g.  new-unit.sh k1-221101
 #   new-unit.sh --remove <exp-id>     # tear the worktree down once the PR is merged
 #
-# Typical call (sets EXPERIMENTS_ROOT in your shell):
+# Typical call (sets SCIENTIST_HOME in your shell):
 #   eval "$(skills/scientist/scripts/new-unit.sh k1-221101)"
 #
 # Env overrides:
@@ -87,5 +87,5 @@ new-unit: worktree ready
   teardown:    $(basename "$0") --remove $id        # after the PR merges
 EOF
 
-# the one line to eval — sets EXPERIMENTS_ROOT to the worktree root (where the K1-* folders live)
-echo "export EXPERIMENTS_ROOT=\"$wt\""
+# the one line to eval — sets SCIENTIST_HOME to the worktree root (where the K1-* folders live)
+echo "export SCIENTIST_HOME=\"$wt\""

@@ -218,8 +218,8 @@ def test_in_folder_inputs_excludes_readme_and_sidecar(tmp_path):
 
 # --------------------------------------------------------------------------- #
 # README review (artifact provenance with declared external inputs) — the layer
-# the store's `review`/`fingerprint`/`audit` commands build on. Ported from the
-# former archivist _experiment tests, rewritten against the shared core API.
+# the store's `review`/`fingerprint`/`audit` commands build on. Exercises the
+# shared provenance core API.
 # --------------------------------------------------------------------------- #
 def _review_exp(tmp_path):
     """An experiment folder under a repo root (tmp_path). Returns (home, exp_dir)."""

@@ -8,10 +8,10 @@ was built from, each with its sha256 at review/extraction time.
 
 The design is a superset of two predecessors that this consolidation merges:
 
-* the extractor's ``_write_provenance`` — wrote ``data/<file>`` artifact entries
+* the extract stage's data-provenance writer — wrote ``data/<file>`` artifact entries
   (raw sources + the recipe as inputs), deduped by artifact, sorted for diffability;
-* archivist's ``_experiment.py`` — the schema'd sidecar (validated fields, status
-  synonyms, unknown-key rejection) and the ``README.md`` provenance + staleness model.
+* the schema'd sidecar (validated fields, status synonyms, unknown-key rejection) and
+  the ``README.md`` provenance + staleness model.
 
 Both write the SAME entry shape into one ``provenance`` list keyed by artifact path;
 the artifact path (``data/…`` vs ``analysis/…`` vs ``README.md``) is the only kind
@@ -41,29 +41,12 @@ provenance:
 from __future__ import annotations
 
 import hashlib
-import os
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 SIDECAR_NAME = "experiment.yml"
 
-
-# --------------------------------------------------------------------------- #
-# environment
-# --------------------------------------------------------------------------- #
-def env_first(*names: str, default: str | None = None) -> str | None:
-    """Return the value of the first *set* environment variable among ``names``.
-
-    Lets a primary ``SCIENTIST_*`` name take precedence while an older name
-    (``ARCHIVIST_*`` / ``EXPERIMENTS_ROOT``) is honored as a non-breaking fallback.
-    A variable counts as "set" if present in the environment (even if empty), so an
-    explicit empty value wins over a later fallback — matching normal env semantics.
-    """
-    for name in names:
-        if name in os.environ:
-            return os.environ[name]
-    return default
 
 # Lifecycle statuses; common synonyms normalise to these. Unknown values raise a
 # clear error (never silently accepted) listing the allowed set.
@@ -287,12 +270,12 @@ def record_provenance(exp_dir: Path, entries: list[dict], *, repo_root: Path | N
     ``entries`` are already repo-relative, so it is not required here.
 
     Recording is a ledger operation, not metadata authoring: the existing sidecar is
-    read leniently (any metadata fields archivist owns are preserved verbatim) and a
+    read leniently (any metadata fields it owns are preserved verbatim) and a
     provenance-only sidecar — one with no ``exp_id`` yet — is accepted, matching the
-    extractor's behavior of stamping provenance onto an otherwise-bare experiment.yml.
+    extract stage's behavior of stamping provenance onto an otherwise-bare experiment.yml.
     """
     sidecar = _load_raw(exp_dir)
-    # superseded legacy key from the extractor era — drop if present
+    # superseded legacy key from an earlier data-provenance form — drop if present
     sidecar.pop("data_provenance", None)
     ours = {e["artifact"] for e in entries}
     kept = [e for e in (sidecar.get("provenance") or [])
@@ -397,12 +380,12 @@ def staleness(exp_dir: Path, repo_root: Path | None = None) -> dict[str, Any]:
     * ``added``   — an in-folder data file not yet recorded under any artifact.
 
     Paths are resolved relative to ``repo_root`` (default: ``exp_dir.parent``, the
-    data-repo root, matching how the extractor records repo-relative input paths).
+    data-repo root, matching how the extract stage records repo-relative input paths).
     """
     exp = Path(exp_dir)
     home = Path(repo_root) if repo_root is not None else exp.parent
     # Staleness only needs the provenance ledger, so read it LENIENTLY: a provenance-only
-    # sidecar (no exp_id yet — the extractor stamps provenance before metadata is filled)
+    # sidecar (no exp_id yet — the extract stage stamps provenance before metadata is filled)
     # is a valid ledger to check. (Callers that want schema validation call read_sidecar
     # separately first, as `audit` does.)
     sidecar = _load_raw(exp)

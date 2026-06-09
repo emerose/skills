@@ -207,7 +207,7 @@ def test_audit_without_store(tmp_path):
     exp = _exp(tmp_path)
     from store import cli as STORE_CLI
 
-    # no .archivist store under tmp_path -> store_exists is False
+    # no .scientist store under tmp_path -> store_exists is False
     args = type("A", (), {"home": str(tmp_path), "experiment": str(exp), "json": True})()
     assert STORE_CLI.store_exists(args) is False
     report = STORE_CLI.audit_report(tmp_path, str(exp))

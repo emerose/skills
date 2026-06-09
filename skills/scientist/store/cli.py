@@ -6,8 +6,8 @@ This is a thin, guardrail layer over the importable modules (:mod:`_store`,
 ``experiment.yml`` access (read/validate/write the sidecar, record provenance,
 staleness, review inputs) routes through :mod:`provenance` — never re-implemented.
 
-Configuration: the data-tree root resolves from ``--home``, else ``$SCIENTIST_HOME``
-(fallback ``$ARCHIVIST_HOME``), else cwd; the store dir is ``.scientist/catalog.duckdb``.
+Configuration: the data-tree root resolves from ``--home``, else ``$SCIENTIST_HOME``,
+else cwd; the store dir is ``.scientist/catalog.duckdb``.
 Third-party keys (``DEEPINFRA_API_KEY`` / ``DATALAB_API_KEY``) are untouched.
 
 ``register(subparsers)`` adds the store subcommands to an existing ``sci`` parser;
@@ -24,10 +24,9 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import provenance
-from provenance import env_first
 
 from . import _audit, _extract, _files, _generate, _intake, _meta, _pr
-from ._store import STORE_DIRNAME, ArchivistStore, EmbedderConfigError, resolve_store_dirname
+from ._store import STORE_DIRNAME, Store, EmbedderConfigError
 
 # Narrative files larger than this are catalogued as descriptors rather than
 # parsed+embedded whole (avoids choking on the multi-hundred-MB raw text dumps).
@@ -73,12 +72,12 @@ def emit_json(obj: Any) -> None:
 
 
 def _home(args: argparse.Namespace) -> Path:
-    return Path(args.home or env_first("SCIENTIST_HOME", "ARCHIVIST_HOME")
+    return Path(args.home or os.environ.get("SCIENTIST_HOME")
                 or Path.cwd()).resolve()
 
 
 def _require_initialized(home: Path) -> None:
-    if not (home / resolve_store_dirname(home) / "catalog.duckdb").exists():
+    if not (home / STORE_DIRNAME / "catalog.duckdb").exists():
         die(f"no scientist store under {home} — run `sci init --home {home}` first")
 
 
@@ -101,7 +100,7 @@ def _find_experiment_dir(home: Path, ident: str) -> tuple[Path, dict[str, Any]] 
 # --------------------------------------------------------------------------- #
 # commands
 # --------------------------------------------------------------------------- #
-async def cmd_init(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_init(store: Store, args: argparse.Namespace) -> None:
     # opening already created the store; ensure a .gitignore covers it.
     gi = store.home / ".gitignore"
     needed = [f"{STORE_DIRNAME}/", ".DS_Store"]
@@ -115,13 +114,9 @@ async def cmd_init(store: ArchivistStore, args: argparse.Namespace) -> None:
     print(f"initialized scientist store at {store.home / store._store_dirname}")
     if add:
         print(f"  added to .gitignore: {', '.join(add)}")
-    legacy = store.home / ".archivist"
-    if legacy.is_dir():
-        print(f"  note: a legacy {legacy.name}/ store exists; it is unused now "
-              f"(rebuild the new store with `sci reindex`, then remove it).")
 
 
-async def cmd_index(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_index(store: Store, args: argparse.Namespace) -> None:
     found = _find_experiment_dir(store.home, args.experiment)
     if not found:
         die(f"no experiment matching {args.experiment!r} under {store.home}")
@@ -135,7 +130,7 @@ async def cmd_index(store: ArchivistStore, args: argparse.Namespace) -> None:
               f"{result['binary']} binary)")
 
 
-async def cmd_reindex(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_reindex(store: Store, args: argparse.Namespace) -> None:
     results = []
     exp_dirs = [(c, p) for c in sorted(store.home.iterdir())
                 if c.is_dir() and (p := _meta.parse_experiment_dirname(c.name))]
@@ -152,7 +147,7 @@ async def cmd_reindex(store: ArchivistStore, args: argparse.Namespace) -> None:
         print(f"indexed {len(results)} experiments, {total} files total")
 
 
-async def _index_experiment(store: ArchivistStore, exp_dir: Path,
+async def _index_experiment(store: Store, exp_dir: Path,
                             parsed: dict[str, Any], *, verbose: bool) -> dict[str, Any]:
     counts = {"narrative": 0, "tabular": 0, "binary": 0, "files_indexed": 0}
     for f in _files.iter_experiment_files(exp_dir):
@@ -262,7 +257,7 @@ def _load_grounding_report(exp_dir: Path, override: str | None) -> tuple[Path, l
     return report_path, claims
 
 
-async def cmd_index_claims(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_index_claims(store: Store, args: argparse.Namespace) -> None:
     """Index the grounded claims from an experiment's grounding_report.json into the
     libkit store as ``kind=claim`` documents, then prune any claims that have been
     removed from the report (rebuildable store)."""
@@ -305,7 +300,7 @@ async def cmd_index_claims(store: ArchivistStore, args: argparse.Namespace) -> N
               f"(from {store.relpath(report_path)}); pruned {pruned} stale")
 
 
-async def cmd_list(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_list(store: Store, args: argparse.Namespace) -> None:
     if args.kind == "file":
         recs = await store.files(args.experiment)
     elif args.kind == "entity":
@@ -337,7 +332,7 @@ async def cmd_list(store: ArchivistStore, args: argparse.Namespace) -> None:
                   f"   ({fc.get('files_indexed', 0)} files)")
 
 
-async def cmd_show(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_show(store: Store, args: argparse.Namespace) -> None:
     rec = await store.get_experiment(args.experiment)
     if rec is None:
         die(f"no experiment {args.experiment!r} (index it with `sci index`)")
@@ -360,7 +355,7 @@ async def cmd_show(store: ArchivistStore, args: argparse.Namespace) -> None:
         print(f"  {line}")
 
 
-async def cmd_search(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_search(store: Store, args: argparse.Namespace) -> None:
     """Metadata search across experiments + files (substring over key fields)."""
     needle = args.text.lower()
     hits = []
@@ -384,7 +379,7 @@ async def cmd_search(store: ArchivistStore, args: argparse.Namespace) -> None:
             print(f"  [file] {r.get('exp_id')}  {r.get('path')}")
 
 
-async def cmd_query(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_query(store: Store, args: argparse.Namespace) -> None:
     """Semantic + full-text search inside indexed content (libkit hybrid)."""
     filters = {"kind": args.kind} if args.kind else None
     results = await store.query(args.text, limit=args.limit, filters=filters)
@@ -426,14 +421,14 @@ async def cmd_query(store: ArchivistStore, args: argparse.Namespace) -> None:
         print(f"  {loc}\n      {snippet}")
 
 
-async def cmd_file(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_file(store: Store, args: argparse.Namespace) -> None:
     rec = await store.get_file(args.path)
     if rec is None:
         die(f"no file record for {args.path!r}")
     emit_json(rec)
 
 
-async def cmd_read(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_read(store: Store, args: argparse.Namespace) -> None:
     """Format-aware dump of a tabular file to stdout (for pulling exact values)."""
     path = (store.home / args.path) if not Path(args.path).is_absolute() else Path(args.path)
     if not path.exists():
@@ -457,7 +452,7 @@ async def cmd_read(store: ArchivistStore, args: argparse.Namespace) -> None:
             f"(path: {path})")
 
 
-async def cmd_entity(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_entity(store: Store, args: argparse.Namespace) -> None:
     """Entities are derived live from experiment records (registry), plus any
     curated notes (kind=entity). `list` aggregates; `show` filters experiments."""
     exps = await store.experiments()
@@ -489,7 +484,7 @@ async def cmd_entity(store: ArchivistStore, args: argparse.Namespace) -> None:
             f"{ident}: {len(matched)} experiments\n  " + "\n  ".join(sorted(matched)))
 
 
-async def cmd_new(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_new(store: Store, args: argparse.Namespace) -> None:
     """Scaffold a new experiment folder: subdirs + a prose README + a starter
     experiment.yml (the structured metadata), then index it."""
     parsed = _meta.parse_experiment_dirname(f"{args.exp_id} - {args.name}")
@@ -517,7 +512,7 @@ async def cmd_new(store: ArchivistStore, args: argparse.Namespace) -> None:
         print(f"indexed as {args.exp_id}; write README.md prose + fill experiment.yml")
 
 
-async def cmd_intake(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_intake(store: Store, args: argparse.Namespace) -> None:
     """File a delivery (folder or files) into an experiment per LAYOUT.md.
 
     Copies (never moves) from the source; dry-run by default — review the plan,
@@ -565,7 +560,7 @@ async def cmd_intake(store: ArchivistStore, args: argparse.Namespace) -> None:
               f"({result['files_indexed']} files total)")
 
 
-async def cmd_catalog(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_catalog(store: Store, args: argparse.Namespace) -> None:
     """Export the experiment catalog: CATALOG.md (human index) + catalog.json."""
     import json
 
@@ -586,7 +581,7 @@ async def cmd_catalog(store: ArchivistStore, args: argparse.Namespace) -> None:
               f"({len(exps)} experiments)")
 
 
-async def _experiment_dirs(store: ArchivistStore, only: str | None):
+async def _experiment_dirs(store: Store, only: str | None):
     """Yield (exp_dir, exp_id) for one experiment or all of them."""
     if only:
         found = _find_experiment_dir(store.home, only)
@@ -600,7 +595,7 @@ async def _experiment_dirs(store: ArchivistStore, only: str | None):
             yield child.resolve(), parsed["exp_id"]
 
 
-async def cmd_check(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_check(store: Store, args: argparse.Namespace) -> None:
     """Deterministic structural integrity report (reports only; never mutates)."""
     worklist = []
     async for exp_dir, exp_id in _experiment_dirs(store, args.experiment):
@@ -703,7 +698,7 @@ def print_audit_report(report: list[dict[str, Any]], as_json: bool) -> None:
           "experiment to read its source_files and verify the README prose.")
 
 
-async def cmd_audit(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_audit(store: Store, args: argparse.Namespace) -> None:
     """Provenance staleness (experiment.yml provenance vs the evidence on disk) +
     a worklist for the parallel-agent semantic pass.
 
@@ -742,7 +737,7 @@ async def cmd_audit(store: ArchivistStore, args: argparse.Namespace) -> None:
           "experiment to read its source_files and verify the README prose.")
 
 
-async def cmd_meta(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_meta(store: Store, args: argparse.Namespace) -> None:
     """Show an experiment's structured metadata (from experiment.yml), or with
     --suggest, print a *draft* sidecar derived heuristically from the README for an
     agent/human to review and write. The tool never writes the sidecar from prose."""
@@ -780,7 +775,7 @@ async def cmd_meta(store: ArchivistStore, args: argparse.Namespace) -> None:
     emit_json(meta)
 
 
-async def cmd_fingerprint(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_fingerprint(store: Store, args: argparse.Namespace) -> None:
     """Show the input set `review` would record for an experiment's README right now —
     the in-folder data files (+ any externally-declared inputs), each with its current
     sha256. Lets you see exactly what provenance will track."""
@@ -807,7 +802,7 @@ async def cmd_fingerprint(store: ArchivistStore, args: argparse.Namespace) -> No
         print(f"  ! missing: {m}", file=sys.stderr)
 
 
-async def cmd_review(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_review(store: Store, args: argparse.Namespace) -> None:
     """Mark an experiment's README as verified against its data: record an explicit
     input list (with each file's sha256) + the README's sha + a review date in
     experiment.yml. In-folder data files are included automatically; declare any
@@ -840,13 +835,13 @@ async def cmd_review(store: ArchivistStore, args: argparse.Namespace) -> None:
             print(f"  ! declared input not found on disk: {m}", file=sys.stderr)
 
 
-async def cmd_pr(store: ArchivistStore, args: argparse.Namespace) -> None:
+async def cmd_pr(store: Store, args: argparse.Namespace) -> None:
     """Package working-tree changes into a branch + pull request for review."""
     await _maybe_pr(store, args.paths or None, args.title,
                     args.body or args.title, args, dry_run=args.dry_run)
 
 
-async def _maybe_pr(store: ArchivistStore, paths, title: str, body: str,
+async def _maybe_pr(store: Store, paths, title: str, body: str,
                     args: argparse.Namespace, *, dry_run: bool = False) -> None:
     try:
         result = _pr.create_pr(store.home, title=title, body=body,
@@ -904,7 +899,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     """Register the store subcommands on an existing ``sci`` subparser action.
 
     Each store subcommand carries a ``--home`` flag (managed data folder; default
-    ``$SCIENTIST_HOME``, fallback ``$ARCHIVIST_HOME``, else cwd) and a ``--json`` flag.
+    ``$SCIENTIST_HOME``, else cwd) and a ``--json`` flag.
     """
     def add(name: str, help_: str) -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=help_)
@@ -998,7 +993,7 @@ async def _run(args: argparse.Namespace) -> None:
         await handler(_HomeOnly(home), args)  # type: ignore[arg-type]
         return
     try:
-        store = ArchivistStore.open(home)
+        store = Store.open(home)
     except EmbedderConfigError as e:
         die(str(e))
     try:
@@ -1010,7 +1005,7 @@ async def _run(args: argparse.Namespace) -> None:
 def store_exists(args: argparse.Namespace) -> bool:
     """Whether a libkit store is initialized under the resolved data folder."""
     home = _home(args)
-    return (home / resolve_store_dirname(home) / "catalog.duckdb").exists()
+    return (home / STORE_DIRNAME / "catalog.duckdb").exists()
 
 
 def dispatch_audit_storeless(args: argparse.Namespace) -> int:

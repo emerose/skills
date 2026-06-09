@@ -35,7 +35,6 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from provenance import env_first
 from provenance import record_provenance as _record_provenance
 from labfiles import read_docx_text, read_pdf_text, read_pptx_text
 
@@ -374,7 +373,7 @@ _orig_read_csv = None
 
 
 def _data_root() -> Path | None:
-    r = env_first("SCIENTIST_HOME", "EXPERIMENTS_ROOT")
+    r = os.environ.get("SCIENTIST_HOME")
     return Path(r).resolve() if r else None
 
 

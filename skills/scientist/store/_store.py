@@ -1,7 +1,7 @@
-"""The libkit-backed store for archivist.
+"""The libkit-backed store for scientist.
 
-libkit is the single store: there is no separate archivist database. Each
-experiment, file, and curated-entity note is one libkit *document*; all archivist
+libkit is the single store: there is no separate scientist database. Each
+experiment, file, and curated-entity note is one libkit *document*; all scientist
 fields live in the document's free-form ``metadata`` JSON (see :mod:`_meta`).
 This module wraps ``libkit.Library`` with the operations libkit deliberately does
 not provide — logical identity keyed by ``exp_id`` / file ``path``, experiment
@@ -17,30 +17,16 @@ Two libkit facts shape everything:
 
 from __future__ import annotations
 
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from provenance import env_first
-
 from . import _meta
 
 STORE_DIRNAME = ".scientist"
-LEGACY_STORE_DIRNAME = ".archivist"
 DB_FILENAME = "catalog.duckdb"
-
-
-def resolve_store_dirname(home: Path) -> str:
-    """The store dir name to use under ``home``. New stores use ``.scientist/``,
-    but an existing legacy ``.archivist/`` store is reused **in place** — the
-    rename is forward-looking, not a re-embed (reindexing an existing corpus would
-    be needless cost; the store can be large). Prefer ``.scientist/`` if both exist."""
-    if (home / STORE_DIRNAME).exists():
-        return STORE_DIRNAME
-    if (home / LEGACY_STORE_DIRNAME).exists():
-        return LEGACY_STORE_DIRNAME
-    return STORE_DIRNAME
 
 
 def _now_iso() -> str:
@@ -51,7 +37,7 @@ class EmbedderConfigError(RuntimeError):
     """The configured embedder doesn't match how the library was built."""
 
 
-class ArchivistStore:
+class Store:
     """Async wrapper over a libkit ``Library`` scoped to one data folder.
 
     ``home`` is the managed scientific-data folder; the libkit store lives at
@@ -62,7 +48,7 @@ class ArchivistStore:
     def __init__(self, home: Path, lib: Any) -> None:
         self.home = home
         self.lib = lib
-        self._store_dirname = resolve_store_dirname(home)
+        self._store_dirname = STORE_DIRNAME
 
     # ---- lifecycle ----------------------------------------------------------
     @classmethod
@@ -72,27 +58,23 @@ class ArchivistStore:
         *,
         embedding: str | None = None,
         model: str | None = None,
-    ) -> "ArchivistStore":
+    ) -> "Store":
         """Open (creating if needed) the libkit library under ``home/.scientist``.
 
         ``embedding``/``model`` must stay consistent across runs — libkit fixes
         the store's vector dimension from the embedder at creation and refuses to
         reopen with a different one. Defaults come from ``SCIENTIST_EMBEDDING``
-        (fallback ``ARCHIVIST_EMBEDDING``; default ``remote`` — DeepInfra, no local
-        model download) and ``SCIENTIST_EMBED_MODEL`` (fallback
-        ``ARCHIVIST_EMBED_MODEL``; default ``qwen3_600m``, dim 1024).
+        (default ``remote`` — DeepInfra, no local model download) and
+        ``SCIENTIST_EMBED_MODEL`` (default ``qwen3_600m``, dim 1024).
         """
         from libkit import Library
         from libkit.errors import EmbedderMismatch
 
-        store_dir = home / resolve_store_dirname(home)
+        store_dir = home / STORE_DIRNAME
         store_dir.mkdir(parents=True, exist_ok=True)
-        embedding = embedding or env_first("SCIENTIST_EMBEDDING", "ARCHIVIST_EMBEDDING",
-                                           default="remote")
-        model = model or env_first("SCIENTIST_EMBED_MODEL", "ARCHIVIST_EMBED_MODEL",
-                                   default="qwen3_600m")
-        allow_mismatch = (env_first("SCIENTIST_ALLOW_EMBEDDER_MISMATCH",
-                                    "ARCHIVIST_ALLOW_EMBEDDER_MISMATCH", default="").lower()
+        embedding = embedding or os.environ.get("SCIENTIST_EMBEDDING", "remote")
+        model = model or os.environ.get("SCIENTIST_EMBED_MODEL", "qwen3_600m")
+        allow_mismatch = (os.environ.get("SCIENTIST_ALLOW_EMBEDDER_MISMATCH", "").lower()
                           in ("1", "true", "yes"))
         try:
             lib = Library.open(

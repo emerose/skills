@@ -1,5 +1,5 @@
 """The store layer of the scientist skill: a libkit-backed index/search/catalog
-over a tree of scientific experiments (the former ``archivist``).
+over a tree of scientific experiments.
 
 libkit IS the store — there is no separate database. Each experiment, file, and
 curated-entity note is one libkit document; all fields live in the document's
@@ -18,9 +18,9 @@ and the PR plumbing (:mod:`_pr`). The CLI handlers live in :mod:`store.cli`.
 from __future__ import annotations
 
 from . import _audit, _extract, _files, _generate, _intake, _meta, _pr, _store
-from ._store import STORE_DIRNAME, ArchivistStore, EmbedderConfigError
+from ._store import STORE_DIRNAME, Store, EmbedderConfigError
 
 __all__ = [
-    "ArchivistStore", "EmbedderConfigError", "STORE_DIRNAME",
+    "Store", "EmbedderConfigError", "STORE_DIRNAME",
     "_store", "_meta", "_files", "_extract", "_intake", "_audit", "_generate", "_pr",
 ]

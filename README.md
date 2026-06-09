@@ -34,8 +34,7 @@ figures) from that data; assert **grounded scientific claims** (each a re-runnab
 pytest spec linking a statement to sha-pinned evidence with a strength); index
 everything — **claims and internal summaries first** — into a **libkit** store for
 semantic + full-text search; and trace any result back to the original measurements.
-One `sci` CLI for the deterministic ops, plus a pytest plugin for claims. Subsumes the
-former extractor, archivist, and analyst skills. See
+One `sci` CLI for the deterministic ops, plus a pytest plugin for claims. See
 [`skills/scientist/SKILL.md`](skills/scientist/SKILL.md); for the per-phase detail, the
 files under [`skills/scientist/references/`](skills/scientist/references/).
 

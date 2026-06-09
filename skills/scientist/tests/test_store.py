@@ -1,4 +1,4 @@
-"""Integration tests for ArchivistStore against real libkit, using a fake embedder
+"""Integration tests for Store against real libkit, using a fake embedder
 + Markdown loader + trivial chunker — so no model download and no API keys.
 
 Skipped automatically if libkit isn't installed. Needs network the first time
@@ -13,7 +13,7 @@ import pytest
 
 libkit = pytest.importorskip("libkit")
 
-from store._store import ArchivistStore  # noqa: E402
+from store._store import Store  # noqa: E402
 from store import _meta  # noqa: E402
 from libkit import Library, LibraryConfig  # noqa: E402
 from libkit.concurrency import ConcurrencyHint  # noqa: E402
@@ -50,15 +50,15 @@ class _FakeChunker:
 
 @pytest.fixture
 def store(tmp_path):
-    (tmp_path / ".archivist").mkdir()
+    (tmp_path / ".scientist").mkdir()
     cfg = LibraryConfig(
-        db_path=tmp_path / ".archivist" / "catalog.duckdb",
+        db_path=tmp_path / ".scientist" / "catalog.duckdb",
         embedder=_FakeEmbedder(),
         chunker=_FakeChunker(),
         loaders={".md": MarkdownLoader(), ".txt": MarkdownLoader()},
         cache_enabled=False,
     )
-    return ArchivistStore(tmp_path, Library(cfg))
+    return Store(tmp_path, Library(cfg))
 
 
 def _run(store, coro_factory):

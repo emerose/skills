@@ -1,13 +1,13 @@
-"""Pure model helpers for archivist: the experiment / file / entity record model,
+"""Pure model helpers for scientist: the experiment / file / entity record model,
 deterministic Markdown *card* generators, dependency blocks, and the mapping
-between an archivist *record* and a libkit document's ``metadata`` dict.
+between a *record* and a libkit document's ``metadata`` dict.
 
 Dependency-free (stdlib only) so it imports and unit-tests without libkit or a
 network.
 
 ## The record model
 
-archivist manages a tree of scientific *experiments* (e.g. ``05 - Scientific
+scientist manages a tree of scientific *experiments* (e.g. ``05 - Scientific
 Data``). The logical unit is an **experiment** — a folder of heterogeneous files
 — not a single document. Everything is stored in one libkit library as documents
 of three *kinds*, distinguished by the ``kind`` metadata key:
@@ -33,7 +33,7 @@ of three *kinds*, distinguished by the ``kind`` metadata key:
   path, so it's normalized to be reproducible across runs/machines).
 
 libkit owns byte-level identity (``document_id`` = SHA-256 of the ingested bytes).
-archivist layers logical identity on top: an experiment is keyed by ``exp_id``, a
+scientist layers logical identity on top: an experiment is keyed by ``exp_id``, a
 file by its ``path``.
 """
 
@@ -328,7 +328,7 @@ def file_card_markdown(rec: dict[str, Any], *, schema: dict[str, Any] | None = N
 
 
 def readme_template(rec: dict[str, Any]) -> str:
-    """A pure-prose README.md skeleton for a newly scaffolded experiment. Archivist
+    """A pure-prose README.md skeleton for a newly scaffolded experiment. scientist
     never edits READMEs after this; all structured metadata lives in experiment.yml,
     so this is only section prompts for the human/agent to fill."""
     exp_id = rec.get("exp_id", "")

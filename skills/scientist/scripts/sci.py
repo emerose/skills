@@ -35,9 +35,9 @@ experiment, it runs the store staleness pass across the whole data folder. Use
 `sci check` for the structural-integrity report.
 
 `extract`'s recipe lives at <exp>/data/extract.py and defines build(x); see the
-extraction package and references/extract.md. The data-tree root is $SCIENTIST_HOME
-(fallback $ARCHIVIST_HOME), the private vocab is $SCIENTIST_VOCAB (fallback
-$ARCHIVIST_VOCAB), and the store lives at <home>/.scientist/catalog.duckdb.
+extraction package and references/extract.md. The data-tree root is $SCIENTIST_HOME,
+the private vocab is $SCIENTIST_VOCAB, and the store lives at
+<home>/.scientist/catalog.duckdb.
 """
 from __future__ import annotations
 

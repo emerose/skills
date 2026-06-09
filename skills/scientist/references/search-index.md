@@ -44,7 +44,7 @@ Opening the library constructs an embedder (libkit fixes the vector dimension at
 uv run skills/scientist/scripts/sci.py <command> [args] --home "<data folder>"
 ```
 The managed folder is `--home`, `$SCIENTIST_HOME` (one var drives the store + the `experiments`
-root; `$ARCHIVIST_HOME` / `$EXPERIMENTS_ROOT` still work as fallbacks), or cwd. Run `init` once per folder.
+root), or cwd. Run `init` once per folder.
 
 ```bash
 sci init                                    # create the store + .gitignore entry

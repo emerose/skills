@@ -71,7 +71,7 @@ Jess) · `viability` · `cytokine` · `immunotox` · `mea` · `pk` · `biodist` 
 
 ## Migration note
 
-This convention applies to data produced by the extractor. Existing `data/` files
+This convention applies to data produced by extraction. Existing `data/` files
 are renamed/reshaped to match **as each experiment is (re)processed through
 extraction** — not in a separate mass-rename. The extraction audit reports legacy
 files that don't yet conform.

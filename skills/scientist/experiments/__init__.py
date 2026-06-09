@@ -19,11 +19,11 @@ a notebook and inside a claim.
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 import analyst
-from provenance import env_first
 
 __all__ = ["Study", "Program", "program", "canonical", "root", "resolve"]
 
@@ -31,7 +31,7 @@ _STUDY_RE = re.compile(r"^k1_\d{6}$", re.IGNORECASE)
 
 
 def root() -> Path:
-    r = env_first("SCIENTIST_HOME", "EXPERIMENTS_ROOT")
+    r = os.environ.get("SCIENTIST_HOME")
     if not r:
         raise RuntimeError(
             "SCIENTIST_HOME is not set — point it at the '05 - Scientific Data' checkout.")
@@ -185,7 +185,7 @@ class Study:
 
 class Program:
     """Cross-experimental reference facts + the home for program-level claims:
-    ``$EXPERIMENTS_ROOT/program/``. The *contents* (entity registries, naming conventions,
+    ``$SCIENTIST_HOME/program/``. The *contents* (entity registries, naming conventions,
     program constants) are program-specific and live in the data repo; this accessor is
     generic. Reads route through the tracked loader, so referencing a program fact from a
     claim/derivation is captured as provenance like any other input.

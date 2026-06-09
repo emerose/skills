@@ -1,4 +1,4 @@
-"""Filesystem helpers for archivist: walking an experiment folder, classifying
+"""Filesystem helpers for scientist: walking an experiment folder, classifying
 each file, and extracting a lightweight schema + preview from tabular files.
 
 The schema/preview is what gets embedded for *discovery* ("which file has the
@@ -19,7 +19,7 @@ from typing import Any, Iterator
 from . import _meta
 
 # Never index these — VCS, caches, virtualenvs, the store itself, OS cruft.
-IGNORE_DIR_NAMES = {".git", ".scientist", ".archivist", "__pycache__", "node_modules",
+IGNORE_DIR_NAMES = {".git", ".scientist", "__pycache__", "node_modules",
                     ".ipynb_checkpoints"}
 IGNORE_DIR_SUFFIXES = (".dist-info", ".egg-info")
 IGNORE_FILE_NAMES = {".DS_Store", "Thumbs.db"}

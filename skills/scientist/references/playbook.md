@@ -17,12 +17,12 @@ a unit needs nothing from the Drive: provision an isolated, off-Drive worktree i
 # (the [reports] extra pulls the doc() readers: pdfplumber / python-docx / python-pptx)
 
 # provision a per-unit worktree off a local clone of origin/main, and point
-# EXPERIMENTS_ROOT at it (clones ~1GB the first time, then each unit is ~instant):
+# SCIENTIST_HOME at it (clones ~1GB the first time, then each unit is ~instant):
 eval "$(skills/scientist/scripts/new-unit.sh k1-000000)"
 ```
 
 Do all edits, `python derive.py`, and `pytest` in that worktree; commit there (scoped to
-your experiment dir) and `git -C "$EXPERIMENTS_ROOT" push origin analyst/k1-000000` straight
+your experiment dir) and `git -C "$SCIENTIST_HOME" push origin analyst/k1-000000` straight
 to GitHub; open one PR. After it merges, `skills/scientist/scripts/new-unit.sh --remove
 k1-000000`. (See the header of `scripts/new-unit.sh` for env overrides + teardown.)
 

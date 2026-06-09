@@ -1,4 +1,4 @@
-"""Audit + integrity helpers for archivist (reports only — never mutates).
+"""Audit + integrity helpers for scientist (reports only — never mutates).
 
 Two layers:
 
@@ -7,7 +7,7 @@ Two layers:
   and redundant archives (a zip whose members are already extracted in-folder, the
   ``raw.zip`` pattern).
 * **Staleness** (`staleness`): a generated doc carries an explicit dependency block
-  (``<!-- archivist:deps … -->``) listing the source files it was built from with
+  (``<!-- scientist:deps … -->``) listing the source files it was built from with
   their sha256 at generation time. Re-hashing those vs disk tells us, cheaply and
   deterministically, whether a README/summary is out of date — the first half of the
   "keep summaries current" goal; the parallel-agent semantic pass is the second half.

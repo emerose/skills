@@ -176,9 +176,8 @@ def main():
     ap.add_argument("--no-drift", action="store_true", help="skip the git drift check (faster)")
     args = ap.parse_args()
 
-    # SCIENTIST_HOME is the data-tree root; EXPERIMENTS_ROOT is the legacy fallback.
-    root = next((os.environ[k] for k in ("SCIENTIST_HOME", "EXPERIMENTS_ROOT")
-                 if k in os.environ), None)
+    # SCIENTIST_HOME is the data-tree root.
+    root = os.environ.get("SCIENTIST_HOME")
     if not root:
         raise SystemExit("set SCIENTIST_HOME to the experiments data repo")
     root = Path(root)

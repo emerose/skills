@@ -24,7 +24,7 @@
     {
       "name": "scientist",
       "source": "./",
-      "description": "Manage a tree of scientific experiments end to end as one provenance-tracked pipeline raw→data→analysis→claims: extract raw measurements from CRO files (Excel, GraphPad Prism, Word/PDF/PowerPoint) into tidy deterministic data/ CSVs; re-derive analysis (EC50/Hill fits, stats, summaries, figures); assert grounded scientific claims (each a re-runnable pytest spec linking a statement to sha-pinned evidence with a strength); and index everything — claims and summaries first — into a libkit store for semantic + full-text search, with an end-to-end traceability audit from any claim back to the original measurements. Built on libkit. Subsumes the former extractor, archivist, and analyst skills.",
+      "description": "Manage a tree of scientific experiments end to end as one provenance-tracked pipeline raw→data→analysis→claims: extract raw measurements from CRO files (Excel, GraphPad Prism, Word/PDF/PowerPoint) into tidy deterministic data/ CSVs; re-derive analysis (EC50/Hill fits, stats, summaries, figures); assert grounded scientific claims (each a re-runnable pytest spec linking a statement to sha-pinned evidence with a strength); and index everything — claims and summaries first — into a libkit store for semantic + full-text search, with an end-to-end traceability audit from any claim back to the original measurements. Built on libkit.",
       "version": "0.1.0",
       "author": {
         "name": "Sam Quigley",

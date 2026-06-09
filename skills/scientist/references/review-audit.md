@@ -57,7 +57,7 @@ strength, caveats, evidence, inputs+shas, reconcile, drift?}`).
 
 ```bash
 pytest <…>/analysis/claims --check-drift        # flag stale claims (input changed since @strength set)
-EXPERIMENTS_ROOT=… rollup.py [--out DIR] [--no-drift]   # PROGRAM-WIDE rollup
+SCIENTIST_HOME=… rollup.py [--out DIR] [--no-drift]   # PROGRAM-WIDE rollup
 ```
 
 - **Program rollup** runs *every* `<exp>/analysis/claims` in one session (so cross-experiment

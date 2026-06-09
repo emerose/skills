@@ -13,7 +13,7 @@ temporal history. Closes the pipeline `raw → data → analysis → claims`.
 ## Two packages (the generic machinery)
 
 - **`experiments`** — typed, tracked data access. `from experiments import k1_000000 as k` resolves
-  the `K1-000000 *` folder under `$SCIENTIST_HOME` (fallback `$EXPERIMENTS_ROOT`) and returns a `Study`. Tidy `data/` tables are
+  the `K1-000000 *` folder under `$SCIENTIST_HOME` and returns a `Study`. Tidy `data/` tables are
   attributes (`02_assay_summary.csv` → `k.assay_summary`, drop the `NN_`). Lazy, cached,
   **sha-pinned**, recorded as provenance on every read. `k.meta` = `experiment.yml`; `k.analysis.<name>`
   = a derived table; `k.derive` = the experiment's `analysis/derive.py`. DataFrames carry
@@ -140,7 +140,7 @@ uv run --with-editable skills/scientist pytest <exp1>/analysis/claims <exp2>/...
 uv run --with-editable skills/scientist pytest <…>/analysis/claims --check-drift       # also flag stale claims
 ```
 
-Program-wide rollup: `EXPERIMENTS_ROOT=… uv run --with-editable skills/scientist python skills/scientist/scripts/rollup.py`.
+Program-wide rollup: `SCIENTIST_HOME=… uv run --with-editable skills/scientist python skills/scientist/scripts/rollup.py`.
 
 Emits `grounding_report.md` + `.json` (per claim: `{id, statement, outcome, kind, strength, caveats,
 evidence, inputs+shas, reconcile, drift?}`).

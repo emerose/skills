@@ -69,7 +69,7 @@ def audit(exp: Path, script: Path | None = None) -> int:
 
     # 2. grounding (inputs exist; provenance sha match if recorded). Read leniently:
     # the recorded provenance may sit on an exp_id-less sidecar (data committed before
-    # archivist metadata is authored), and audit must still check it.
+    # the metadata is authored), and audit must still check it.
     sidecar = P._load_raw(exp)
     recorded, recorded_recipe = {}, {}
     for e in P.edges(sidecar, "data/"):

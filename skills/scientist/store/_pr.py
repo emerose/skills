@@ -1,7 +1,7 @@
-"""Git/GitHub plumbing: package archivist's generated changes into a branch and
+"""Git/GitHub plumbing: package scientist's generated changes into a branch and
 open a pull request for the user to review and merge.
 
-archivist never writes content silently to the main branch — `readme`/`summary`
+scientist never writes content silently to the main branch — `readme`/`summary`
 regenerate files in the working tree, and this module wraps them into a reviewable
 PR (branch -> commit -> push -> `gh pr create`). The data folder is the git repo;
 the private remote is configured separately (`gh repo create`).
@@ -29,7 +29,7 @@ def _git(home: Path, *args: str, check: bool = True) -> str:
 
 def slug_branch(title: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48].strip("-")
-    return f"archivist/{s or 'update'}"
+    return f"scientist/{s or 'update'}"
 
 
 def current_branch(home: Path) -> str:

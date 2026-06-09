@@ -1,7 +1,7 @@
-"""Rendering helpers for archivist. Archivist does NOT write prose: READMEs are
+"""Rendering helpers for scientist. scientist does NOT write prose: READMEs are
 purely human/agent-authored and structured metadata lives in ``experiment.yml``.
 This module only renders *views* of the index on demand (e.g. the Files-on-disk
-summary shown by ``arx show``). Dependency-free (stdlib) so it unit-tests in
+summary shown by ``sci show``). Dependency-free (stdlib) so it unit-tests in
 isolation.
 """
 

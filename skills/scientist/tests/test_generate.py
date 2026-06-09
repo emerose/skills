@@ -1,4 +1,4 @@
-"""Unit tests for _generate: the Files-on-disk view (the only thing archivist
+"""Unit tests for _generate: the Files-on-disk view (the only thing scientist
 renders into prose-free output now)."""
 
 from store import _generate

@@ -1,6 +1,6 @@
 # analyst — analysis + claim-grounding layer (draft spec)
 
-Closes the provenance pipeline `raw → data → analysis → claims`. The extractor already
+Closes the provenance pipeline `raw → data → analysis → claims`. The extract stage already
 produces trustworthy `data/`. This layer adds (1) **comprehensive, re-derivable
 analysis** of each experiment (EC50 fits, stats, summaries, figures) traced to `data/`,
 and (2) **grounded, traceable claims** — every scientific assertion linked to the exact
@@ -31,7 +31,7 @@ deliverable?** If yes, pulling it into `data/` is faithful extraction; if the re
 
 **De-overloading `extract`:** some recipes currently compute derived tables inside
 `extract.py` (e.g. K1-000001's `03_dose_response` = per-dose mean/SEM/KD% computed
-from the pzfx, with point-exclusion choices). Building the analyst layer pulls those
+from the pzfx, with point-exclusion choices). Building the claims layer pulls those
 derivations out of `extract.py` into `analysis/`, restoring extraction to pure
 faithfulness; the computed tables become analysis outputs (exposed via `k.analysis.*`).
 
@@ -44,7 +44,7 @@ glob on the id). Attributes are the tidy tables as pandas DataFrames; lazy, cach
 provenance.
 - `02_assay_summary.csv` → `k.assay_summary`; `k.meta` → `experiment.yml`; `__dir__()` lists
   tables (IPython tab-completion). DataFrames carry `.attrs["source"]`/`["sha256"]`.
-- Root via `EXPERIMENTS_ROOT` env. Later: `k.analysis.<name>` exposes derived outputs the same way.
+- Root via `SCIENTIST_HOME` env. Later: `k.analysis.<name>` exposes derived outputs the same way.
 
 ### 2. `analysis/` — comprehensive derivations (products, not claims)
 Plain importable functions per experiment (no decorators) that **compute** the derived
