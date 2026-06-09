@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scientist"
+version = "0.1.0"
+description = "scientist — consolidated scientific-data skill: shared provenance core + lab-file readers + the raw→data extractor"
+# libkit (the store layer) requires >=3.12, matching scripts/sci.py's PEP723 header.
+requires-python = ">=3.12"
+# Deterministic format readers (xlsx/xls, GraphPad Prism, Word/PDF report tables)
+# plus PyYAML for the experiment.yml sidecar. Pinned loosely; readers are pure
+# functions of the source bytes given a fixed library set.
+dependencies = [
+    "openpyxl>=3.1",
+    "pyyaml>=6.0",
+    "xlrd>=2.0",
+    "python-docx>=1.1",
+    "pdfplumber>=0.11",
+    # python-pptx completes the doc-text readers (labfiles.read_pptx_text); core
+    # alongside pdfplumber/python-docx so the claims path (editable install, no extras)
+    # can quote .pptx TC decks without the [reports] extra.
+    "python-pptx>=1.0",
+    # store layer (libkit-backed index/search/catalog)
+    "libkit>=0.2.3",
+    "platformdirs>=4.0",
+    # grounding (claim-grounding + analysis-provenance) core. Scientific deps are
+    # version-pinned for fit determinism: a 4-parameter Hill fit (scipy.optimize)
+    # is a pure function of its inputs given a fixed library set, so claims pin to a
+    # tested set and compare derived floats within tolerance (never byte-identical).
+    "pandas==2.2.3",
+    "numpy==2.1.3",
+    "scipy==1.14.1",
+    "matplotlib==3.9.2",
+    "pytest>=8.0",
+]
+
+[project.optional-dependencies]
+# Pure-Python readers a doc()/external claim may need to quote a CRO report:
+# pdfplumber (.pdf), python-docx (.docx), python-pptx (.pptx TC decks). DocRef.text()
+# dispatches over these — offline + deterministic (no LibreOffice, no hosted API).
+# pdfplumber + python-docx are already core deps; python-pptx is the addition here.
+reports = ["pdfplumber>=0.11", "python-docx>=1.1", "python-pptx>=1.0"]
+
+# Auto-load the grounding plugin: a bare `pytest <exp>/analysis/claims` works once
+# the package is on the path (e.g. `uv run --with-editable skills/scientist pytest …`).
+[project.entry-points.pytest11]
+scientist = "scientist.grounding.plugin"
+
+[tool.setuptools.packages.find]
+# The single top-level `scientist` package and its subpackages
+# (provenance, labfiles, extraction, store, experiments, grounding).
+where = ["."]
+include = ["scientist*"]

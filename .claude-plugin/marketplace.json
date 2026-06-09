@@ -22,9 +22,9 @@
       "tags": ["bibliography", "research", "pdf", "citations", "academic", "rag", "libkit"]
     },
     {
-      "name": "archivist",
+      "name": "scientist",
       "source": "./",
-      "description": "Organize, index, and search a tree of scientific experiments (raw lab/CRO data, protocols, reports, notebooks, and internal summaries) kept as one folder per experiment: full-text + semantic search inside a libkit store, an experiment catalog with CRO study IDs / assays / ASOs / models, cross-referenced related studies, exact-value reads from source spreadsheets, and provenance-tracked internal summaries kept current as data changes. Built on libkit.",
+      "description": "Manage a tree of scientific experiments end to end as one provenance-tracked pipeline raw→data→analysis→claims: extract raw measurements from CRO files (Excel, GraphPad Prism, Word/PDF/PowerPoint) into tidy deterministic data/ CSVs; re-derive analysis (EC50/Hill fits, stats, summaries, figures); assert grounded scientific claims (each a re-runnable pytest spec linking a statement to sha-pinned evidence with a strength); and index everything — claims and summaries first — into a libkit store for semantic + full-text search, with an end-to-end traceability audit from any claim back to the original measurements. Built on libkit.",
       "version": "0.1.0",
       "author": {
         "name": "Sam Quigley",
@@ -32,7 +32,7 @@
       },
       "repository": "https://github.com/emerose/skills",
       "category": "research",
-      "tags": ["science", "lab-data", "experiments", "cro", "research", "rag", "libkit"]
+      "tags": ["science", "lab-data", "experiments", "cro", "provenance", "claims", "extraction", "research", "rag", "libkit"]
     }
   ]
 }
