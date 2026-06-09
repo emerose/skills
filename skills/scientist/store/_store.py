@@ -27,7 +27,20 @@ from provenance import env_first
 from . import _meta
 
 STORE_DIRNAME = ".scientist"
+LEGACY_STORE_DIRNAME = ".archivist"
 DB_FILENAME = "catalog.duckdb"
+
+
+def resolve_store_dirname(home: Path) -> str:
+    """The store dir name to use under ``home``. New stores use ``.scientist/``,
+    but an existing legacy ``.archivist/`` store is reused **in place** — the
+    rename is forward-looking, not a re-embed (reindexing an existing corpus would
+    be needless cost; the store can be large). Prefer ``.scientist/`` if both exist."""
+    if (home / STORE_DIRNAME).exists():
+        return STORE_DIRNAME
+    if (home / LEGACY_STORE_DIRNAME).exists():
+        return LEGACY_STORE_DIRNAME
+    return STORE_DIRNAME
 
 
 def _now_iso() -> str:
@@ -49,6 +62,7 @@ class ArchivistStore:
     def __init__(self, home: Path, lib: Any) -> None:
         self.home = home
         self.lib = lib
+        self._store_dirname = resolve_store_dirname(home)
 
     # ---- lifecycle ----------------------------------------------------------
     @classmethod
@@ -71,7 +85,7 @@ class ArchivistStore:
         from libkit import Library
         from libkit.errors import EmbedderMismatch
 
-        store_dir = home / STORE_DIRNAME
+        store_dir = home / resolve_store_dirname(home)
         store_dir.mkdir(parents=True, exist_ok=True)
         embedding = embedding or env_first("SCIENTIST_EMBEDDING", "ARCHIVIST_EMBEDDING",
                                            default="remote")
@@ -349,7 +363,7 @@ class ArchivistStore:
     async def _ingest_card(self, markdown: str, rec: dict[str, Any]) -> Any:
         """Ingest a deterministic Markdown card. The card's bytes (not its temp
         filename) decide libkit's ``document_id``, so identical cards collapse."""
-        card_dir = self.home / _meta_store_cards_dir()
+        card_dir = self.home / self._store_dirname / "cards"
         card_dir.mkdir(parents=True, exist_ok=True)
         tmp = Path(tempfile.mkstemp(suffix=".md", dir=card_dir)[1])
         try:
@@ -366,10 +380,6 @@ class ArchivistStore:
         merged = dict(doc.metadata or {})
         merged.update(changes)
         await self.lib.update_metadata(document_id, metadata=merged)
-
-
-def _meta_store_cards_dir() -> str:
-    return f"{STORE_DIRNAME}/cards"
 
 
 def _claim_evidence_dict(evidence_json: Any) -> dict[str, Any]:

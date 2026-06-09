@@ -27,7 +27,7 @@ import provenance
 from provenance import env_first
 
 from . import _audit, _extract, _files, _generate, _intake, _meta, _pr
-from ._store import STORE_DIRNAME, ArchivistStore, EmbedderConfigError
+from ._store import STORE_DIRNAME, ArchivistStore, EmbedderConfigError, resolve_store_dirname
 
 # Narrative files larger than this are catalogued as descriptors rather than
 # parsed+embedded whole (avoids choking on the multi-hundred-MB raw text dumps).
@@ -78,7 +78,7 @@ def _home(args: argparse.Namespace) -> Path:
 
 
 def _require_initialized(home: Path) -> None:
-    if not (home / STORE_DIRNAME / "catalog.duckdb").exists():
+    if not (home / resolve_store_dirname(home) / "catalog.duckdb").exists():
         die(f"no scientist store under {home} — run `sci init --home {home}` first")
 
 
@@ -112,7 +112,7 @@ async def cmd_init(store: ArchivistStore, args: argparse.Namespace) -> None:
             if existing and existing[-1].strip():
                 fh.write("\n")
             fh.write("\n".join(add) + "\n")
-    print(f"initialized scientist store at {store.home / STORE_DIRNAME}")
+    print(f"initialized scientist store at {store.home / store._store_dirname}")
     if add:
         print(f"  added to .gitignore: {', '.join(add)}")
     legacy = store.home / ".archivist"
@@ -574,7 +574,7 @@ async def cmd_catalog(store: ArchivistStore, args: argparse.Namespace) -> None:
     clean = [{k: v for k, v in e.items() if not k.startswith("_") and k != "content_hash"}
              for e in exps]
     md_path = store.home / "CATALOG.md"
-    json_path = store.home / STORE_DIRNAME / "catalog.json"
+    json_path = store.home / store._store_dirname / "catalog.json"
     md_path.write_text(_meta.catalog_markdown(exps), encoding="utf-8")
     json_path.write_text(json.dumps(clean, ensure_ascii=False, indent=2, default=str, sort_keys=True),
                          encoding="utf-8")
@@ -1009,7 +1009,8 @@ async def _run(args: argparse.Namespace) -> None:
 
 def store_exists(args: argparse.Namespace) -> bool:
     """Whether a libkit store is initialized under the resolved data folder."""
-    return (_home(args) / STORE_DIRNAME / "catalog.duckdb").exists()
+    home = _home(args)
+    return (home / resolve_store_dirname(home) / "catalog.duckdb").exists()
 
 
 def dispatch_audit_storeless(args: argparse.Namespace) -> int:
