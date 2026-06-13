@@ -1,18 +1,26 @@
-"""Best-effort extraction of experiment metadata + entities from README content
-and filenames. Dependency-free (stdlib only) so it unit-tests without libkit.
+"""Controlled-vocabulary normalizers for experiment metadata. Dependency-free
+(stdlib only, PyYAML lazy) so it unit-tests without libkit.
 
-The aim is *precision over recall* for the structured fields that drive experiment
-cards and the (derivable) entity registry: CRO, external study IDs, assays, ASOs,
-species/model, status, and related experiments. Everything is conservative —
-controlled vocabularies with explicit aliases, plus a few tight regexes — because
-these values feed cross-referencing (`entity show "ASO-7"`) where a false match
-is worse than a miss. Free-text the extractor isn't sure about is left for the
-human/agent author of a README, not invented here.
+*Reading* a README and deciding what an experiment's CRO / assays / model / status
+are is reading comprehension — the calling agent's job, done directly from the prose
+(see references/search-index.md, "Author experiment.yml from the README"). This module
+is the deterministic glue underneath that: it canonicalizes the tokens the agent
+identifies so cross-referencing stays consistent (``entity show "ASO-7"`` must match
+whether the README wrote "ASO 7", "ASO-7", or "ASO007"). It does NOT decide *which*
+values apply — it normalizes ones already in hand:
 
-Real CRO/vendor names and vendor-specific study-id formats are program-specific
-and are **not** baked into this public repo. They live in a private vocabulary
-file in your data folder (`vocab.yml`, or `$SCIENTIST_VOCAB`); `load_vocab()`
-merges it over the generic placeholder defaults below. See that loader.
+* :func:`find_asos` — ASO mentions → canonical ``ASO-<n>``.
+* :func:`find_study_ids` — study-id-shaped tokens (vendor-neutral defaults + private
+  patterns), validated against the controlled shapes.
+* :func:`find_related` — cross-referenced ``K1-…`` ids (self excluded).
+* :func:`load_vocab` / :func:`match_vocab` — map a CRO/assay/model name onto its
+  canonical vocabulary entry (alias → canonical), so a full vendor name folds to its
+  short form.
+
+Real CRO/vendor names and vendor-specific study-id formats are program-specific and are
+**not** baked into this public repo. They live in a private vocabulary file in your data
+folder (``vocab.yml``, or ``$SCIENTIST_VOCAB``); :func:`load_vocab` merges it over the
+generic placeholder defaults below.
 """
 
 from __future__ import annotations
@@ -21,7 +29,6 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any
 
 # --------------------------------------------------------------------------- #
 # controlled vocabularies (canonical -> alias regex fragments, case-insensitive)
@@ -135,7 +142,10 @@ def load_vocab(home: str | Path | None = None) -> tuple[dict[str, list[str]], li
     return cro, pats
 
 
-def _match_vocab(text: str, vocab: dict[str, list[str]]) -> list[str]:
+def match_vocab(text: str, vocab: dict[str, list[str]]) -> list[str]:
+    """Every canonical vocabulary entry whose alias patterns match ``text``, in
+    vocabulary order. Use to fold a name the agent read ("RT-qPCR", "Vendor A
+    Discovery Services") onto its canonical form ("qPCR", "Vendor A")."""
     found = []
     for canon, patterns in vocab.items():
         if any(re.search(p, text, re.IGNORECASE) for p in patterns):
@@ -163,171 +173,3 @@ def find_study_ids(text: str, patterns: list[str] | None = None) -> list[str]:
 def find_related(text: str, *, exclude: str | None = None) -> list[str]:
     rel = sorted({m.group(0) for m in _EXP_ID_RE.finditer(text)})
     return [r for r in rel if r != exclude]
-
-
-# --------------------------------------------------------------------------- #
-# README parsing
-# --------------------------------------------------------------------------- #
-# Only genuine 2-column rows: the value cell must not itself contain a `|`. This
-# deliberately ignores 3+-column tables (Related-Studies, Files-on-disk, etc.), whose
-# rows would otherwise be mis-parsed as label/value pairs with pipe-laden values.
-_TABLE_ROW_RE = re.compile(r"^\|\s*\*{0,2}([^|*]+?)\*{0,2}\s*\|\s*([^|]+?)\s*\|\s*$", re.MULTILINE)
-
-
-def parse_md_table_fields(text: str) -> dict[str, str]:
-    """Pull ``| **Label** | value |`` rows from a two-column Markdown table into a
-    dict keyed by lowercased label. Skips separator rows, empty values, and any row
-    that isn't a clean 2-column property row (so a wider table's headers/cells don't
-    pollute the field map)."""
-    out: dict[str, str] = {}
-    for label, value in _TABLE_ROW_RE.findall(text):
-        label = label.strip().lower()
-        value = value.strip().strip("*").strip()
-        if not label or not value or set(value) <= {"-", " ", ":"}:
-            continue
-        if label in ("field", "parameter", "property", "value", "details"):
-            continue
-        out.setdefault(label, value)
-    return out
-
-
-def _external_study_id(fields: dict[str, str]) -> str | None:
-    """Pick the experiment's *external* study id from parsed table fields.
-
-    Matches varied labels by meaning (external/CRO study id), never the internal
-    id, and rejects values that are clearly parse garbage (containing ``|`` from a
-    mis-read multi-column row, or newlines). Returns the highest-priority clean
-    value, or ``None``."""
-    best: tuple[int, str] | None = None
-    for label, value in fields.items():
-        if "internal" in label or "|" in value or "\n" in value:
-            continue
-        if re.search(r"external", label) and "id" in label:
-            rank = 0
-        elif label in ("cro study id", "cro id", "external / cro study id"):
-            rank = 1
-        elif label in ("study id", "external study id"):
-            rank = 2
-        else:
-            continue
-        if best is None or rank < best[0]:
-            best = (rank, value.strip())
-    return best[1] if best else None
-
-
-def _section(text: str, *titles: str) -> str | None:
-    """Return the body of the first matching ``## Title`` section, if present."""
-    for title in titles:
-        m = re.search(rf"^#{{1,4}}\s*{re.escape(title)}\s*$(.*?)(?=^#{{1,4}}\s|\Z)",
-                      text, re.MULTILINE | re.DOTALL | re.IGNORECASE)
-        if m:
-            body = m.group(1).strip()
-            if body:
-                return body
-    return None
-
-
-def _first_paragraph(body: str | None) -> str | None:
-    if not body:
-        return None
-    for para in re.split(r"\n\s*\n", body):
-        para = para.strip()
-        if para and not para.startswith(("|", "#")):
-            return re.sub(r"\s+", " ", para)
-    return None
-
-
-def extract_from_readme(
-    text: str,
-    *,
-    exp_id: str | None = None,
-    home: str | Path | None = None,
-    cro_vocab: dict[str, list[str]] | None = None,
-    study_id_patterns: list[str] | None = None,
-) -> dict[str, Any]:
-    """Extract structured experiment metadata from a README's Markdown.
-
-    Returns only the keys it can fill with reasonable confidence; the caller
-    merges these over the folder-derived skeleton. Recognises both the table-
-    style headers used in these READMEs ("External ID", "CRO", "Species/Strain",
-    "Report Status") and free vocabulary in the prose.
-
-    CRO names and study-id formats come from ``load_vocab(home)`` (generic defaults
-    plus any private ``vocab.yml``); pass ``cro_vocab``/``study_id_patterns`` to
-    override directly (e.g. in tests).
-    """
-    if cro_vocab is None or study_id_patterns is None:
-        loaded_cro, loaded_pats = load_vocab(home)
-        if cro_vocab is None:
-            cro_vocab = loaded_cro
-        if study_id_patterns is None:
-            study_id_patterns = loaded_pats
-
-    fields = parse_md_table_fields(text)
-    out: dict[str, Any] = {}
-
-    # Title: explicit label, else the "# K1-xxx: Title" heading.
-    title_m = re.search(r"\*\*Study Title:\*\*\s*(.+)", text)
-    if title_m:
-        out["title"] = title_m.group(1).strip()
-    else:
-        h1 = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
-        if h1:
-            t = h1.group(1).strip()
-            t = re.sub(r"^K1-[A-Za-z0-9]+\s*[:\-–—]\s*", "", t)  # drop id prefix
-            out["title"] = t
-
-    # Own study ID comes ONLY from the IDs table — authoritative for THIS
-    # experiment. We deliberately do NOT scan the prose (a planning doc references
-    # other studies' ids). Labels vary ("External Study ID", "Study ID (External)",
-    # "External ID", "CRO Study ID"), so match by meaning; never the internal id.
-    ext_val = _external_study_id(fields)
-    if ext_val:
-        out["cro_study_ids"] = find_study_ids(ext_val, study_id_patterns) or [ext_val]
-    # Secondary (still authoritative for THIS experiment): a study-id-shaped token
-    # in the title, e.g. "Rat IT PK/PD Screening Study (V1234567)".
-    if "cro_study_ids" not in out and out.get("title"):
-        tids = find_study_ids(out["title"], study_id_patterns)
-        if tids:
-            out["cro_study_ids"] = tids
-
-    cro = fields.get("cro")
-    if cro:
-        canon = _match_vocab(cro, cro_vocab)
-        if canon:
-            out["cro"] = canon[0]            # canonicalise a full name to the vocab
-        elif not re.search(r"\bTBD\b|to be|bids|n/?a\b|none|\|", cro, re.IGNORECASE):
-            out["cro"] = re.split(r"\(", cro)[0].strip()   # else a clean literal value
-    else:
-        cros = _match_vocab(text, cro_vocab)
-        if cros:
-            out["cro"] = cros[0]
-
-    model = fields.get("species/strain") or fields.get("species") or fields.get("model")
-    out["model"] = model.strip() if model else None
-    # Assays/ASOs from vocabulary are safe to read from prose (they describe what
-    # the experiment did); cross-references are K1- ids, self excluded.
-    out["assays"] = _match_vocab(text, ASSAY_VOCAB)
-    out["asos"] = find_asos(text)
-    out["related"] = find_related(text, exclude=exp_id)
-
-    # Status ONLY from an explicit lifecycle field — never scraped from prose
-    # ("failed to deliver" must not mark a study failed). Folder-name suffixes
-    # like "(Terminated)"/"(Failed)"/DRAFT are handled by the caller.
-    status_val = fields.get("status") or fields.get("study status")
-    if status_val:
-        for status, pats in STATUS_HINTS.items():
-            if any(re.search(p, status_val, re.IGNORECASE) for p in pats):
-                out["status"] = status
-                break
-        else:
-            out["status"] = status_val.strip().lower()
-
-    # Narrative sections (kept short; the README itself remains the full text).
-    out["synopsis"] = _first_paragraph(
-        _section(text, "Study Overview", "Synopsis", "Overview", "Summary"))
-    kf = _section(text, "Key Findings", "Main Findings", "Key Conclusions")
-    if kf:
-        out["key_findings"] = re.sub(r"\n{3,}", "\n\n", kf).strip()[:2000]
-
-    return {k: v for k, v in out.items() if v not in (None, "", [], {})}

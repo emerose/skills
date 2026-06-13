@@ -25,7 +25,7 @@ from typing import Any, NoReturn
 
 from .. import provenance
 
-from . import _audit, _extract, _files, _generate, _intake, _meta, _pr
+from . import _audit, _files, _generate, _intake, _meta, _pr
 from ._store import STORE_DIRNAME, Store, EmbedderConfigError
 
 # Narrative files larger than this are catalogued as descriptors rather than
@@ -512,11 +512,33 @@ async def cmd_new(store: Store, args: argparse.Namespace) -> None:
         print(f"indexed as {args.exp_id}; write README.md prose + fill experiment.yml")
 
 
+def _parse_routes(raw: list[str] | None) -> dict[str, str]:
+    """Parse repeatable ``--route "NAME=subdir"`` flags into a {name: subdir} map.
+
+    NAME is a source file's basename; subdir must be one of LAYOUT's subfolders. The
+    agent supplies these after reading the delivery — the *content* judgment intake no
+    longer guesses (a document's role depends on what it contains)."""
+    routes: dict[str, str] = {}
+    for item in raw or []:
+        name, sep, sub = item.partition("=")
+        name, sub = name.strip(), sub.strip().lower()
+        if not sep or not name or not sub:
+            die(f"bad --route {item!r}: expected NAME=subdir "
+                f"(subdir one of {', '.join(_intake.SUBDIRS)})")
+        if sub not in _intake.SUBDIRS:
+            die(f"bad --route {item!r}: subdir must be one of {', '.join(_intake.SUBDIRS)}")
+        routes[name] = sub
+    return routes
+
+
 async def cmd_intake(store: Store, args: argparse.Namespace) -> None:
     """File a delivery (folder or files) into an experiment per LAYOUT.md.
 
     Copies (never moves) from the source; dry-run by default — review the plan,
-    then re-run with --commit to copy + index.
+    then re-run with --commit to copy + index. A document's *role* (protocol vs
+    reports vs raw) is the agent's judgment, supplied per file with repeatable
+    `--route "NAME=subdir"`; unrouted files fall back to a format/`raw` default the
+    dry-run marks as a guess to confirm. See references/search-index.md.
     """
     import shutil
 
@@ -529,21 +551,29 @@ async def cmd_intake(store: Store, args: argparse.Namespace) -> None:
     if not found:
         die(f"no experiment matching {args.experiment!r} — scaffold it first with `sci new`")
     exp_dir, parsed = found
-    plan = _intake.plan_intake(sources, exp_dir)
+    routes = _parse_routes(getattr(args, "route", None))
+    plan = _intake.plan_intake(sources, exp_dir, routes=routes)
 
     if args.json and not args.commit:
         emit_json({"experiment": parsed["exp_id"], "dry_run": True,
                    "plan": [{"src": str(p["src"]), "dest": store.relpath(p["dest"]),
-                             "subdir": p["subdir"], "collision": p["exists"]} for p in plan]})
+                             "subdir": p["subdir"], "routed_by": p["routed_by"],
+                             "collision": p["exists"]} for p in plan]})
         return
     if not args.commit:
         print(f"intake plan for {parsed['exp_id']} (dry-run — nothing copied):")
         by_sub: dict[str, int] = {}
+        guessed = 0
         for p in plan:
             by_sub[p["subdir"]] = by_sub.get(p["subdir"], 0) + 1
             flag = "  ⚠ overwrites existing" if p["exists"] else ""
-            print(f"  {p['subdir']:8} ← {p['src'].name}{flag}")
+            mark = "  ? unreviewed default" if p["routed_by"] in ("default", "ext") else ""
+            guessed += 1 if mark else 0
+            print(f"  {p['subdir']:8} ← {p['src'].name}{flag}{mark}")
         print(f"  ({len(plan)} files: " + ", ".join(f"{n} {s}" for s, n in sorted(by_sub.items())) + ")")
+        if guessed:
+            print(f"  {guessed} file(s) fell back to a default placement — read them and re-route any "
+                  f"protocol/reports/data with --route \"NAME=subdir\".")
         print("re-run with --commit to copy these in and index.")
         return
 
@@ -738,36 +768,20 @@ async def cmd_audit(store: Store, args: argparse.Namespace) -> None:
 
 
 async def cmd_meta(store: Store, args: argparse.Namespace) -> None:
-    """Show an experiment's structured metadata (from experiment.yml), or with
-    --suggest, print a *draft* sidecar derived heuristically from the README for an
-    agent/human to review and write. The tool never writes the sidecar from prose."""
+    """Show an experiment's structured metadata (from experiment.yml).
+
+    Authoring the sidecar from a README is a reading task the agent does directly —
+    see references/search-index.md ("Author experiment.yml from the README"); the
+    tool never writes the sidecar from prose."""
     found = _find_experiment_dir(store.home, args.experiment)
     if not found:
         die(f"no experiment matching {args.experiment!r}")
     exp_dir, parsed = found
     sidecar = exp_dir / provenance.SIDECAR_NAME
 
-    if args.suggest:
-        readme = exp_dir / "README.md"
-        draft: dict[str, Any] = {"exp_id": parsed["exp_id"], "name": parsed["name"]}
-        if readme.is_file():
-            guess = _extract.extract_from_readme(
-                readme.read_text(encoding="utf-8", errors="replace"),
-                exp_id=parsed["exp_id"], home=store.home)
-            for k in ("title", "cro", "cro_study_ids", "status", "model", "assays", "asos", "related"):
-                if guess.get(k):
-                    draft[k] = guess[k]
-        try:
-            draft = provenance.validate(draft)
-        except provenance.SidecarError:
-            pass  # a draft is allowed to be imperfect; the reviewer fixes it
-        print(f"# SUGGESTED draft for {sidecar} — REVIEW before saving; not authoritative.")
-        print(provenance._dump_sidecar_text(draft))
-        return
-
     if not sidecar.is_file():
-        die(f"no {provenance.SIDECAR_NAME} for {parsed['exp_id']} — create one "
-            f"(see `sci meta {parsed['exp_id']} --suggest` for a draft)")
+        die(f"no {provenance.SIDECAR_NAME} for {parsed['exp_id']} — author one by reading "
+            f"the README (references/search-index.md), or scaffold with `sci new`")
     try:
         meta = provenance.read_sidecar(exp_dir)
     except provenance.SidecarError as e:
@@ -943,6 +957,9 @@ def register(sub: argparse._SubParsersAction) -> None:
     sp = add("intake", "file a delivery (folder/files) into an experiment per LAYOUT.md")
     sp.add_argument("experiment", help="target experiment (exp_id or folder)")
     sp.add_argument("source", help="a delivery folder or a single file (copied, not moved)")
+    sp.add_argument("--route", action="append", metavar="NAME=SUBDIR",
+                    help="place file NAME in SUBDIR (protocol/reports/data/raw/analysis); "
+                         "repeatable — the agent's per-document role call")
     sp.add_argument("--commit", action="store_true", help="actually copy + index (default: dry-run)")
     add("catalog", "export the experiment catalog (CATALOG.md + catalog.json)")
     sp = add("check", "structural integrity report (missing/unindexed files, layout, redundant archives)")
@@ -951,8 +968,6 @@ def register(sub: argparse._SubParsersAction) -> None:
     sp.add_argument("experiment", nargs="?", help="limit to one experiment (default: all)")
     sp = add("meta", "show an experiment's structured metadata (experiment.yml)")
     sp.add_argument("experiment")
-    sp.add_argument("--suggest", action="store_true",
-                    help="print a heuristic draft sidecar from the README to review (not authoritative)")
     sp = add("fingerprint", "show the input files (+ sha256) review would record for an experiment")
     sp.add_argument("experiment")
     sp = add("review", "record provenance after verifying the README vs its data (explicit input list)")
