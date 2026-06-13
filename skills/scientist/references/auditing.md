@@ -39,18 +39,15 @@ slides under `Shared/`). `sci audit` re-hashes them and compares:
 - `no-provenance` — never reviewed; warrants a semantic look.
 - `no-/invalid-experiment-yml` — create or fix the sidecar (`sci meta <exp> --suggest`).
 
-## 2b. Prose ↔ claims (a discipline inside the semantic pass — no CLI)
+## 2b. Prose ↔ claims (part of the semantic pass)
 
-A result asserted in prose must map to a grounded `kind=claim`. This is a *procedure you
-run* while reading the prose, not a tool: the whole check is "read the claims, apply a
-fixed rule," and there's nothing a CLI does better than you reading the grounding report
-— so there's deliberately no `sci enforce-prose`. For each prose doc (`README.md`,
-`reports/*.md`):
+A result asserted in prose must map to a grounded `kind=claim`. While reading each prose
+doc (`README.md`, `reports/*.md`):
 
 1. **Find the evidentiary conclusions** — sentences asserting a *result*, quantitative
    (%, fold-change, p-value, `n=`, dose, IC50…) or qualitative ("well tolerated",
    "sustained knockdown", "comparable to vehicle"). Skip background/method/motivation
-   prose ("6 animals per group", "incubated 30 min"). This judgment is why it's yours.
+   prose ("6 animals per group", "incubated 30 min").
 2. **Map each to a claim** — a result should cite **`[claim:<id>]`** (stable `claim_id`
    or its trailing node). Pull claims with `sci query "<topic>" --kind claim` /
    `sci list --kind claim --experiment <exp> --json`, or read
@@ -59,14 +56,13 @@ fixed rule," and there's nothing a CLI does better than you reading the groundin
    `strong`/`moderate`. Else flag **unbacked** (no such claim), **weak-backing** (only
    backing is contradicted/drifted/unverifiable/weak — report *with* its
    outcome+strength), or **off-topic** (cited claim is grounded but not actually about
-   this sentence — only you can catch this).
+   this sentence).
 4. **Grade severity** — an *unbacked qualitative* conclusion is **advisory** (note it;
    soft prose is fuzzy and high-volume); an unbacked number, a weak/off-topic/contradicted
    backing is **blocking** (fix the prose or the citation).
 
-The grounded rule + `claim_id` format are the same ones `index-claims`, `sci query
---kind claim`, and `sci trace` use, so this stays consistent with the rest of the
-pipeline. The planned report phase (`sci report`) runs the identical procedure over
+The grounded rule and `claim_id` format match `index-claims` / `sci query --kind claim`
+/ `sci trace`. The planned report phase (`sci report`) runs the identical procedure over
 generated report Markdown.
 
 ## 3. Semantic — the parallel-agent pass (authoritative for content)

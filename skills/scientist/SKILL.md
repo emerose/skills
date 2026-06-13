@@ -77,4 +77,4 @@ Read the repo-wide [AGENTS.md](../../AGENTS.md) first: improve-as-you-go, push r
 (libkit is the store substrate; this is how bibliographer drove several libkit features),
 and verify changes on throwaway data. Per-phase maintenance notes live in each `references/` file;
 the open direction (reproduction audit, finer-grained provenance, program-level traceability) is in
-[ROADMAP.md](ROADMAP.md) — claim↔prose enforcement is shipped (a semantic-pass discipline; see review-audit.md).
+[ROADMAP.md](ROADMAP.md) — claim↔prose enforcement is shipped (see review-audit.md).

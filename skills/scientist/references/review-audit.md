@@ -35,19 +35,16 @@ sci audit  [K1-000000] [--json]          # staleness vs recorded provenance + a 
   read the data, verify the prose, and run the **prose ↔ claims check** below — the authoritative content
   check (see [auditing.md](auditing.md)).
 
-### Prose ↔ claims check (a semantic-pass discipline — you do this, no CLI)
+### Prose ↔ claims check
 
 Keep a `README.md` / `reports/*.md` sentence from **asserting a result without a grounded `kind=claim`
-backing it**. This is a *procedure you (the reviewing agent) run*, not a tool — the whole check is
-"read the claims, apply a fixed rule." There's nothing here a CLI does better than you reading the
-grounding report, so there is deliberately no `sci enforce-prose` command. For each prose doc (the root
-`README.md` and any `reports/*.md`):
+backing it**. As part of the semantic pass, for each prose doc (the root `README.md` and any
+`reports/*.md`):
 
-1. **Find the evidentiary conclusions.** Read the prose and pick out the sentences that assert a *result*
-   — quantitative (a %, fold-change, p-value, `n=`, dose, IC50…) *or* qualitative ("well tolerated",
-   "sustained knockdown", "comparable to vehicle", "dose-dependent"). Skip background / method /
-   motivation prose ("6 animals per group", "incubated 30 min", "we designed ASOs targeting X"). This
-   is a judgment call — it's exactly why it's left to you and not a regex.
+1. **Find the evidentiary conclusions.** Pick out the sentences that assert a *result* — quantitative
+   (a %, fold-change, p-value, `n=`, dose, IC50…) *or* qualitative ("well tolerated", "sustained
+   knockdown", "comparable to vehicle", "dose-dependent"). Skip background / method / motivation prose
+   ("6 animals per group", "incubated 30 min", "we designed ASOs targeting X").
 
 2. **Map each to a claim.** A result should carry an explicit citation **`[claim:<id>]`** in the prose
    (the stable `claim_id` `<exp>::<test-file>::<node>`, or its trailing node name). Pull the claims with
@@ -62,18 +59,16 @@ grounding report, so there is deliberately no `sci enforce-prose` command. For e
    - **weak-backing** — the only backing claim is contradicted (`xfail`), drifted (`failed`),
      unverifiable (`skipped`), or weak/unspecified strength → report it *with* the claim's
      `outcome`+`strength`, so prose leaning on a contradicted result is caught, not silently passed;
-   - **off-topic / wrong-claim** — the cited claim is grounded but isn't actually *about* this sentence
-     (a tolerability claim cited next to an efficacy number). Only you can catch this — it's the reason a
-     dumb citation-resolver wouldn't be enough.
+   - **off-topic** — the cited claim is grounded but isn't actually *about* this sentence (a tolerability
+     claim cited next to an efficacy number).
 
-4. **Grade severity, then report.** An *unbacked qualitative* conclusion is **advisory** (note it; soft
-   prose is fuzzy and high-volume, so don't treat a missing citation as a failure). An unbacked numeric
-   result, a `weak-backing`, an `off-topic` citation, or any contradicted backing is **blocking** — fix
-   the prose or the citation. Don't rewrite silently; report each finding with its doc, line, the
-   sentence, the claim it maps to (or that it's missing), and the claim's outcome/strength.
+4. **Grade severity, then report.** An *unbacked qualitative* conclusion is **advisory** (note it; a
+   missing citation on soft prose isn't a failure). An unbacked numeric result, a `weak-backing`, an
+   `off-topic` citation, or any contradicted backing is **blocking** — fix the prose or the citation.
+   Don't rewrite silently; report each finding with its doc, line, the sentence, the claim it maps to
+   (or that it's missing), and the claim's outcome/strength.
 
-The rule and the `claim_id` format are the *same* ones `index-claims`, `sci query --kind claim`, and
-`sci trace` use — so this check stays consistent with how the rest of the pipeline judges "grounded."
+The grounded rule and `claim_id` format match `index-claims` / `sci query --kind claim` / `sci trace`.
 The planned report phase (`sci report`) runs the identical procedure over generated report Markdown.
 
 ## Structural check

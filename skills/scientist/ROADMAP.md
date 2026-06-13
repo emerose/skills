@@ -33,18 +33,15 @@ a drifted input would point at *which* number moved.
 
 ## 3. Claims ⟷ prose enforcement — no ungrounded narrative ✅ shipped
 
-A **semantic-pass discipline**, not a tool — the whole check is "read the claims, apply a fixed rule,"
-which the reviewing agent does better than any CLI could, so there's deliberately no new code. During
-`sci audit`'s semantic pass, for each `README.md` / `reports/*.md` the agent picks out every result
-asserted in prose (quantitative *or* qualitative — both are grounded and audited the same way), maps it
-to its `kind=claim` (cite inline with `[claim:<id>]`; pull claims via `sci query --kind claim` or the
-`grounding_report.json`), and confirms the claim is grounded — `passed`/`xpass` **and** strong/moderate.
+Done as part of `sci audit`'s semantic pass: for each `README.md` / `reports/*.md` the agent picks out
+every result asserted in prose (quantitative *or* qualitative — both grounded and audited the same way),
+maps it to its `kind=claim` (cite inline with `[claim:<id>]`; pull claims via `sci query --kind claim` or
+the `grounding_report.json`), and confirms the claim is grounded — `passed`/`xpass` **and** strong/moderate.
 Else it reports `unbacked`, `weak-backing` (contradicted/weak — *with* its outcome+strength), or
-`off-topic` (grounded claim cited but not about this sentence — the case only an agent catches). Severity
-is tiered so the gate stays useful: an unbacked *qualitative* conclusion is advisory; an unbacked number,
-or any bad/contradicted citation, is blocking. The grounded rule + `claim_id` format are the same ones
-`index-claims` / `sci query --kind claim` / `sci trace` already use; the planned report phase
-(`sci report`) runs the identical procedure over generated report Markdown. See
+`off-topic` (grounded claim cited but not about this sentence). Severity is tiered: an unbacked
+*qualitative* conclusion is advisory; an unbacked number, or any bad/contradicted citation, is blocking.
+The grounded rule + `claim_id` format match `index-claims` / `sci query --kind claim` / `sci trace`; the
+planned report phase (`sci report`) runs the identical procedure over generated report Markdown. See
 [references/review-audit.md](references/review-audit.md) and [references/auditing.md](references/auditing.md).
 
 ## 4. Program-level traceability

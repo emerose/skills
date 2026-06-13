@@ -33,8 +33,8 @@ Store (a libkit-backed index/search/catalog over a tree of experiments):
 data/ ↔ raw/ AND provenance staleness of the experiment.yml ledger. With no
 experiment, it runs the store staleness pass across the whole data folder. Use
 `sci check` for the structural-integrity report. The prose ↔ claims check (every
-asserted result maps to a grounded claim) is a semantic-pass discipline the agent runs
-during audit — see references/review-audit.md, no separate command.
+asserted result maps to a grounded claim) runs in audit's semantic pass — see
+references/review-audit.md.
 
 `extract`'s recipe lives at <exp>/data/extract.py and defines build(x); see the
 extraction package and references/extract.md. The data-tree root is $SCIENTIST_HOME,
