@@ -3,8 +3,9 @@
 The pipeline is built: `raw → data → analysis → claims` is one auditable DAG over a single
 `experiment.yml` provenance ledger, and `sci trace` walks any claim back to the original
 measurements, flagging breaks. What remains is to make the chain **deeper** (finer provenance),
-**executable** (analyses that actually re-run and reproduce), and **enforced** (no prose claim
-without a grounded backing).
+**executable** (analyses that actually re-run and reproduce), **enforced** (no prose claim
+without a grounded backing), and to add a terminal **report** phase (`claims → report`) that turns
+grounded claims into a human-facing narrative without loosening the grounding discipline.
 
 ## Already shipped (for context)
 
@@ -36,7 +37,7 @@ derivation execution, so an out-of-`data/` read is flagged for a derivation exac
 Emits three independent verdicts per experiment — **runs / reproduces / reads_only_data** — and an
 overall REPRODUCES / BROKEN status.
 
-## 2. Finer-grained provenance — beyond file + sha
+## 2. Finer-grained provenance — beyond file + sha *(deferred — low priority)*
 
 Provenance `inputs` are file-level today (`path` + `sha256`). Extend toward **sheet / cell-range /
 slide / table** granularity where the readers can supply it, so an extracted value (or a quoted
@@ -97,3 +98,7 @@ write the claim first).
 - *Reader fidelity for pzfx / prism / docx / pdf / pptx?* → built (tabular + table readers and
   prose `doc()` text, all in `labfiles`). The remaining reader work is the cell-range granularity
   in §2, not new formats.
+- *Report design (§5) — what grounds the prose / scope / figures / output?* → reports **cite
+  existing claims only** (author the claim first); **both** program- and per-experiment scopes;
+  report-specific figures via a **grounded derivation** (no ad-hoc graphics); Markdown source
+  rendered to **PDF** as the primary deliverable.

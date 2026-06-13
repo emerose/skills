@@ -10,7 +10,7 @@ Structured ``experiment.yml`` access (read/validate/write the sidecar, record
 provenance, compute staleness, resolve review inputs) is NOT duplicated here — it
 routes through the shared :mod:`provenance` core. This package keeps the libkit
 glue (:mod:`_store`), the record/card model (:mod:`_meta`), file walking/schema
-(:mod:`_files`), README metadata extraction (:mod:`_extract`), intake planning
+(:mod:`_files`), controlled-vocabulary metadata normalizers (:mod:`_extract`), intake planning
 (:mod:`_intake`), structural audit (:mod:`_audit`), view rendering (:mod:`_generate`),
 and the PR plumbing (:mod:`_pr`). The CLI handlers live in :mod:`store.cli`.
 """

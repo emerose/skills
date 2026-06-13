@@ -1,27 +1,26 @@
-"""Unit tests for _intake: incoming-file classification + placement plan."""
+"""Unit tests for _intake: placement plan (mechanical) + agent-supplied routes.
+
+A document's *role* (protocol vs reports vs raw) is the agent's content judgment,
+passed in via `routes`; this module only does the deterministic placement — keep an
+already-organised subfolder, honour the agent's route, else a format/`raw` default.
+"""
 
 from scientist.store import _intake
 
 
-def test_classify_incoming_keywords_win():
-    assert _intake.classify_incoming("V1234567 Final Study Protocol v07 SIGNED.pdf") == "protocol"
-    assert _intake.classify_incoming("VendorA_Sync SoW2.docx") == "protocol"
-    assert _intake.classify_incoming("V1234567 Draft Report_03.docx") == "reports"
-    assert _intake.classify_incoming("V1234567 Draft Results_8Dec2023.pptx") == "reports"
-    assert _intake.classify_incoming("01August2022_Sync_TC-05_Final.pptx") == "reports"
-    assert _intake.classify_incoming("Histopathology Report.pdf") == "reports"
-
-
-def test_classify_incoming_by_extension():
+def test_classify_incoming_fallback_is_deterministic():
+    # format-determined binaries -> raw (mechanical, role fixed by format)
     assert _intake.classify_incoming("20260312_Sync_Lumbar.eds") == "raw"
     assert _intake.classify_incoming("baseline_D30.spk") == "raw"
     assert _intake.classify_incoming("V1234567 graphs.pzfx") == "raw"
-    # an unmarked CRO data file defaults to raw (original measurements)
-    assert _intake.classify_incoming("V1234567 BW results.xlsx") == "raw"
-    assert _intake.classify_incoming("random_deck.pptx") == "reports"
+    # documents are NOT classified by keyword any more — they fall back to the
+    # conservative LAYOUT default (raw); the agent re-routes via plan_intake routes.
+    assert _intake.classify_incoming("V1234567 Final Study Protocol.pdf") == "raw"
+    assert _intake.classify_incoming("V1234567 Draft Report.docx") == "raw"
+    assert _intake.classify_incoming("random_deck.pptx") == "raw"
 
 
-def test_plan_intake_routes_and_collisions(tmp_path):
+def test_plan_intake_default_and_routes(tmp_path):
     src = tmp_path / "delivery"
     (src / "sub").mkdir(parents=True)
     (src / "Final Study Protocol.pdf").write_text("p")
@@ -33,15 +32,31 @@ def test_plan_intake_routes_and_collisions(tmp_path):
     (exp / "protocol" / "Final Study Protocol.pdf").write_text("old")  # collision
 
     sources = sorted(p for p in src.rglob("*") if p.is_file())
-    plan = _intake.plan_intake(sources, exp)
-    routes = {p["src"].name: (p["subdir"], p["exists"]) for p in plan}
-    assert ".DS_Store" not in routes
-    assert routes["Final Study Protocol.pdf"] == ("protocol", True)   # collision flagged
-    assert routes["Draft Report.docx"][0] == "reports"
-    assert routes["instrument.eds"][0] == "raw"
-    # dest path is under the routed subdir
-    rep = next(p for p in plan if p["src"].name == "Draft Report.docx")
-    assert rep["dest"] == exp / "reports" / "Draft Report.docx"
+    # the agent's content judgment: route the two documents
+    routes = {"Final Study Protocol.pdf": "protocol", "Draft Report.docx": "reports"}
+    plan = _intake.plan_intake(sources, exp, routes=routes)
+    by_name = {p["src"].name: p for p in plan}
+
+    assert ".DS_Store" not in by_name
+    assert by_name["Final Study Protocol.pdf"]["subdir"] == "protocol"
+    assert by_name["Final Study Protocol.pdf"]["routed_by"] == "agent"
+    assert by_name["Final Study Protocol.pdf"]["exists"] is True       # collision flagged
+    assert by_name["Draft Report.docx"]["subdir"] == "reports"
+    assert by_name["Draft Report.docx"]["dest"] == exp / "reports" / "Draft Report.docx"
+    # the instrument binary is placed by format, no route needed
+    assert by_name["instrument.eds"]["subdir"] == "raw"
+    assert by_name["instrument.eds"]["routed_by"] == "ext"
+
+
+def test_plan_intake_unrouted_document_defaults_and_is_flagged(tmp_path):
+    src = tmp_path / "delivery"
+    src.mkdir()
+    (src / "Mystery.docx").write_text("?")
+    exp = tmp_path / "K1-3 - Exp"
+    exp.mkdir()
+    plan = _intake.plan_intake([src / "Mystery.docx"], exp)   # no routes
+    assert plan[0]["subdir"] == "raw"
+    assert plan[0]["routed_by"] == "default"        # an unreviewed guess the dry-run marks
 
 
 def test_plan_intake_preserves_existing_subdir_structure(tmp_path):
@@ -53,4 +68,5 @@ def test_plan_intake_preserves_existing_subdir_structure(tmp_path):
     exp.mkdir()
     plan = _intake.plan_intake([src / "raw" / "Run 2" / "x.eds"], exp)
     assert plan[0]["subdir"] == "raw"
+    assert plan[0]["routed_by"] == "path"
     assert plan[0]["dest"] == exp / "raw" / "Run 2" / "x.eds"
