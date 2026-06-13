@@ -137,6 +137,31 @@ DAG + drift walk).
   with `--json`, `{experiment, chains:[{terminal, kind, path_to_raw, breaks}], breaks, status}`. Exit 0 if
   fully grounded, 1 if any break. (Lives in `provenance/trace.py` — provenance-level and store-free.)
 
+### Report-rooted trace
+
+```bash
+sci trace <report.md> [--home H] [--json]   # report -> each cited claim -> analysis -> data -> raw
+```
+
+Pass a **report Markdown** instead of an experiment and `trace` puts a **report node atop the DAG**:
+it parses the report's `[claim:<id>]` citations, resolves each to a live claim (across every
+experiment's grounding report under `--home`), and reuses the per-claim walk to chain each cited claim
+to raw. Fans in across experiments; the report is **GROUNDED** only when every cited claim resolves and
+its chain is unbroken (`{report, terminals:[{cite, claim_id, experiment, path_to_raw, breaks}], breaks,
+status}`). This is the traceability half of the **report phase** — see below.
+
+## Report phase — `claims → report`
+
+The terminal phase: a human-facing narrative built *from* grounded claims, holding the same grounding
+discipline. `sci report <report.md>` **mechanizes** what's mechanical — it validates that every inline
+`[claim:<id>]` citation resolves to a *live, grounded* claim (the identical grounded rule + `claim_id`
+format this file's prose↔claims check uses) and every `![..](..)` figure/table embed is a *current*
+sha-pinned `analysis/` artifact (drifted / untracked / dangling embeds fail) — then renders the
+validated report to a PDF (pandoc) and indexes it as `kind=report`. The **semantic** "is every result
+cited / on-topic / not over-reaching" judgment stays the prose↔claims semantic pass above (the same
+discipline, now over `reports/*.md`); `sci report` does **not** re-introduce assertion-detection. Full
+authoring model, the grounded-derivation figure model, and verdicts: [report.md](report.md).
+
 ## Reproduce — does the analysis actually re-run?
 
 ```bash

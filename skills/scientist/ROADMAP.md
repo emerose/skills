@@ -17,6 +17,10 @@ without a grounded backing).
   re-runs each `analysis/derive.py` in the pinned environment and checks the regenerated
   `analysis/tables|fig/*` reproduce the recorded artifacts (within tolerance) and that the
   derivation read only from `data/` (the bypass guard, extended to derivations). See §1.
+- **Reports** `claims → report` (`sci report`) — a human-facing narrative built from grounded
+  claims (`[claim:<id>]` citations + grounded-derivation figure embeds), mechanically audited
+  (citations resolve to live grounded claims, embeds to current sha-pinned artifacts), rendered
+  to PDF, and indexed as `kind=report`. See §5.
 
 ## 1. Analysis reproduction audit — do the analyses actually re-run? *(shipped)*
 
@@ -57,6 +61,34 @@ planned report phase (`sci report`) runs the identical procedure over generated 
 `scripts/rollup.py` aggregates claims program-wide (the cross-experiment claim graph, drift). Add
 a program-level **traceability status** — the per-experiment `sci trace` verdict rolled up — so
 "is the program's stated evidence fully grounded?" is a single report.
+
+## 5. Reports — `claims → report` ✅ shipped
+
+**Shipped** as the terminal phase `raw → data → analysis → claims → report` (`sci report`;
+`provenance/report.py` + a report-rooted `sci trace`; docs in [references/report.md](references/report.md)).
+Where a *claim* is one machine-checkable assertion, a **report** is a human-facing narrative built
+*from* claims — it collects grounded claims (fanning in across experiments), arranges them into an
+argument, and embeds figures/tables — holding the same discipline: **no quantitative prose without an
+*existing* grounded `kind=claim` backing** (reports never re-litigate grounding; to assert something new,
+write the claim first).
+
+- **Authoring model.** Git-diffable Markdown with the **same `[claim:<id>]` citation syntax §3 defined**
+  (full `claim_id` or its trailing node name) — cross-experiment reports under
+  `program/reports/<slug>/`, per-experiment summaries under `<exp>/reports/<slug>/`.
+- **Report figures via a grounded derivation.** A comparison plot/table no single experiment produced is
+  produced through a **program-level `grounding.derivation(program, __file__)`** (the same machinery as
+  `derive.py`; `program/analysis/`), so it's sha-pinned with recorded inputs — then embedded. No ad-hoc
+  untracked graphics. These derivations are auditable by `sci reproduce program` (its read contract
+  relaxed to cross-experiment *tracked* inputs; untracked reads still flagged).
+- **`sci report` mechanizes** citation resolution (each `[claim:<id>]` → a live, grounded claim:
+  `backed`/`weak-backing`/`missing`/`ambiguous`, applying the identical grounded rule as §3 / `sci
+  trace`) + embed resolution (each `![..](..)` → a current sha-pinned analysis artifact:
+  `current`/`drifted`/`missing`/`untracked`/`dangling`), then **renders** to PDF/HTML/docx via pandoc and
+  **indexes** the report as **`kind=report`** (title/abstract + section summaries, cited claim ids) for
+  `sci query`. The *semantic* "is each result cited / on-topic / not over-reaching" check stays the §3
+  semantic pass — `sci report` does NOT re-introduce regex assertion-detection.
+- **Traceability.** `sci trace <report.md>` puts a report node atop the DAG, walkable down through each
+  cited claim to the original measurements.
 
 ## Resolved
 

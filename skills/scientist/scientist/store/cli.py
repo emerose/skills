@@ -307,10 +307,12 @@ async def cmd_list(store: Store, args: argparse.Namespace) -> None:
         recs = await store.all_records({"kind": "entity"})
     elif args.kind == "claim":
         recs = await store.claims(args.experiment)
+    elif args.kind == "report":
+        recs = await store.reports(args.experiment)
     else:
         recs = await store.experiments()
     recs.sort(key=lambda r: r.get("exp_id") or r.get("path")
-              or r.get("entity_id") or r.get("claim_id") or "")
+              or r.get("entity_id") or r.get("claim_id") or r.get("report_id") or "")
     if args.json:
         emit_json(recs)
         return
@@ -326,6 +328,9 @@ async def cmd_list(store: Store, args: argparse.Namespace) -> None:
             label = _meta.CLAIM_OUTCOME_LABEL.get(r.get("outcome"), r.get("outcome") or "?")
             stmt = (r.get("statement") or "").strip().replace("\n", " ")[:90]
             print(f"  [{label} · {r.get('strength','?')}] {r.get('exp_id')}  {stmt}")
+        elif args.kind == "report":
+            title = (r.get("title") or r.get("slug") or "").strip().replace("\n", " ")[:80]
+            print(f"  [{r.get('scope','?')}] {r.get('report_id')}  {title}")
         else:
             fc = r.get("file_counts") or {}
             print(f"  {r.get('exp_id')}  {r.get('name') or r.get('title') or ''}"
@@ -402,6 +407,10 @@ async def cmd_query(store: Store, args: argparse.Namespace) -> None:
             hit["claim_kind"] = meta.get("claim_kind")
             hit["statement"] = meta.get("statement")
             hit["claim_id"] = meta.get("claim_id")
+        elif meta.get("kind") == "report":
+            hit["report_id"] = meta.get("report_id")
+            hit["scope"] = meta.get("scope")
+            hit["report_title"] = meta.get("title")
         out.append(hit)
     if args.json:
         emit_json(out)
@@ -415,6 +424,11 @@ async def cmd_query(store: Store, args: argparse.Namespace) -> None:
             stmt = (h.get("statement") or h.get("text") or "").strip().replace("\n", " ")[:200]
             print(f"  [claim · {label} · strength: {h.get('strength','?')}] {h.get('exp_id')}\n"
                   f"      {stmt}")
+            continue
+        if h.get("kind") == "report":
+            snippet = (h.get("text") or "").strip().replace("\n", " ")[:200]
+            print(f"  [report · {h.get('scope','?')}] {h.get('report_id')}"
+                  f"  {h.get('report_title') or ''}\n      {snippet}")
             continue
         loc = h.get("path") or h.get("exp_id") or "?"
         snippet = (h.get("text") or "").strip().replace("\n", " ")[:200]
@@ -900,9 +914,10 @@ def register(sub: argparse._SubParsersAction) -> None:
     sp.add_argument("experiment")
     sp.add_argument("--report", help="grounding_report.json to index "
                     "(default <exp>/analysis/grounding_report.json then <exp>/grounding_report.json)")
-    sp = add("list", "list experiments (default), files, entities, or claims")
-    sp.add_argument("--kind", choices=["experiment", "file", "entity", "claim"], default="experiment")
-    sp.add_argument("--experiment", help="when --kind file/claim: limit to this exp_id")
+    sp = add("list", "list experiments (default), files, entities, claims, or reports")
+    sp.add_argument("--kind", choices=["experiment", "file", "entity", "claim", "report"],
+                    default="experiment")
+    sp.add_argument("--experiment", help="when --kind file/claim/report: limit to this exp_id")
     sp = add("show", "show one experiment and its files")
     sp.add_argument("experiment")
     sp = add("search", "metadata search across experiments and files")
@@ -910,7 +925,8 @@ def register(sub: argparse._SubParsersAction) -> None:
     sp = add("query", "semantic + full-text search inside indexed content")
     sp.add_argument("text")
     sp.add_argument("--limit", type=int, default=8)
-    sp.add_argument("--kind", choices=["experiment", "file", "entity", "claim"], default=None)
+    sp.add_argument("--kind", choices=["experiment", "file", "entity", "claim", "report"],
+                    default=None)
     sp = add("file", "show one file record (by relative path)")
     sp.add_argument("path")
     sp = add("read", "dump a tabular file (csv/tsv/xlsx) to stdout")
@@ -1002,6 +1018,37 @@ def dispatch_audit_storeless(args: argparse.Namespace) -> int:
     _load_dotenv(home)
     report = audit_report(home, getattr(args, "experiment", None))
     print_audit_report(report, args.json)
+    return 0
+
+
+async def _run_index_report(args: argparse.Namespace, card: dict[str, Any]) -> None:
+    home = _home(args)
+    _load_dotenv(home)
+    _require_initialized(home)
+    try:
+        store = Store.open(home)
+    except EmbedderConfigError as e:
+        die(str(e))
+    try:
+        rec = await store.upsert_report(card)
+        if args.json:
+            emit_json({"report_id": rec.get("report_id"), "scope": rec.get("scope"),
+                       "exp_id": rec.get("exp_id"), "document_id": rec.get("document_id")})
+        else:
+            print(f"indexed report {rec.get('report_id')} "
+                  f"({rec.get('scope')}{', ' + rec['exp_id'] if rec.get('exp_id') else ''}) "
+                  f"into the store")
+    finally:
+        await store.close()
+
+
+def index_report(args: argparse.Namespace, card: dict[str, Any]) -> int:
+    """Open the libkit store and upsert a ``kind=report`` document from a prepared ``card``
+    dict (built store-free by ``provenance.report`` + ``sci report``). Sync wrapper."""
+    try:
+        asyncio.run(_run_index_report(args, card))
+    except KeyboardInterrupt:
+        die("interrupted", code=130)
     return 0
 
 

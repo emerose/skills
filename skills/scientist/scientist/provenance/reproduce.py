@@ -180,12 +180,21 @@ def _compare_fig(regen: bytes, recorded_path: Path) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # reads-only-data enforcement
 # --------------------------------------------------------------------------- #
-def _off_data_reads(inputs: list[dict], exp: Path, repo_root: Path) -> list[dict[str, str]]:
-    """The derivation's reads that violate "read only from ``data/``". Allowed: the
-    experiment's own ``data/`` files, its ``experiment.yml`` (``meta`` config), and the
+def _off_data_reads(inputs: list[dict], exp: Path, repo_root: Path, *,
+                    program: bool = False) -> list[dict[str, str]]:
+    """The derivation's reads that violate its read contract.
+
+    For a per-experiment derivation the contract is "read only from ``data/``": allowed are
+    the experiment's own ``data/`` files, its ``experiment.yml`` (``meta`` config), and the
     program convention/reference facts the canonicalization boundary uses (``reference``).
     Flagged: a read of ``raw/`` or a derived ``analysis/`` artifact, another experiment's
-    files, or any untracked read the bypass guard caught."""
+    files, or any untracked read the bypass guard caught.
+
+    For a **program-level** derivation (``program=True``) the contract is different: a
+    cross-experiment *report* comparison legitimately fans in *other experiments'* recorded
+    ``data/``/``analysis/`` artifacts and program ``reference`` facts. So those tracked reads
+    are allowed; only an **untracked** (bypass) read is flagged — the discipline that every
+    input still flow through the tracked accessor stays enforced."""
     data_dir = (exp / "data").resolve()
     flags: list[dict[str, str]] = []
     for inp in inputs:
@@ -193,6 +202,11 @@ def _off_data_reads(inputs: list[dict], exp: Path, repo_root: Path) -> list[dict
         via = str(inp.get("via", ""))
         path = Path(inp["path"])
         ap = path if path.is_absolute() else (repo_root / path)
+        if kind == "bypass" or via.startswith("bypass"):
+            flags.append({"path": inp["path"], "reason": "untracked read (not via the tracked accessor)"})
+            continue
+        if program:
+            continue                              # any tracked cross-experiment input is allowed
         try:
             under_data = ap.resolve().is_relative_to(data_dir)
         except (OSError, ValueError):
@@ -201,9 +215,7 @@ def _off_data_reads(inputs: list[dict], exp: Path, repo_root: Path) -> list[dict
             continue                              # config / program convention — allowed
         if kind == "data" and under_data:
             continue                              # the faithful data/ layer — the whole point
-        if kind == "bypass" or via.startswith("bypass"):
-            flags.append({"path": inp["path"], "reason": "untracked read (not via the tracked accessor)"})
-        elif kind == "analysis":
+        if kind == "analysis":
             flags.append({"path": inp["path"], "reason": "reads a derived analysis/ artifact, not faithful data/"})
         elif not under_data:
             flags.append({"path": inp["path"], "reason": f"reads outside {exp.name}/data/"})
@@ -246,13 +258,18 @@ def reproduce(exp_dir: Path, repo_root: Path | None = None, *,
     from .. import grounding
     from .. import experiments as E
 
+    # A program-level derivation (program/analysis/derive.py) is the home for cross-experiment
+    # *report* comparison artifacts; its read contract is broader than a per-experiment one.
+    is_program = exp.name == "program"
+
     # The derive.py resolves its own Study via SCIENTIST_HOME; point it at the repo root
     # so a synthetic/off-tree experiment audits without a globally-configured home.
     prev_home = os.environ.get("SCIENTIST_HOME")
     os.environ["SCIENTIST_HOME"] = str(home)
     try:
-        code = exp.name.split(" ")[0].lower().replace("-", "_")   # "K1-000000 - Demo" -> k1_000000
+        code = "program" if is_program else exp.name.split(" ")[0].lower().replace("-", "_")
         try:
+            E._program = None                                     # drop any home-stale program cache
             study = getattr(E, code)
             module = study.derive
         except Exception as e:                                    # noqa: BLE001 — surface as a clean verdict
@@ -281,7 +298,7 @@ def reproduce(exp_dir: Path, repo_root: Path | None = None, *,
             os.environ["SCIENTIST_HOME"] = prev_home
 
     # --- reads-only-data ---
-    off_data = _off_data_reads(captured_inputs, exp, home)
+    off_data = _off_data_reads(captured_inputs, exp, home, program=is_program)
     result["off_data_reads"] = off_data
     result["reads_only_data"] = result["runs"] and not off_data
 

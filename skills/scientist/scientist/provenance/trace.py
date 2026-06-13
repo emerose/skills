@@ -277,6 +277,82 @@ def trace(exp_dir: Path, repo_root: Path | None = None, *,
 
 
 # --------------------------------------------------------------------------- #
+# report-rooted trace — a report node atop the DAG
+# --------------------------------------------------------------------------- #
+def trace_report(report_path: Path, repo_root: Path | None = None) -> dict[str, Any]:
+    """Walk the DAG *down from a report*: a report node sits atop the pipeline, walkable
+    through each ``[claim:<id>]`` it cites to that claim's analysis → data → raw chain.
+
+    The report is a terminal that fans in across experiments. We parse its citations,
+    resolve each to a live claim (across every experiment's grounding report under
+    ``repo_root``), and reuse the per-experiment :func:`trace` to chain each cited claim to
+    raw. The report is **GROUNDED** only when every cited claim resolves *and* its chain is
+    unbroken.
+
+    Returns ``{report, terminals:[{cite, claim_id, experiment, path_to_raw, breaks}],
+    breaks, status}``. Pure (ledger + grounding reports only); store-free, like
+    :func:`trace`."""
+    from . import report as R   # local import: avoid a module-load cycle
+
+    rp = Path(report_path).resolve()
+    home = Path(repo_root).resolve() if repo_root is not None else R._infer_home(rp)
+    parsed = R.parse_report(rp.read_text(encoding="utf-8"))
+    claim_index = R.index_claims(home)
+
+    terminals: list[dict[str, Any]] = []
+    all_breaks: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for cit in parsed["citations"]:
+        cid = cit["id"]
+        if cid in seen:
+            continue
+        seen.add(cid)
+        cands = R.resolve_citation(cid, claim_index)
+        if len(cands) != 1:
+            kind = "dangling" if not cands else "ambiguous"
+            br = {"kind": kind, "path": cid, "terminal": cid}
+            all_breaks.append(br)
+            terminals.append({"cite": cid, "claim_id": None, "experiment": None,
+                              "path_to_raw": [], "breaks": [br]})
+            continue
+        claim = claim_index[cands[0]]
+        exp_dir = Path(claim["exp_dir"])
+        # reuse the per-experiment claim trace, keyed on the raw nodeid the report stored
+        sub = trace(exp_dir, repo_root=home, claim_id=claim.get("id"))
+        chain = sub["chains"][0] if sub["chains"] else {"path_to_raw": [], "breaks": []}
+        terminals.append({
+            "cite": cid,
+            "claim_id": cands[0],
+            "experiment": claim.get("exp_id"),
+            "path_to_raw": chain.get("path_to_raw", []),
+            "breaks": chain.get("breaks", []),
+        })
+        all_breaks.extend(chain.get("breaks", []))
+
+    status = "GROUNDED" if not all_breaks else "BROKEN"
+    return {
+        "report": _repo_rel(rp, home),
+        "terminals": terminals,
+        "breaks": all_breaks,
+        "status": status,
+    }
+
+
+def render_report_trace(result: dict[str, Any]) -> str:
+    """Human-readable report-rooted trace, matching the per-experiment :func:`render`."""
+    lines = [f"report {result['report']}: {result['status']}"]
+    for t in result["terminals"]:
+        verdict = "GROUNDED" if not t["breaks"] else "BROKEN"
+        label = t.get("claim_id") or t["cite"]
+        lines.append(f"  [claim] {label}: {verdict}")
+        if t["path_to_raw"]:
+            lines.append(f"      chain: {' <- '.join(t['path_to_raw'])}")
+        for b in t["breaks"]:
+            lines.append(f"      ! {b['kind']}: {b['path']}")
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
 # rendering
 # --------------------------------------------------------------------------- #
 def render(result: dict[str, Any]) -> str:

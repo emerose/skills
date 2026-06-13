@@ -198,9 +198,34 @@ class Program:
     ``program/claims/test_*.py`` is the natural home for grounded cross-cutting claims —
     collected by the same pytest plugin as any claims dir."""
 
+    # A stable handle so a program-level derivation can open through the SAME
+    # ``grounding.derivation(study, __file__)`` machinery an experiment uses (the
+    # Derivation context reads ``study.path`` + ``study.id``).
+    id = "program"
+
     def __init__(self):
         self.path = root() / "program"
         self._conv = None    # cached conventions dict (loaded + recorded once)
+
+    @property
+    def derive(self):
+        """The program's ``program/analysis/derive.py`` as a module (the home for
+        cross-experiment *report* derivations — comparison tables/figures no single
+        experiment produced). Loaded under a unique name and cached, mirroring
+        :attr:`Study.derive`, so ``sci reproduce program`` can re-run it."""
+        import importlib.util
+        import sys
+        name = "experiments_derive_program"
+        if name in sys.modules:
+            return sys.modules[name]
+        p = self.path / "analysis" / "derive.py"
+        if not p.is_file():
+            raise AttributeError("program has no analysis/derive.py")
+        spec = importlib.util.spec_from_file_location(name, p)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+        return mod
 
     @property
     def conventions(self) -> dict:
