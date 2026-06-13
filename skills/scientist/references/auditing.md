@@ -37,7 +37,8 @@ slides under `Shared/`). `sci audit` re-hashes them and compares:
   edited since review. Run `sci fingerprint <exp>` to see the current input set +
   hashes, re-verify the prose, then `sci review <exp>` to re-stamp.
 - `no-provenance` — never reviewed; warrants a semantic look.
-- `no-/invalid-experiment-yml` — create or fix the sidecar (`sci meta <exp> --suggest`).
+- `no-/invalid-experiment-yml` — create or fix the sidecar (author it from the README; see
+  [search-index.md](search-index.md), "Author experiment.yml from the README").
 
 ## 2b. Prose ↔ claims (part of the semantic pass)
 

@@ -60,7 +60,7 @@ sci file  "K1-000000/data/quantigene.csv"    # one file's record (path, sha256, 
 sci read  "K1-000000/data/quantigene.csv"    # dump a csv/tsv/xlsx to pull exact values
 sci entity list | show "ASO-7"               # derived registry / every experiment involving ASO 7
 sci catalog                                 # export CATALOG.md + .scientist/catalog.json
-sci meta K1-000000 [--suggest]               # show experiment.yml metadata (--suggest = a draft)
+sci meta K1-000000                           # show experiment.yml structured metadata
 ```
 
 **Two kinds of search, and the difference matters:**
@@ -79,12 +79,46 @@ sci meta K1-000000 [--suggest]               # show experiment.yml metadata (--s
 Each experiment folder has a tracked, schema'd `experiment.yml` sidecar — the single source of truth
 for structured metadata (`exp_id`, `cro`, `cro_study_ids`, `status`, `model`, `assays`, `asos`,
 `related`, and the `provenance` list). The **`README.md` stays purely prose; scientist never writes
-to it.** Populate the sidecar yourself or start from `sci meta <exp> --suggest` (a heuristic *draft*
-you review). Unknown fields / bad status raise a clear error.
+to it, and never *reads* it for you** — deciding what an experiment's CRO/assays/model/status are is
+reading comprehension, which you do directly. Unknown fields / bad status raise a clear error on save.
 
-**Private vocabulary (your real CRO names).** `--suggest` canonicalizes CRO names + study-id formats
-from a controlled vocabulary. The public repo ships only generic placeholders (`Vendor A`, …); keep
-real vendor names in a private `vocab.yml` at your data-folder root (or `$SCIENTIST_VOCAB`). See
+### Author `experiment.yml` from the README
+
+`sci meta <exp>` shows the current sidecar (or reports there's none). To write/refresh it:
+
+1. **Read** `<exp>/README.md` (and any IDs table). Decide each field by judgment — don't pattern-match:
+   `title`, `cro`, `model`, `status`, plus which `assays`/`asos` the work actually used. The README's
+   *own* IDs table is authoritative for `cro_study_ids`; a predecessor id mentioned only in prose is
+   **not** this experiment's id.
+2. **Canonicalize the tokens you picked** so cross-referencing stays consistent (`sci entity show
+   "ASO-7"` must match regardless of how the README spelled it). The deterministic normalizers live in
+   `scientist.store._extract`; call them rather than hand-normalizing:
+
+   ```python
+   from scientist.store import _extract as X
+   cro_vocab, id_pats = X.load_vocab(home)        # generic defaults + your private vocab.yml
+   X.match_vocab(readme_text, cro_vocab)          # full vendor name  -> canonical, e.g. ["Vendor A"]
+   X.match_vocab(readme_text, X.ASSAY_VOCAB)      # "RT-qPCR","Luminex" -> ["qPCR","Luminex"]
+   X.match_vocab(readme_text, X.MODEL_VOCAB)      # species/strain      -> canonical model
+   X.find_asos(readme_text)                       # "ASO 7"/"ASO007"    -> ["ASO-7"]
+   X.find_study_ids(ids_table_cell, id_pats)      # validate id shapes (don't scrape free prose)
+   X.find_related(readme_text, exclude=exp_id)    # cross-referenced K1- ids, self excluded
+   ```
+
+   `match_vocab` only *folds a name you supply onto its canonical form*; you still choose which
+   assays/CRO apply — it won't invent them. `status` must come from an explicit lifecycle field, never
+   from prose like "failed to deliver" (`X.STATUS_HINTS` has the accepted values).
+3. **Write** the sidecar with the schema gate, then index:
+
+   ```python
+   from scientist import provenance as P
+   P.write_sidecar(exp_dir, P.validate(meta))     # raises on unknown field / bad status
+   ```
+   then `sci index <exp>`.
+
+**Private vocabulary (your real CRO names).** The public repo ships only generic placeholders
+(`Vendor A`, …); keep real vendor names + vendor-specific study-id shapes in a private `vocab.yml` at
+your data-folder root (or `$SCIENTIST_VOCAB`). `load_vocab(home)` merges it over the defaults. See
 [vocab.example.yml](vocab.example.yml).
 
 ## Scaffold an experiment / file a delivery
@@ -92,11 +126,28 @@ real vendor names in a private `vocab.yml` at your data-folder root (or `$SCIENT
 ```bash
 sci new K1-000003 "Rat IT Chronic Tox" --cro "Vendor A" --study-id V9999001 --model "Sprague-Dawley rats"
 sci intake K1-000003 ~/Downloads/V9999001_delivery          # dry-run: show the placement plan
-sci intake K1-000003 ~/Downloads/V9999001_delivery --commit  # copy in (never move) + reindex
+sci intake K1-000003 ~/Downloads/V9999001_delivery \
+    --route "Final Report.docx=reports" --route "SoW2.pdf=protocol" --commit   # route + copy + index
 ```
 `new` creates the folder skeleton (`raw/ data/ protocol/ reports/ analysis/` + README template) and
-indexes it. `intake` routes each file to the right subfolder per LAYOUT.md, flags collisions, skips
-OS cruft, preserves any `raw/Run 2/…` substructure. **Review the dry-run before committing.**
+indexes it.
+
+**Filing a delivery — you classify the documents, intake does the mechanics.** `intake` handles the
+deterministic part: it preserves any `raw/Run 2/…` substructure the delivery already has, routes
+format-fixed binaries (`.eds/.pzfx/.bam/…`) to `raw`, flags collisions, skips OS cruft, copies (never
+moves), and reindexes. What it does **not** do is guess a *document's* role — whether a PDF/DOCX/PPTX
+is a protocol, a report, or a raw deliverable depends on what it contains, which is your call:
+
+1. Run the **dry-run** (no `--commit`). Each file shows its planned subfolder; any that fell back to
+   the `raw` default is marked `? unreviewed default`.
+2. **Read** those flagged documents enough to place them per LAYOUT.md (`protocol` = SOWs/protocols/
+   amendments, `reports` = CRO reports/decks/telecons/interpretation, `raw` = original measurements,
+   `data` only for tidy extracted CSVs the recipe produces — rarely an intake target).
+3. Re-run with a `--route "NAME=subdir"` for each document you're moving off the default (repeatable;
+   `NAME` is the file's basename), then `--commit`. Binaries and already-organised files need no route.
+
+`--json` emits the plan (each entry carries `routed_by`: `path`/`agent`/`ext`/`default`) so you can
+drive routing programmatically. **Always review the dry-run before committing.**
 
 ## Good habits
 - **Index is idempotent** — re-running after files change replaces affected records (keyed by
