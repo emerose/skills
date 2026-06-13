@@ -31,58 +31,50 @@ sci audit  [K1-000000] [--json]          # staleness vs recorded provenance + a 
 - **`audit`** — re-hashes every recorded input + the README and reports `up-to-date`, `stale` (naming
   each input that **changed** / went **missing** / was **added**, and whether the README itself was
   edited since review), `no-provenance` (never reviewed), or `no-/invalid-experiment-yml`. `--json` adds
-  a per-experiment `source_files` worklist for the **semantic pass** plus a `prose_docs` list (the
-  README + `reports/*.md` whose evidentiary conclusions must each map to a grounded claim — see below):
-  fan out an agent per experiment to read the data, verify the prose, and run `sci enforce-prose` —
-  the authoritative content check (see [auditing.md](auditing.md)).
+  a per-experiment `source_files` worklist for the **semantic pass**: fan out an agent per experiment to
+  read the data, verify the prose, and run the **prose ↔ claims check** below — the authoritative content
+  check (see [auditing.md](auditing.md)).
 
-### Prose ↔ claims enforcement (`sci enforce-prose`)
+### Prose ↔ claims check (a semantic-pass discipline — you do this, no CLI)
 
-The gate that keeps a `README.md` / `reports/*.md` sentence from **asserting an evidentiary conclusion
-without a grounded `kind=claim` backing it**. Two halves, split by what each is good at:
+Keep a `README.md` / `reports/*.md` sentence from **asserting a result without a grounded `kind=claim`
+backing it**. This is a *procedure you (the reviewing agent) run*, not a tool — the whole check is
+"read the claims, apply a fixed rule." There's nothing here a CLI does better than you reading the
+grounding report, so there is deliberately no `sci enforce-prose` command. For each prose doc (the root
+`README.md` and any `reports/*.md`):
 
-- **Detection is the agent's job (inverted control).** Judging *whether a sentence asserts a conclusion
-  worth grounding* is a language task, not a regex one — so `audit` does **not** scan prose. Its
-  `prose_docs` list just points the semantic-pass agent at the docs; the agent reads them, decides which
-  sentences are evidentiary conclusions (a numeric result — %, fold-change, p-value, `n=`, dose, IC50… —
-  *or* a qualitative one — "well tolerated", "sustained knockdown", "comparable to vehicle"), and passes
-  that list on, tagging each `quantitative` or `qualitative`.
-- **Enforcement is deterministic.** The agent feeds its assertions to `sci enforce-prose`, which does the
-  part worth pinning down — parse the exact citation, resolve the claim, check the backing:
+1. **Find the evidentiary conclusions.** Read the prose and pick out the sentences that assert a *result*
+   — quantitative (a %, fold-change, p-value, `n=`, dose, IC50…) *or* qualitative ("well tolerated",
+   "sustained knockdown", "comparable to vehicle", "dose-dependent"). Skip background / method /
+   motivation prose ("6 animals per group", "incubated 30 min", "we designed ASOs targeting X"). This
+   is a judgment call — it's exactly why it's left to you and not a regex.
 
-  ```bash
-  sci enforce-prose <exp> [--source <doc>] [--report PATH] [--json]   # assertions as JSON on stdin
-  echo '[{"text":"Knockdown reached 82% [claim:test_kd_lumbar].","kind":"quantitative"}]' \
-    | sci enforce-prose "K1-000000 - …"
-  ```
-  Assertions arrive as a JSON list of strings or `{"text", "line"?, "kind"?}` objects (`kind` is
-  `quantitative` (default) or `qualitative`). Cite a result in prose with **`[claim:<id>]`** (the full
-  stable `claim_id` `<exp>::<test-file>::<node>`, or just its trailing node name). An assertion is
-  **cleared** only when a citation resolves to a claim that is *grounded* (`passed`/`xpass`) **and**
-  *strong/moderate* strength. Otherwise it's flagged:
-  - `unbacked` — no `[claim:…]` citation (carries an advisory best-overlap `suggestion`, never an
-    auto-clear — a coincidental match must not mask missing evidence);
-  - `weak-backing` — cited only to a claim that is contradicted (`xfail`), drifted (`failed`),
-    unverifiable (`skipped`), or weak/unspecified — **surfaced with its `outcome`+`strength`**, so prose
-    leaning on a contradicted result is caught, not silently passed;
-  - `unknown-claim` — a citation that resolves to no known claim.
-- **Quantitative vs qualitative is a severity tier, not a scope filter.** A qualitative conclusion is
-  grounded and audited exactly like a numeric one (the claim layer never cared whether a statement had a
-  number). But qualitative conclusions are fuzzier to enumerate and noisier in bulk, so each flag carries
-  a `severity`: a *missing citation* on a `qualitative` assertion is **advisory** (reported, doesn't fail
-  the gate); a missing citation on a numeric result is **blocking**; an explicit-but-bad citation
-  (`weak-backing` / `unknown-claim`) is **blocking either way** — it's a checkable author error, not
-  extraction noise. Tagging is fail-safe: only an explicit `qualitative` downgrades; absent/unknown stays
-  blocking. **Exit is 1 iff any blocking flag**, 0 otherwise (a usable CI gate that the high-volume
-  qualitative case can't drown out).
-- **Backing source** — `sci enforce-prose` is **store-free** like `sci trace`: it backs the check with
-  the experiment's `grounding_report.json` (the source the `kind=claim` index is itself built from;
-  `--report` overrides the path). Claims are keyed by the same stable `claim_id` the index uses, so
-  `[claim:…]` citations resolve identically.
-- **Reusable entry point** — the deterministic core is `scientist.store._prose.enforce_prose(assertions,
-  claims)`: pure (no I/O, no store, no regex), free of README- or store-specific plumbing. The planned
-  report phase (`sci report`) reuses it verbatim — its generating agent emits the assertions it wrote,
-  which enforce against the report's claims.
+2. **Map each to a claim.** A result should carry an explicit citation **`[claim:<id>]`** in the prose
+   (the stable `claim_id` `<exp>::<test-file>::<node>`, or its trailing node name). Pull the claims with
+   `sci query "<topic>" --kind claim` or `sci list --kind claim --experiment <exp> --json` (live index),
+   or read `<exp>/analysis/grounding_report.json` directly (each claim: `{id, statement, outcome,
+   strength, kind}`). For an *un-cited* result, find the claim it ought to map to by reading the
+   statements — if none exists, that's the finding.
+
+3. **Apply the grounded rule.** A result is **backed** only if its claim is *grounded* — `outcome` is
+   `passed` or `xpass` **and** `strength` is `strong` or `moderate`. Otherwise flag it:
+   - **unbacked** — no claim asserts this result (or the result has no citation and no matching claim);
+   - **weak-backing** — the only backing claim is contradicted (`xfail`), drifted (`failed`),
+     unverifiable (`skipped`), or weak/unspecified strength → report it *with* the claim's
+     `outcome`+`strength`, so prose leaning on a contradicted result is caught, not silently passed;
+   - **off-topic / wrong-claim** — the cited claim is grounded but isn't actually *about* this sentence
+     (a tolerability claim cited next to an efficacy number). Only you can catch this — it's the reason a
+     dumb citation-resolver wouldn't be enough.
+
+4. **Grade severity, then report.** An *unbacked qualitative* conclusion is **advisory** (note it; soft
+   prose is fuzzy and high-volume, so don't treat a missing citation as a failure). An unbacked numeric
+   result, a `weak-backing`, an `off-topic` citation, or any contradicted backing is **blocking** — fix
+   the prose or the citation. Don't rewrite silently; report each finding with its doc, line, the
+   sentence, the claim it maps to (or that it's missing), and the claim's outcome/strength.
+
+The rule and the `claim_id` format are the *same* ones `index-claims`, `sci query --kind claim`, and
+`sci trace` use — so this check stays consistent with how the rest of the pipeline judges "grounded."
+The planned report phase (`sci report`) runs the identical procedure over generated report Markdown.
 
 ## Structural check
 
