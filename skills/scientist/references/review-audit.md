@@ -54,34 +54,42 @@ backing it**. As part of the semantic pass, for each prose doc (the root `README
    **`[claim:<id>]`** in the prose (the stable `claim_id` `<exp>::<test-file>::<node>`, or its trailing
    node name). For an *un-cited* result, find the claim it ought to map to by reading the statements.
 
-3. **Apply the grounded rule (claim first, then artifact).** A result is **claim-backed** only if its
-   claim is *grounded* — `outcome` is `passed` or `xpass` **and** `strength` is `strong` or `moderate`.
-   If no grounded claim covers it, check the **analysis-artifact** path before flagging it unbacked: does
-   the asserted number appear verbatim (within rounding) as a cell in a *current, sha-pinned* `analysis/`
-   artifact — a recorded `analysis/tables/*.csv` whose edge is live in the provenance ledger? Confirm the
-   value with `sci read <path>` and that the artifact isn't drifted (`sci trace <exp>` / `sci audit`). This
-   is the §5 backing unit (a grounded `kind=claim` **or** a sha-pinned analysis artifact). Classify:
-   - **backed** — a grounded claim (or, secondarily, a live sha-pinned artifact) supports the result;
-   - **artifact-only** — the number traces to a current analysis artifact but *no* claim asserts it. The
-     evidence exists, so this isn't drift — but author the claim so the result is drift-tracked and
-     surfaced in search (`sci query --kind claim` / `sci trace`). Name the artifact path + cell.
-   - **unbacked** — *no* claim and *no* analysis artifact carries this result (a pure prose assertion);
+3. **Apply the grounded rule — a `kind=claim` is the only accepted backing.** A result is **backed** only
+   if a *grounded* claim asserts it — `outcome` is `passed` or `xpass` **and** `strength` is `strong` or
+   `moderate`. A raw `analysis/` cell is *grounded provenance* but not *judged evidence* (no outcome, no
+   strength, nothing vouching it's the right/headline number), so it does **not** by itself back prose —
+   the claim is where that judgment, drift-tracking, and search-indexing live, and a claim is what cites
+   the artifact. When no grounded claim covers a result, use **artifact-tracing as triage** (not as an
+   alternative backing) to set severity: does the asserted number appear verbatim (within rounding) as a
+   cell in a *current, non-drifted* sha-pinned `analysis/` artifact whose edge is live in the ledger
+   (confirm with `sci read <path>`; check drift with `sci trace <exp>` / `sci audit`)? Classify:
+   - **backed** — a grounded claim asserts the result;
+   - **artifact-only** — *no* claim asserts it, but the number traces to a current analysis artifact. A
+     **finding to clear, not a pass** — but a cheap one: author the claim citing that cell (`[claim:<id>]`),
+     so the result becomes judged, drift-tracked, and searchable. Name the artifact path + cell.
+   - **unbacked** — *no* claim **and** *no* analysis artifact carries this result (a pure prose assertion —
+     invented or from an untracked source; find the source before anything else);
    - **weak-backing** — the only backing claim is contradicted (`xfail`), drifted (`failed`),
      unverifiable (`skipped`), or weak/unspecified strength → report it *with* the claim's
      `outcome`+`strength`, so prose leaning on a contradicted result is caught, not silently passed;
    - **off-topic** — the cited claim is grounded but isn't actually *about* this sentence (a tolerability
      claim cited next to an efficacy number).
 
-4. **Grade severity, then report.** An *unbacked qualitative* conclusion and any **artifact-only** result
-   are **advisory** (note them; a missing citation on soft prose, or a number that's genuinely grounded in a
-   sha-pinned artifact but lacks an authored claim, isn't a failure — author the claim to clear it). An
-   unbacked numeric result, a `weak-backing`, an `off-topic` citation, or any contradicted backing is
-   **blocking** — fix the prose or the citation. Don't rewrite silently; report each finding with its doc,
-   line, the sentence, the claim *or artifact* it maps to (or that it's missing), and the outcome/strength.
+4. **Grade severity, then report.** Three tiers:
+   - **blocking** — an `unbacked` numeric result, a `weak-backing`, an `off-topic` citation, or any
+     contradicted backing. Fix the prose or the citation.
+   - **finding (clear it)** — an `artifact-only` result: the number is real but uncovered by a claim →
+     author the claim citing the cell. Not blocking (the evidence exists), but not a pass either — it
+     stays on the worklist until a claim covers it.
+   - **advisory** — an *unbacked qualitative* conclusion (soft prose with no number; note it, not a failure).
 
-The grounded rule and `claim_id` format match `index-claims` / `sci query --kind claim` / `sci trace`; the
-analysis-artifact backing path is the same sha-pinned grounding `sci trace` walks (claim → artifact → data
-→ raw). The planned report phase (`sci report`) runs the identical procedure over generated report Markdown.
+   Don't rewrite silently; report each finding with its doc, line, the sentence, the claim it maps to (or
+   that it's missing, plus the artifact cell when `artifact-only`), and the claim's outcome/strength.
+
+The grounded rule and `claim_id` format match `index-claims` / `sci query --kind claim` / `sci trace`. The
+claim is the sole backing unit; it cites the sha-pinned artifact, and `sci trace` walks the full chain
+(claim → artifact → data → raw). The report phase (`sci report`, §5) runs the identical procedure over
+generated report Markdown — reports cite claims the same way, never a bare artifact.
 
 ## Structural check
 

@@ -46,16 +46,19 @@ Done as part of `sci audit`'s semantic pass: for each `README.md` / `reports/*.m
 every result asserted in prose (quantitative *or* qualitative — both grounded and audited the same way),
 pulls the experiment's claim set once, and maps each result to its `kind=claim` (cite inline with
 `[claim:<id>]`; pull claims via `sci list --kind claim --experiment <exp>` / the `grounding_report.json`),
-confirming the claim is grounded — `passed`/`xpass` **and** strong/moderate. When no claim covers a number
-it checks the **analysis-artifact** path — the §5 backing unit: a value that traces verbatim to a current
-sha-pinned `analysis/` artifact (verified via `sci read` / `sci trace`) is grounded, reported `artifact-only`
-with a nudge to author the claim rather than flagged as drift. Else it reports `unbacked`, `weak-backing`
-(contradicted/weak — *with* its outcome+strength), or `off-topic` (grounded claim cited but not about this
-sentence). Severity is tiered: an unbacked *qualitative* conclusion and an `artifact-only` number are
-advisory; an unbacked number, or any bad/contradicted citation, is blocking. The grounded rule + `claim_id`
-format + artifact path match `index-claims` / `sci query --kind claim` / `sci trace`; the planned report
-phase (`sci report`) runs the identical procedure over generated report Markdown. See
-[references/review-audit.md](references/review-audit.md) and [references/auditing.md](references/auditing.md).
+confirming the claim is grounded — `passed`/`xpass` **and** strong/moderate. **A grounded `kind=claim` is
+the sole accepted backing** — a raw `analysis/` cell is grounded *provenance* but not *judged* evidence (no
+outcome/strength), and a claim is what cites the artifact. When no claim covers a number, artifact-tracing
+is *triage*, not an alternative backing: a value that traces verbatim to a current sha-pinned `analysis/`
+artifact (verified via `sci read` / `sci trace`) is reported `artifact-only` — a **finding to clear by
+authoring the claim**, cheap because the evidence already exists — vs. `unbacked` (no claim *and* no
+artifact: invented/untracked). Else `weak-backing` (contradicted/weak — *with* its outcome+strength) or
+`off-topic` (grounded claim cited but not about this sentence). Three severity tiers: **blocking** (unbacked
+number / bad / contradicted citation), **finding** (`artifact-only` — author the claim), **advisory**
+(unbacked *qualitative*). The grounded rule + `claim_id` format match `index-claims` / `sci query --kind
+claim` / `sci trace`; the report phase (`sci report`, §5) runs the identical procedure over report Markdown,
+citing claims the same way. See [references/review-audit.md](references/review-audit.md) and
+[references/auditing.md](references/auditing.md).
 
 ## 4. Program-level traceability
 
@@ -69,16 +72,20 @@ Where a **claim** is one machine-checkable assertion, a **report** is a human-fa
 built *from* claims. It collects grounded claims — potentially fanning in from across experiments —
 arranges them into a coherent argument, and pulls in figures and tables to make a point. It is for
 humans, not machines: readable, concise, compelling. The same provenance discipline applies —
-**no quantitative prose without a backing** — but the unit of backing is an *existing* grounded
-`kind=claim` (or a sha-pinned analysis artifact), so a report never re-litigates grounding and
-can't drift ahead of the evidence: to assert something new, you author the claim first.
+**no quantitative prose without a backing** — and the unit of backing is an *existing* grounded
+`kind=claim` (the same sole-backing rule as §3; a raw artifact cell is grounded provenance but not
+judged evidence). A report never re-litigates grounding and can't drift ahead of the evidence: to
+assert something new, you author the claim first. (Figures and tables are *embedded as exhibits* —
+sha-pinned artifacts, below — which is distinct from backing a quantitative *sentence*; the sentence
+that draws a conclusion from an exhibit still cites the claim.)
 
 **Authoring — Markdown + a citation syntax.** A report is git-diffable Markdown (like everything
-else durable here) with an inline **citation syntax** naming a claim by its stable `claim_id`
-(`<exp>::<test-file>::<node>`) or an analysis artifact by path + role. The prose, section
-structure, and argument are hand-authored; the citations are the load-bearing links the audit
-checks. Reports live in **both** scopes, citing the same way: cross-experiment reports under
-`program/reports/<slug>/`, per-experiment summary reports under `<exp>/reports/<slug>/`.
+else durable here) with an inline **citation syntax** in two roles: a **claim citation** by stable
+`claim_id` (`<exp>::<test-file>::<node>`) **backs a quantitative assertion**, and an **artifact
+reference** by path + role **embeds an exhibit** (a figure/table). The prose, section structure, and
+argument are hand-authored; the citations are the load-bearing links the audit checks. Reports live
+in **both** scopes, citing the same way: cross-experiment reports under `program/reports/<slug>/`,
+per-experiment summary reports under `<exp>/reports/<slug>/`.
 
 **Report-specific figures via a grounded derivation.** A compelling cross-experiment report often
 needs a *new* comparison plot or summary table that no single experiment produced. Produce these
@@ -89,9 +96,10 @@ embeds the grounded artifact. No ad-hoc, untracked graphics.
 **`sci report` — build + audit + render.** One command that (1) **validates** every citation —
 each cited `claim_id` must resolve in the claim index to a *live, current* claim, every embedded
 figure/table to a *current* sha-pinned artifact; (2) **enforces grounding** — flag any quantitative
-sentence with no citation (reusing/extending the §3 semantic audit), and refuse to present a
-contradicted (`xfail`) or drifted claim as positive support, surfacing its real outcome + strength
-instead; (3) **renders** the validated Markdown to the primary deliverable, a polished **PDF** with
+sentence with no *claim* citation (reusing/extending the §3 semantic audit — an embedded exhibit
+doesn't substitute for the claim a conclusion-sentence needs), and refuse to present a contradicted
+(`xfail`) or drifted claim as positive support, surfacing its real outcome + strength instead;
+(3) **renders** the validated Markdown to the primary deliverable, a polished **PDF** with
 figures embedded (optional HTML/docx). A report that cites a claim which has since flipped or
 drifted **fails the audit**, exactly as `sci trace` flags a broken chain — so a shipped report is
 provably backed by currently-true claims.
