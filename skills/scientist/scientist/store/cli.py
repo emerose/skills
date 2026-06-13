@@ -695,7 +695,9 @@ def print_audit_report(report: list[dict[str, Any]], as_json: bool) -> None:
                 print(f"    added (unrecorded): {p}")
             print(f"    last reviewed {e.get('reviewed_at')}")
     print("\nFor the semantic pass, run `sci audit --json` and fan out an agent per "
-          "experiment to read its source_files and verify the README prose.")
+          "experiment to read its source_files and verify the README/reports prose — "
+          "including the prose ↔ claims check (every quantitative or qualitative result "
+          "maps to a grounded claim, else flag it; see references/review-audit.md).")
 
 
 async def cmd_audit(store: Store, args: argparse.Namespace) -> None:
@@ -716,25 +718,7 @@ async def cmd_audit(store: Store, args: argparse.Namespace) -> None:
         entry["source_files"] = [fr["path"] for fr in files
                                  if fr.get("role") in ("data", "report", "raw", "analysis")]
         report.append(entry)
-    if args.json:
-        emit_json(report)
-        return
-    for e in report:
-        print(f"{e['exp_id']}: {e['staleness']}")
-        if e.get("error"):
-            print(f"    {e['error']}")
-        if e.get("staleness") == "stale":
-            if e.get("artifact_changed"):
-                print("    an artifact (e.g. README) edited since last review")
-            for p in e.get("changed", []):
-                print(f"    changed: {p}")
-            for p in e.get("missing", []):
-                print(f"    missing: {p}")
-            for p in e.get("added", []):
-                print(f"    added (unrecorded): {p}")
-            print(f"    last reviewed {e.get('reviewed_at')}")
-    print("\nFor the semantic pass, run `sci audit --json` and fan out an agent per "
-          "experiment to read its source_files and verify the README prose.")
+    print_audit_report(report, args.json)
 
 
 async def cmd_meta(store: Store, args: argparse.Namespace) -> None:
@@ -947,7 +931,8 @@ def register(sub: argparse._SubParsersAction) -> None:
     add("catalog", "export the experiment catalog (CATALOG.md + catalog.json)")
     sp = add("check", "structural integrity report (missing/unindexed files, layout, redundant archives)")
     sp.add_argument("experiment", nargs="?", help="limit to one experiment (default: all)")
-    sp = add("audit", "provenance staleness of the experiment.yml ledger + a worklist for the semantic pass")
+    sp = add("audit", "provenance staleness of the experiment.yml ledger + a worklist for the "
+             "semantic pass (which includes the prose↔claims check)")
     sp.add_argument("experiment", nargs="?", help="limit to one experiment (default: all)")
     sp = add("meta", "show an experiment's structured metadata (experiment.yml)")
     sp.add_argument("experiment")

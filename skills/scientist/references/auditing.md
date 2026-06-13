@@ -39,6 +39,15 @@ slides under `Shared/`). `sci audit` re-hashes them and compares:
 - `no-provenance` — never reviewed; warrants a semantic look.
 - `no-/invalid-experiment-yml` — create or fix the sidecar (`sci meta <exp> --suggest`).
 
+## 2b. Prose ↔ claims (part of the semantic pass)
+
+A result asserted in prose must map to a grounded `kind=claim`. While reading each prose
+doc, run the **prose ↔ claims check** — find every asserted result (quantitative or
+qualitative), map it to its claim (`sci query --kind claim` / the `grounding_report.json`),
+confirm the claim is grounded (`passed`/`xpass` **and** strong/moderate), else flag it
+(`unbacked` / `weak-backing` / `off-topic`; unbacked qualitative is advisory, the rest
+blocking). Full procedure: [review-audit.md](review-audit.md) §"Prose ↔ claims check".
+
 ## 3. Semantic — the parallel-agent pass (authoritative for content)
 
 Hashing tells you an input *changed*, not whether the *prose is still true*. For
@@ -51,6 +60,10 @@ Fan out one agent per experiment:
 > **framing/labeling**. Report only genuine contradictions, stale numbers, and missing
 > major caveats — classify each as `contradiction` vs `imprecision`. Also return the
 > exact list of files you actually relied on. Don't rewrite; report.
+>
+> Then run the prose↔claims check (procedure in `references/review-audit.md`
+> §"Prose ↔ claims check") over `README.md` and `reports/*.md`, reporting each unbacked
+> result, weak/contradicted backing (with its outcome+strength), or off-topic citation.
 
 The verdict is a **pointer to where to look**, not the truth — always re-verify against
 the primary data before changing prose (the agent can over-read; see the discipline

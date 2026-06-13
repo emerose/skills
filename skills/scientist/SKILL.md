@@ -47,7 +47,7 @@ Each phase's detail lives in `references/` and is loaded only when you need it. 
 | Extract raw CRO files → tidy `data/` CSVs, and audit that `data/` is grounded in `raw/` | [references/extract.md](references/extract.md) |
 | Re-derive analysis (fits/stats/figures) and author grounded scientific **claims** | [references/derive-claims.md](references/derive-claims.md) |
 | Index / search / catalog the tree, file a delivery, scaffold a new experiment | [references/search-index.md](references/search-index.md) |
-| Review provenance, audit staleness, structural check, **trace** a result raw→claims | [references/review-audit.md](references/review-audit.md) |
+| Review provenance, audit staleness, structural check, **trace** a result raw→claims, **enforce** prose↔claims | [references/review-audit.md](references/review-audit.md) |
 
 `data/` naming convention + assay vocabulary: [references/naming.md](references/naming.md).
 Private CRO vocabulary (your real vendor names): [references/vocab.example.yml](references/vocab.example.yml).
@@ -76,5 +76,5 @@ Read the repo-wide [AGENTS.md](../../AGENTS.md) first: improve-as-you-go, push r
 **PR your changes back** to the skills repo, contribute generic fixes **upstream to libkit** by PR
 (libkit is the store substrate; this is how bibliographer drove several libkit features),
 and verify changes on throwaway data. Per-phase maintenance notes live in each `references/` file;
-the open direction (reproduction audit, finer-grained provenance, claim/prose enforcement) is in
-[ROADMAP.md](ROADMAP.md).
+the open direction (reproduction audit, finer-grained provenance, program-level traceability) is in
+[ROADMAP.md](ROADMAP.md) — claim↔prose enforcement is shipped (see review-audit.md).

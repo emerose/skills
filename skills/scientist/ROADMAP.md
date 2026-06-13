@@ -39,13 +39,18 @@ slide / table** granularity where the readers can supply it, so an extracted val
 figure) traces to the exact source cell or slide, not just the file. This sharpens `sci trace` —
 a drifted input would point at *which* number moved.
 
-## 3. Claims ⟷ prose enforcement — no ungrounded narrative
+## 3. Claims ⟷ prose enforcement — no ungrounded narrative ✅ shipped
 
-`sci audit --json` emits a semantic-pass worklist and claims are indexed, but a `README.md` /
-`reports/` sentence can still assert a quantitative result with no backing `kind=claim` or
-analysis. Tighten the semantic audit to **require** every such claim to map to a grounded claim
-(or be flagged), so the prose can't drift ahead of the evidence. Builds on the existing `audit`
-plus the claim index.
+Done as part of `sci audit`'s semantic pass: for each `README.md` / `reports/*.md` the agent picks out
+every result asserted in prose (quantitative *or* qualitative — both grounded and audited the same way),
+maps it to its `kind=claim` (cite inline with `[claim:<id>]`; pull claims via `sci query --kind claim` or
+the `grounding_report.json`), and confirms the claim is grounded — `passed`/`xpass` **and** strong/moderate.
+Else it reports `unbacked`, `weak-backing` (contradicted/weak — *with* its outcome+strength), or
+`off-topic` (grounded claim cited but not about this sentence). Severity is tiered: an unbacked
+*qualitative* conclusion is advisory; an unbacked number, or any bad/contradicted citation, is blocking.
+The grounded rule + `claim_id` format match `index-claims` / `sci query --kind claim` / `sci trace`; the
+planned report phase (`sci report`) runs the identical procedure over generated report Markdown. See
+[references/review-audit.md](references/review-audit.md) and [references/auditing.md](references/auditing.md).
 
 ## 4. Program-level traceability
 

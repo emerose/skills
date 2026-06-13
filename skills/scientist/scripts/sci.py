@@ -32,7 +32,9 @@ Store (a libkit-backed index/search/catalog over a tree of experiments):
 `audit` runs BOTH passes on one experiment: the extraction re-extraction check of
 data/ ↔ raw/ AND provenance staleness of the experiment.yml ledger. With no
 experiment, it runs the store staleness pass across the whole data folder. Use
-`sci check` for the structural-integrity report.
+`sci check` for the structural-integrity report. The prose ↔ claims check (every
+asserted result maps to a grounded claim) runs in audit's semantic pass — see
+references/review-audit.md.
 
 `trace` statically walks the provenance DAG (recorded shas still match); `reproduce`
 is its executable complement — it RE-RUNS <exp>/analysis/derive.py in the pinned

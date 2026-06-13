@@ -32,8 +32,44 @@ sci audit  [K1-000000] [--json]          # staleness vs recorded provenance + a 
   each input that **changed** / went **missing** / was **added**, and whether the README itself was
   edited since review), `no-provenance` (never reviewed), or `no-/invalid-experiment-yml`. `--json` adds
   a per-experiment `source_files` worklist for the **semantic pass**: fan out an agent per experiment to
-  read the data and verify the prose — the authoritative content check (see
-  [auditing.md](auditing.md)).
+  read the data, verify the prose, and run the **prose ↔ claims check** below — the authoritative content
+  check (see [auditing.md](auditing.md)).
+
+### Prose ↔ claims check
+
+Keep a `README.md` / `reports/*.md` sentence from **asserting a result without a grounded `kind=claim`
+backing it**. As part of the semantic pass, for each prose doc (the root `README.md` and any
+`reports/*.md`):
+
+1. **Find the evidentiary conclusions.** Pick out the sentences that assert a *result* — quantitative
+   (a %, fold-change, p-value, `n=`, dose, IC50…) *or* qualitative ("well tolerated", "sustained
+   knockdown", "comparable to vehicle", "dose-dependent"). Skip background / method / motivation prose
+   ("6 animals per group", "incubated 30 min", "we designed ASOs targeting X").
+
+2. **Map each to a claim.** A result should carry an explicit citation **`[claim:<id>]`** in the prose
+   (the stable `claim_id` `<exp>::<test-file>::<node>`, or its trailing node name). Pull the claims with
+   `sci query "<topic>" --kind claim` or `sci list --kind claim --experiment <exp> --json` (live index),
+   or read `<exp>/analysis/grounding_report.json` directly (each claim: `{id, statement, outcome,
+   strength, kind}`). For an *un-cited* result, find the claim it ought to map to by reading the
+   statements — if none exists, that's the finding.
+
+3. **Apply the grounded rule.** A result is **backed** only if its claim is *grounded* — `outcome` is
+   `passed` or `xpass` **and** `strength` is `strong` or `moderate`. Otherwise flag it:
+   - **unbacked** — no claim asserts this result (or the result has no citation and no matching claim);
+   - **weak-backing** — the only backing claim is contradicted (`xfail`), drifted (`failed`),
+     unverifiable (`skipped`), or weak/unspecified strength → report it *with* the claim's
+     `outcome`+`strength`, so prose leaning on a contradicted result is caught, not silently passed;
+   - **off-topic** — the cited claim is grounded but isn't actually *about* this sentence (a tolerability
+     claim cited next to an efficacy number).
+
+4. **Grade severity, then report.** An *unbacked qualitative* conclusion is **advisory** (note it; a
+   missing citation on soft prose isn't a failure). An unbacked numeric result, a `weak-backing`, an
+   `off-topic` citation, or any contradicted backing is **blocking** — fix the prose or the citation.
+   Don't rewrite silently; report each finding with its doc, line, the sentence, the claim it maps to
+   (or that it's missing), and the claim's outcome/strength.
+
+The grounded rule and `claim_id` format match `index-claims` / `sci query --kind claim` / `sci trace`.
+The planned report phase (`sci report`) runs the identical procedure over generated report Markdown.
 
 ## Structural check
 
