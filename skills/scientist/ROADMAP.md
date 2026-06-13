@@ -44,13 +44,17 @@ a drifted input would point at *which* number moved.
 
 Done as part of `sci audit`'s semantic pass: for each `README.md` / `reports/*.md` the agent picks out
 every result asserted in prose (quantitative *or* qualitative — both grounded and audited the same way),
-maps it to its `kind=claim` (cite inline with `[claim:<id>]`; pull claims via `sci query --kind claim` or
-the `grounding_report.json`), and confirms the claim is grounded — `passed`/`xpass` **and** strong/moderate.
-Else it reports `unbacked`, `weak-backing` (contradicted/weak — *with* its outcome+strength), or
-`off-topic` (grounded claim cited but not about this sentence). Severity is tiered: an unbacked
-*qualitative* conclusion is advisory; an unbacked number, or any bad/contradicted citation, is blocking.
-The grounded rule + `claim_id` format match `index-claims` / `sci query --kind claim` / `sci trace`; the
-planned report phase (`sci report`) runs the identical procedure over generated report Markdown. See
+pulls the experiment's claim set once, and maps each result to its `kind=claim` (cite inline with
+`[claim:<id>]`; pull claims via `sci list --kind claim --experiment <exp>` / the `grounding_report.json`),
+confirming the claim is grounded — `passed`/`xpass` **and** strong/moderate. When no claim covers a number
+it checks the **analysis-artifact** path — the §5 backing unit: a value that traces verbatim to a current
+sha-pinned `analysis/` artifact (verified via `sci read` / `sci trace`) is grounded, reported `artifact-only`
+with a nudge to author the claim rather than flagged as drift. Else it reports `unbacked`, `weak-backing`
+(contradicted/weak — *with* its outcome+strength), or `off-topic` (grounded claim cited but not about this
+sentence). Severity is tiered: an unbacked *qualitative* conclusion and an `artifact-only` number are
+advisory; an unbacked number, or any bad/contradicted citation, is blocking. The grounded rule + `claim_id`
+format + artifact path match `index-claims` / `sci query --kind claim` / `sci trace`; the planned report
+phase (`sci report`) runs the identical procedure over generated report Markdown. See
 [references/review-audit.md](references/review-audit.md) and [references/auditing.md](references/auditing.md).
 
 ## 4. Program-level traceability

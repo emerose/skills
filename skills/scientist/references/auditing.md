@@ -42,12 +42,14 @@ slides under `Shared/`). `sci audit` re-hashes them and compares:
 
 ## 2b. Prose ↔ claims (part of the semantic pass)
 
-A result asserted in prose must map to a grounded `kind=claim`. While reading each prose
-doc, run the **prose ↔ claims check** — find every asserted result (quantitative or
-qualitative), map it to its claim (`sci query --kind claim` / the `grounding_report.json`),
-confirm the claim is grounded (`passed`/`xpass` **and** strong/moderate), else flag it
-(`unbacked` / `weak-backing` / `off-topic`; unbacked qualitative is advisory, the rest
-blocking). Full procedure: [review-audit.md](review-audit.md) §"Prose ↔ claims check".
+A result asserted in prose must map to grounded evidence — a `kind=claim`, or (secondarily) a
+sha-pinned `analysis/` artifact. While reading each prose doc, run the **prose ↔ claims check** —
+find every asserted result (quantitative or qualitative), map it to its claim (`sci query --kind
+claim` / the `grounding_report.json`), confirm the claim is grounded (`passed`/`xpass` **and**
+strong/moderate); if no claim covers it, check whether the number traces to a current sha-pinned
+analysis artifact before flagging it. Else flag it (`unbacked` / `artifact-only` / `weak-backing` /
+`off-topic`; unbacked qualitative and artifact-only are advisory, the rest blocking). Full
+procedure: [review-audit.md](review-audit.md) §"Prose ↔ claims check".
 
 ## 3. Semantic — the parallel-agent pass (authoritative for content)
 
@@ -63,8 +65,10 @@ Fan out one agent per experiment:
 > exact list of files you actually relied on. Don't rewrite; report.
 >
 > Then run the prose↔claims check (procedure in `references/review-audit.md`
-> §"Prose ↔ claims check") over `README.md` and `reports/*.md`, reporting each unbacked
-> result, weak/contradicted backing (with its outcome+strength), or off-topic citation.
+> §"Prose ↔ claims check") over `README.md` and `reports/*.md` — pull the experiment's claim set
+> once up front — reporting each unbacked result, artifact-only result (grounded in a sha-pinned
+> analysis artifact but with no authored claim), weak/contradicted backing (with its
+> outcome+strength), or off-topic citation.
 
 The verdict is a **pointer to where to look**, not the truth — always re-verify against
 the primary data before changing prose (the agent can over-read; see the discipline
