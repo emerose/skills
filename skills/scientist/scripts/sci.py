@@ -34,10 +34,12 @@ data/ ↔ raw/ AND provenance staleness of the experiment.yml ledger; with no ex
 it runs the store staleness pass across the whole data folder. Use `sci check` for the
 structural-integrity report.
 
-`enforce-prose <exp>` is the quantitative-prose ↔ claims gate: the caller (the
-semantic-pass agent) extracts the quantitative assertions from a README/reports doc and
-pipes them in as JSON; each must cite a grounded `kind=claim` with `[claim:<id>]` or it
-is flagged. Store-free (backed by grounding_report.json); exit 1 if anything is flagged.
+`enforce-prose <exp>` is the prose ↔ claims gate: the caller (the semantic-pass agent)
+extracts the evidentiary conclusions from a README/reports doc — numeric or qualitative,
+tagged `kind` — and pipes them in as JSON; each must cite a grounded `kind=claim` with
+`[claim:<id>]` or it is flagged. An unbacked qualitative conclusion is advisory; an
+unbacked number or a bad citation is blocking. Store-free (backed by
+grounding_report.json); exit 1 iff any blocking flag.
 
 `extract`'s recipe lives at <exp>/data/extract.py and defines build(x); see the
 extraction package and references/extract.md. The data-tree root is $SCIENTIST_HOME,
@@ -89,10 +91,11 @@ def main() -> int:
 
     # ---- enforce-prose: deterministic prose↔claims gate over agent-supplied assertions ----
     p_ep = sub.add_parser("enforce-prose",
-                          help="map agent-extracted quantitative prose assertions to grounded claims")
+                          help="map agent-extracted prose conclusions (numeric or qualitative) to grounded claims")
     p_ep.add_argument("exp", help="experiment folder (path)")
-    p_ep.add_argument("--assertions", help="JSON file of the assertions to check "
-                      "(list of strings or [{text, line}]); default: read from stdin")
+    p_ep.add_argument("--assertions", help="JSON file of the assertions to check (list of "
+                      "strings or [{text, line, kind}], kind=quantitative|qualitative); "
+                      "default: read from stdin")
     p_ep.add_argument("--source", help="label for the prose doc the assertions came from "
                       "(e.g. the README path), echoed in the output")
     p_ep.add_argument("--report", help="grounding_report.json to back the check with "
@@ -140,9 +143,9 @@ def _trace(args: argparse.Namespace) -> int:
 
 def _enforce_prose(args: argparse.Namespace) -> int:
     """`sci enforce-prose <exp>`: deterministic prose↔claims gate. The caller (the
-    semantic-pass agent) decides which prose sentences are quantitative assertions and
+    semantic-pass agent) decides which prose sentences are evidentiary conclusions and
     feeds them in as JSON; this maps each to a grounded claim or flags it. Store-free
-    (backed by the grounding report). Exit 1 if anything is flagged."""
+    (backed by the grounding report). Exit 1 iff any blocking flag."""
     import json
 
     raw = (Path(args.assertions).read_text(encoding="utf-8") if args.assertions

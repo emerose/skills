@@ -32,38 +32,49 @@ sci audit  [K1-000000] [--json]          # staleness vs recorded provenance + a 
   each input that **changed** / went **missing** / was **added**, and whether the README itself was
   edited since review), `no-provenance` (never reviewed), or `no-/invalid-experiment-yml`. `--json` adds
   a per-experiment `source_files` worklist for the **semantic pass** plus a `prose_docs` list (the
-  README + `reports/*.md` whose quantitative results must each map to a grounded claim — see below):
+  README + `reports/*.md` whose evidentiary conclusions must each map to a grounded claim — see below):
   fan out an agent per experiment to read the data, verify the prose, and run `sci enforce-prose` —
   the authoritative content check (see [auditing.md](auditing.md)).
 
-### Quantitative prose ↔ claims enforcement (`sci enforce-prose`)
+### Prose ↔ claims enforcement (`sci enforce-prose`)
 
-The gate that keeps a `README.md` / `reports/*.md` sentence from **asserting a quantitative result
+The gate that keeps a `README.md` / `reports/*.md` sentence from **asserting an evidentiary conclusion
 without a grounded `kind=claim` backing it**. Two halves, split by what each is good at:
 
-- **Detection is the agent's job (inverted control).** Judging *whether a sentence asserts a
-  quantitative result* is a language task, not a regex one — so `audit` does **not** scan prose. Its
+- **Detection is the agent's job (inverted control).** Judging *whether a sentence asserts a conclusion
+  worth grounding* is a language task, not a regex one — so `audit` does **not** scan prose. Its
   `prose_docs` list just points the semantic-pass agent at the docs; the agent reads them, decides which
-  sentences are quantitative claims (a %, fold-change, p-value, `n=`, dose, IC50…), and passes that list on.
+  sentences are evidentiary conclusions (a numeric result — %, fold-change, p-value, `n=`, dose, IC50… —
+  *or* a qualitative one — "well tolerated", "sustained knockdown", "comparable to vehicle"), and passes
+  that list on, tagging each `quantitative` or `qualitative`.
 - **Enforcement is deterministic.** The agent feeds its assertions to `sci enforce-prose`, which does the
   part worth pinning down — parse the exact citation, resolve the claim, check the backing:
 
   ```bash
   sci enforce-prose <exp> [--source <doc>] [--report PATH] [--json]   # assertions as JSON on stdin
-  echo '["Knockdown reached 82% [claim:test_kd_lumbar]."]' | sci enforce-prose "K1-000000 - …"
+  echo '[{"text":"Knockdown reached 82% [claim:test_kd_lumbar].","kind":"quantitative"}]' \
+    | sci enforce-prose "K1-000000 - …"
   ```
-  Assertions arrive as a JSON list of strings or `{"text", "line"}` objects. Cite a result in prose with
-  **`[claim:<id>]`** (the full stable `claim_id` `<exp>::<test-file>::<node>`, or just its trailing node
-  name). An assertion is **cleared** only when a citation resolves to a claim that is *grounded*
-  (`passed`/`xpass`) **and** *strong/moderate* strength. Otherwise it's flagged:
+  Assertions arrive as a JSON list of strings or `{"text", "line"?, "kind"?}` objects (`kind` is
+  `quantitative` (default) or `qualitative`). Cite a result in prose with **`[claim:<id>]`** (the full
+  stable `claim_id` `<exp>::<test-file>::<node>`, or just its trailing node name). An assertion is
+  **cleared** only when a citation resolves to a claim that is *grounded* (`passed`/`xpass`) **and**
+  *strong/moderate* strength. Otherwise it's flagged:
   - `unbacked` — no `[claim:…]` citation (carries an advisory best-overlap `suggestion`, never an
     auto-clear — a coincidental match must not mask missing evidence);
   - `weak-backing` — cited only to a claim that is contradicted (`xfail`), drifted (`failed`),
     unverifiable (`skipped`), or weak/unspecified — **surfaced with its `outcome`+`strength`**, so prose
     leaning on a contradicted result is caught, not silently passed;
   - `unknown-claim` — a citation that resolves to no known claim.
-
-  Exit is **1 if anything is flagged**, 0 if every assertion maps to a grounded claim (a usable CI gate).
+- **Quantitative vs qualitative is a severity tier, not a scope filter.** A qualitative conclusion is
+  grounded and audited exactly like a numeric one (the claim layer never cared whether a statement had a
+  number). But qualitative conclusions are fuzzier to enumerate and noisier in bulk, so each flag carries
+  a `severity`: a *missing citation* on a `qualitative` assertion is **advisory** (reported, doesn't fail
+  the gate); a missing citation on a numeric result is **blocking**; an explicit-but-bad citation
+  (`weak-backing` / `unknown-claim`) is **blocking either way** — it's a checkable author error, not
+  extraction noise. Tagging is fail-safe: only an explicit `qualitative` downgrades; absent/unknown stays
+  blocking. **Exit is 1 iff any blocking flag**, 0 otherwise (a usable CI gate that the high-volume
+  qualitative case can't drown out).
 - **Backing source** — `sci enforce-prose` is **store-free** like `sci trace`: it backs the check with
   the experiment's `grounding_report.json` (the source the `kind=claim` index is itself built from;
   `--report` overrides the path). Claims are keyed by the same stable `claim_id` the index uses, so

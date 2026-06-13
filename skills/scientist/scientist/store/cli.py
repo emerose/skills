@@ -645,7 +645,7 @@ def _claims_from_report(exp_dir: Path, exp_id: str,
     """Claims for the store-free prose pass: read the per-experiment grounding report
     (if present) and key each claim by its STABLE ``claim_id`` (so prose ``[claim:…]``
     citations resolve identically with or without a store). Returns ``[]`` when no
-    report exists — every quantitative assertion then flags as unbacked, which is the
+    report exists — every assertion then flags as unbacked, which is the
     honest verdict for an experiment whose claims were never run."""
     import json
 
@@ -702,12 +702,15 @@ def _rel(home: Path, p: Path) -> str:
 
 def render_prose_result(res: dict[str, Any]) -> str:
     """Human render of one :func:`_prose.enforce_prose` result."""
-    n_flag = len(res["flags"])
-    head = "✓ all backed" if not n_flag else f"{n_flag} flagged"
+    if not res["flags"]:
+        head = "✓ all backed"
+    else:
+        head = f"{res['blocking']} blocking, {res['advisory']} advisory"
     lines = [f"{res.get('source') or 'prose'}: {res['backed']}/{res['assertions']} backed ({head})"]
     for f in res["flags"]:
         loc = f"L{f['line']}: " if f.get("line") is not None else ""
-        lines.append(f"  [{f['status']}] {loc}{f['text'][:100]}")
+        sev = f.get("severity", "blocking")
+        lines.append(f"  [{sev}·{f['status']}] {loc}{f['text'][:100]}")
         for b in f.get("backing", []):
             lbl = _meta.CLAIM_OUTCOME_LABEL.get(b.get("outcome"), b.get("outcome") or "?")
             lines.append(f"      ↳ {b.get('claim_id')}  ({lbl} · strength: {b.get('strength','?')})")
@@ -725,8 +728,9 @@ def run_enforce_prose(exp: str, assertions: list[Any], *, report: str | None = N
     """``sci enforce-prose``: deterministic prose↔claims enforcement over the
     assertions the caller (the semantic-pass agent) extracted. STORE-FREE — it backs
     the check with the experiment's ``grounding_report.json`` (the source the claim
-    index is itself built from), mirroring ``sci trace``. Exit 1 if anything is
-    flagged, 0 if every assertion maps to a grounded claim."""
+    index is itself built from), mirroring ``sci trace``. Exit 1 if any **blocking**
+    flag (an unbacked numeric result, or any bad citation); advisory-only flags
+    (unbacked qualitative conclusions) report but exit 0."""
     exp_dir = Path(exp)
     if not exp_dir.is_dir():
         die(f"not an experiment folder: {exp_dir}")
@@ -738,7 +742,7 @@ def run_enforce_prose(exp: str, assertions: list[Any], *, report: str | None = N
         emit_json(res)
     else:
         print(render_prose_result(res))
-    return 1 if res["flags"] else 0
+    return 1 if res["blocking"] else 0
 
 
 def _source_files_on_disk(exp_dir: Path, home: Path) -> list[str]:
@@ -772,7 +776,7 @@ def audit_report(home: Path, only: str | None = None) -> list[dict[str, Any]]:
     for exp_dir, exp_id in pairs:
         entry = _staleness_entry(home, exp_dir, exp_id)
         entry["source_files"] = _source_files_on_disk(exp_dir, home)
-        # Prose docs whose quantitative results must each map to a grounded claim.
+        # Prose docs whose evidentiary conclusions must each map to a grounded claim.
         # Detection is the semantic-pass agent's job (`sci enforce-prose`), so the
         # audit only points at the docs — it doesn't regex them here.
         docs = prose_docs_on_disk(exp_dir, home)
@@ -805,9 +809,10 @@ def print_audit_report(report: list[dict[str, Any]], as_json: bool) -> None:
             print(f"    prose: {d}")
     print("\nFor the semantic pass, run `sci audit --json` and fan out an agent per "
           "experiment to read its source_files and verify the README prose.\n"
-          "Quantitative prose ↔ claims: for each prose doc, extract the quantitative "
-          "assertions and run `sci enforce-prose <exp> --source <doc>` (assertions as "
-          "JSON on stdin) — each must cite a grounded claim with [claim:<id>] or it is flagged.")
+          "Prose ↔ claims: for each prose doc, extract the evidentiary conclusions "
+          "(tag each quantitative|qualitative) and run `sci enforce-prose <exp> --source <doc>` "
+          "(assertions as JSON on stdin) — each must cite a grounded claim with [claim:<id>] or it "
+          "is flagged (unbacked numbers/bad citations block; unbacked qualitative is advisory).")
 
 
 async def cmd_audit(store: Store, args: argparse.Namespace) -> None:
@@ -827,7 +832,7 @@ async def cmd_audit(store: Store, args: argparse.Namespace) -> None:
         # source files an agent should read to verify the prose semantically
         entry["source_files"] = [fr["path"] for fr in files
                                  if fr.get("role") in ("data", "report", "raw", "analysis")]
-        # Prose docs whose quantitative results must each map to a grounded claim —
+        # Prose docs whose evidentiary conclusions must each map to a grounded claim —
         # the agent extracts assertions and runs `sci enforce-prose` (detection is its
         # judgment, not a regex here).
         docs = prose_docs_on_disk(exp_dir, store.home)

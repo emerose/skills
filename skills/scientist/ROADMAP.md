@@ -34,16 +34,18 @@ a drifted input would point at *which* number moved.
 ## 3. Claims ⟷ prose enforcement — no ungrounded narrative ✅ shipped
 
 `sci enforce-prose` enforces this, with control **inverted to the semantic-pass agent**: deciding
-whether a sentence asserts a quantitative result is a language task, so the agent extracts the
+whether a sentence asserts an evidentiary conclusion is a language task, so the agent extracts the
 assertions (`sci audit --json` just lists the `prose_docs` to read) and pipes them in; the deterministic
 gate does the part worth pinning down — parse the `[claim:<id>]` citation, resolve the claim, check it's
 grounded. An assertion clears only when its citation resolves to a `passed`/`xpass`, strong/moderate
 claim, else it's flagged `unbacked`, `weak-backing` (cited only to a contradicted/weak claim — surfaced
-*with* its outcome+strength), or `unknown-claim`. Store-free, backed by `grounding_report.json` like
-`sci trace`; exit 1 if anything is flagged. The core `scientist.store._prose.enforce_prose(assertions,
-claims)` is pure and reusable — the planned report phase (`sci report`) runs the same gate, its
-generating agent emitting the assertions it wrote. See [references/review-audit.md](references/review-audit.md)
-and [references/auditing.md](references/auditing.md).
+*with* its outcome+strength), or `unknown-claim`. Conclusions are graded **quantitative or qualitative**:
+both are grounded and audited the same way, but an *unbacked qualitative* conclusion is `advisory` (the
+fuzzy, high-volume case) while an unbacked numeric result — and any bad citation — is `blocking`. Store-free,
+backed by `grounding_report.json` like `sci trace`; **exit 1 iff any blocking flag**. The core
+`scientist.store._prose.enforce_prose(assertions, claims)` is pure and reusable — the planned report phase
+(`sci report`) runs the same gate, its generating agent emitting the assertions it wrote. See
+[references/review-audit.md](references/review-audit.md) and [references/auditing.md](references/auditing.md).
 
 ## 4. Program-level traceability
 

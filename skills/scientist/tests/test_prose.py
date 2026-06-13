@@ -101,7 +101,56 @@ def test_moderate_grounded_claim_clears():
 
 def test_empty_assertions_is_clean():
     res = _prose.enforce_prose([], [_claim("K1-1::t.py::x", "y")])
-    assert res == {"source": None, "assertions": 0, "backed": 0, "flags": []}
+    assert res == {"source": None, "assertions": 0, "backed": 0,
+                   "blocking": 0, "advisory": 0, "flags": []}
+
+
+# --------------------------------------------------------------------------- #
+# severity tiers — quantitative blocks, qualitative is advisory
+# --------------------------------------------------------------------------- #
+def test_quantitative_unbacked_is_blocking_by_default():
+    # a bare string defaults to quantitative → blocking
+    res = _prose.enforce_prose(["Knockdown reached 82%."], [])
+    f = res["flags"][0]
+    assert f["status"] == "unbacked" and f["tier"] == "quantitative"
+    assert f["severity"] == "blocking"
+    assert res["blocking"] == 1 and res["advisory"] == 0
+
+
+def test_qualitative_unbacked_is_advisory():
+    a = [{"text": "The ASO was well tolerated.", "line": 3, "kind": "qualitative"}]
+    res = _prose.enforce_prose(a, [])
+    f = res["flags"][0]
+    assert f["status"] == "unbacked" and f["tier"] == "qualitative"
+    assert f["severity"] == "advisory"
+    assert res["blocking"] == 0 and res["advisory"] == 1
+
+
+def test_qualitative_assertion_can_be_backed():
+    # qualitative claims are grounded/audited exactly like numeric ones
+    a = [{"text": "Knockdown was sustained [claim:test_sustained].", "kind": "qualitative"}]
+    claims = [_claim("K1-1::test_kd.py::test_sustained", "Knockdown persists through week 8")]
+    res = _prose.enforce_prose(a, claims)
+    assert res["backed"] == 1 and res["flags"] == []
+
+
+def test_qualitative_bad_citation_still_blocks():
+    # an explicit-but-bad citation is a checkable author error → blocking regardless of tier
+    a = [{"text": "Well tolerated [claim:K1-1::test_tox.py::test_tox].", "kind": "qualitative"}]
+    claims = [_claim("K1-1::test_tox.py::test_tox", "Tox seen", outcome="xfail", strength="weak")]
+    res = _prose.enforce_prose(a, claims)
+    f = res["flags"][0]
+    assert f["status"] == "weak-backing" and f["tier"] == "qualitative"
+    assert f["severity"] == "blocking"
+    assert res["blocking"] == 1
+
+
+def test_unknown_kind_defaults_to_blocking():
+    # fail-safe: a typo'd/unknown kind must NOT silently downgrade to advisory
+    a = [{"text": "Knockdown reached 82%.", "kind": "qualitatve"}]   # typo
+    res = _prose.enforce_prose(a, [])
+    assert res["flags"][0]["tier"] == "quantitative"
+    assert res["blocking"] == 1 and res["advisory"] == 0
 
 
 # --------------------------------------------------------------------------- #

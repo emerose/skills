@@ -39,20 +39,26 @@ slides under `Shared/`). `sci audit` re-hashes them and compares:
 - `no-provenance` — never reviewed; warrants a semantic look.
 - `no-/invalid-experiment-yml` — create or fix the sidecar (`sci meta <exp> --suggest`).
 
-## 2b. Quantitative prose ↔ claims — `sci enforce-prose` (part of the semantic pass)
+## 2b. Prose ↔ claims — `sci enforce-prose` (part of the semantic pass)
 
-A quantitative result asserted in prose must map to a grounded `kind=claim`. The split:
-**you (the semantic-pass agent) detect the assertions; `sci enforce-prose` decides if
-they're backed.** Deciding *whether a sentence asserts a quantitative result* is a
-judgment call, so it's left to you — `sci audit` only lists the `prose_docs` to read,
-it doesn't regex them. As part of the per-experiment pass below, pull out each
-quantitative sentence (a result-like number — %, fold-change, p-value, `n=`, dose,
-IC50…; ignore bare counts, dates, refs, and method time/temperature) and feed them to
-the deterministic gate:
+An evidentiary conclusion asserted in prose must map to a grounded `kind=claim`. The
+split: **you (the semantic-pass agent) detect the assertions; `sci enforce-prose`
+decides if they're backed.** Deciding *whether a sentence asserts a conclusion worth
+grounding* is a judgment call, so it's left to you — `sci audit` only lists the
+`prose_docs` to read, it doesn't regex them. As part of the per-experiment pass below,
+pull out each evidentiary conclusion and tag it `quantitative` or `qualitative`:
+
+- **quantitative** — a result-like number (%, fold-change, p-value, `n=`, dose, IC50…);
+- **qualitative** — a non-numeric conclusion ("well tolerated", "sustained knockdown",
+  "comparable to vehicle", "dose-dependent").
+
+Ignore background/method/motivation prose (bare counts, dates, refs, "6 animals per
+group", "incubated 30 min"). Feed the list to the deterministic gate:
 
 ```bash
-echo '[{"text":"Knockdown reached 82% [claim:test_kd_lumbar].","line":12}]' \
-  | sci enforce-prose "<exp>" --source README.md
+echo '[{"text":"Knockdown reached 82% [claim:test_kd_lumbar].","line":12,"kind":"quantitative"},
+       {"text":"The ASO was well tolerated.","line":14,"kind":"qualitative"}]' \
+  | sci enforce-prose "<exp>" --source README.md --json
 ```
 
 Cite a result inline with **`[claim:<id>]`** (full stable `claim_id` or its trailing
@@ -60,8 +66,11 @@ node name). An assertion clears only if its citation resolves to a `passed`/`xpa
 strong/moderate claim; otherwise it's flagged `unbacked` (no citation; carries an
 advisory `suggestion`), `weak-backing` (cited only to a contradicted/drifted/
 unverifiable/weak claim — surfaced *with* its outcome+strength), or `unknown-claim`
-(citation resolves to nothing). Exit 1 if anything is flagged. It's **store-free** —
-backed by the experiment's `grounding_report.json`, like `sci trace`. (Core:
+(citation resolves to nothing). Each flag has a **severity**: an *unbacked qualitative*
+conclusion is `advisory` (reported, doesn't fail the gate — the fuzzy, high-volume
+case); everything else (any quantitative flag, any bad citation) is `blocking`. **Exit
+1 iff any blocking flag.** It's **store-free** — backed by the experiment's
+`grounding_report.json`, like `sci trace`. (Core:
 `scientist.store._prose.enforce_prose(assertions, claims)` — the same gate the report
 phase will run on generated report Markdown.)
 
@@ -78,10 +87,12 @@ Fan out one agent per experiment:
 > major caveats — classify each as `contradiction` vs `imprecision`. Also return the
 > exact list of files you actually relied on. Don't rewrite; report.
 >
-> Then, for the prose↔claims gate: extract every quantitative assertion from each
-> `prose_docs` entry as `[{"text", "line"}]` and pipe it to
-> `sci enforce-prose "<exp>" --source <doc> --json`. Report whatever it flags
-> (`unbacked` / `weak-backing` / `unknown-claim`) alongside your content findings.
+> Then, for the prose↔claims gate: extract every evidentiary conclusion from each
+> `prose_docs` entry as `[{"text", "line", "kind"}]` (kind = `quantitative` for numeric
+> results, `qualitative` for non-numeric ones; skip background/method prose) and pipe it
+> to `sci enforce-prose "<exp>" --source <doc> --json`. Report whatever it flags
+> (`unbacked` / `weak-backing` / `unknown-claim`, each with its `severity`) alongside
+> your content findings.
 
 The verdict is a **pointer to where to look**, not the truth — always re-verify against
 the primary data before changing prose (the agent can over-read; see the discipline
