@@ -42,28 +42,11 @@ slides under `Shared/`). `sci audit` re-hashes them and compares:
 ## 2b. Prose ↔ claims (part of the semantic pass)
 
 A result asserted in prose must map to a grounded `kind=claim`. While reading each prose
-doc (`README.md`, `reports/*.md`):
-
-1. **Find the evidentiary conclusions** — sentences asserting a *result*, quantitative
-   (%, fold-change, p-value, `n=`, dose, IC50…) or qualitative ("well tolerated",
-   "sustained knockdown", "comparable to vehicle"). Skip background/method/motivation
-   prose ("6 animals per group", "incubated 30 min").
-2. **Map each to a claim** — a result should cite **`[claim:<id>]`** (stable `claim_id`
-   or its trailing node). Pull claims with `sci query "<topic>" --kind claim` /
-   `sci list --kind claim --experiment <exp> --json`, or read
-   `<exp>/analysis/grounding_report.json` (`{id, statement, outcome, strength, kind}`).
-3. **Apply the grounded rule** — backed iff the claim is `passed`/`xpass` **and**
-   `strong`/`moderate`. Else flag **unbacked** (no such claim), **weak-backing** (only
-   backing is contradicted/drifted/unverifiable/weak — report *with* its
-   outcome+strength), or **off-topic** (cited claim is grounded but not actually about
-   this sentence).
-4. **Grade severity** — an *unbacked qualitative* conclusion is **advisory** (note it;
-   soft prose is fuzzy and high-volume); an unbacked number, a weak/off-topic/contradicted
-   backing is **blocking** (fix the prose or the citation).
-
-The grounded rule and `claim_id` format match `index-claims` / `sci query --kind claim`
-/ `sci trace`. The planned report phase (`sci report`) runs the identical procedure over
-generated report Markdown.
+doc, run the **prose ↔ claims check** — find every asserted result (quantitative or
+qualitative), map it to its claim (`sci query --kind claim` / the `grounding_report.json`),
+confirm the claim is grounded (`passed`/`xpass` **and** strong/moderate), else flag it
+(`unbacked` / `weak-backing` / `off-topic`; unbacked qualitative is advisory, the rest
+blocking). Full procedure: [review-audit.md](review-audit.md) §"Prose ↔ claims check".
 
 ## 3. Semantic — the parallel-agent pass (authoritative for content)
 
@@ -78,13 +61,9 @@ Fan out one agent per experiment:
 > major caveats — classify each as `contradiction` vs `imprecision`. Also return the
 > exact list of files you actually relied on. Don't rewrite; report.
 >
-> Then run the prose↔claims check (§2b) over `README.md` and `reports/*.md`: for each
-> result asserted in the prose (quantitative or qualitative), find the `kind=claim` that
-> backs it (`sci list --kind claim --experiment <exp> --json`, or the
-> `grounding_report.json`) and confirm it's grounded — `passed`/`xpass` **and**
-> `strong`/`moderate`. Report each unbacked result, weak/contradicted backing (with its
-> outcome+strength), or grounded-but-off-topic citation; mark unbacked *qualitative*
-> conclusions as advisory, the rest as blocking.
+> Then run the prose↔claims check (procedure in `references/review-audit.md`
+> §"Prose ↔ claims check") over `README.md` and `reports/*.md`, reporting each unbacked
+> result, weak/contradicted backing (with its outcome+strength), or off-topic citation.
 
 The verdict is a **pointer to where to look**, not the truth — always re-verify against
 the primary data before changing prose (the agent can over-read; see the discipline
