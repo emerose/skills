@@ -3,8 +3,9 @@
 The pipeline is built: `raw → data → analysis → claims` is one auditable DAG over a single
 `experiment.yml` provenance ledger, and `sci trace` walks any claim back to the original
 measurements, flagging breaks. What remains is to make the chain **deeper** (finer provenance),
-**executable** (analyses that actually re-run and reproduce), and **enforced** (no prose claim
-without a grounded backing).
+**executable** (analyses that actually re-run and reproduce), **enforced** (no prose claim
+without a grounded backing), and to add a terminal **report** phase (`claims → report`) that turns
+grounded claims into a human-facing narrative without loosening the grounding discipline.
 
 ## Already shipped (for context)
 
@@ -32,7 +33,7 @@ derivation execution, so an out-of-`data/` read is flagged for a derivation exac
 Emits three independent verdicts per experiment — **runs / reproduces / reads_only_data** — and an
 overall REPRODUCES / BROKEN status.
 
-## 2. Finer-grained provenance — beyond file + sha
+## 2. Finer-grained provenance — beyond file + sha *(deferred — low priority)*
 
 Provenance `inputs` are file-level today (`path` + `sha256`). Extend toward **sheet / cell-range /
 slide / table** granularity where the readers can supply it, so an extracted value (or a quoted
@@ -58,6 +59,45 @@ planned report phase (`sci report`) runs the identical procedure over generated 
 a program-level **traceability status** — the per-experiment `sci trace` verdict rolled up — so
 "is the program's stated evidence fully grounded?" is a single report.
 
+## 5. Reports — `claims → report`: a grounded human narrative
+
+Where a **claim** is one machine-checkable assertion, a **report** is a human-facing narrative
+built *from* claims. It collects grounded claims — potentially fanning in from across experiments —
+arranges them into a coherent argument, and pulls in figures and tables to make a point. It is for
+humans, not machines: readable, concise, compelling. The same provenance discipline applies —
+**no quantitative prose without a backing** — but the unit of backing is an *existing* grounded
+`kind=claim` (or a sha-pinned analysis artifact), so a report never re-litigates grounding and
+can't drift ahead of the evidence: to assert something new, you author the claim first.
+
+**Authoring — Markdown + a citation syntax.** A report is git-diffable Markdown (like everything
+else durable here) with an inline **citation syntax** naming a claim by its stable `claim_id`
+(`<exp>::<test-file>::<node>`) or an analysis artifact by path + role. The prose, section
+structure, and argument are hand-authored; the citations are the load-bearing links the audit
+checks. Reports live in **both** scopes, citing the same way: cross-experiment reports under
+`program/reports/<slug>/`, per-experiment summary reports under `<exp>/reports/<slug>/`.
+
+**Report-specific figures via a grounded derivation.** A compelling cross-experiment report often
+needs a *new* comparison plot or summary table that no single experiment produced. Produce these
+through a (program-level) `derivation` — the same machinery as `derive.py` — so the artifact is
+sha-pinned and its inputs (the `data/`/analysis tables it reads) are recorded; the report then
+embeds the grounded artifact. No ad-hoc, untracked graphics.
+
+**`sci report` — build + audit + render.** One command that (1) **validates** every citation —
+each cited `claim_id` must resolve in the claim index to a *live, current* claim, every embedded
+figure/table to a *current* sha-pinned artifact; (2) **enforces grounding** — flag any quantitative
+sentence with no citation (reusing/extending the §3 semantic audit), and refuse to present a
+contradicted (`xfail`) or drifted claim as positive support, surfacing its real outcome + strength
+instead; (3) **renders** the validated Markdown to the primary deliverable, a polished **PDF** with
+figures embedded (optional HTML/docx). A report that cites a claim which has since flipped or
+drifted **fails the audit**, exactly as `sci trace` flags a broken chain — so a shipped report is
+provably backed by currently-true claims.
+
+**Indexed + traceable.** The finished report is indexed into libkit (`kind=report`, embedded on its
+title/abstract + section summaries) so "which report makes the case for the dose-dependent effect"
+is answerable, and its citations extend `sci trace`: a report node sits atop the DAG, walkable down
+through each cited claim to the original measurements. Program-level traceability (§4) then includes
+"are our reports fully grounded?"
+
 ## Resolved
 
 - *One skill or several?* → one (`scientist`); the stages are internal capabilities sharing one
@@ -65,3 +105,7 @@ a program-level **traceability status** — the per-experiment `sci trace` verdi
 - *Reader fidelity for pzfx / prism / docx / pdf / pptx?* → built (tabular + table readers and
   prose `doc()` text, all in `labfiles`). The remaining reader work is the cell-range granularity
   in §2, not new formats.
+- *Report design (§5) — what grounds the prose / scope / figures / output?* → reports **cite
+  existing claims only** (author the claim first); **both** program- and per-experiment scopes;
+  report-specific figures via a **grounded derivation** (no ad-hoc graphics); Markdown source
+  rendered to **PDF** as the primary deliverable.
