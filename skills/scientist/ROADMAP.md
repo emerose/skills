@@ -66,7 +66,23 @@ citing claims the same way. See [references/review-audit.md](references/review-a
 a program-level **traceability status** — the per-experiment `sci trace` verdict rolled up — so
 "is the program's stated evidence fully grounded?" is a single report.
 
-## 5. Reports — `claims → report`: a grounded human narrative
+## 5. Reports — `claims → report`: a grounded human narrative *(shipped)*
+
+**Shipped** as `sci report <report.md|dir>` (`scientist/report/`; authoring guide in
+[references/report.md](references/report.md)). It validates every `[claim:<id>]` against the
+claim index (resolve to a live, grounded claim — outcome passed/xpass, strength
+strong/moderate — else blocking, surfacing the real outcome/strength), validates every embedded
+exhibit is a current sha-pinned `analysis/` artifact (untracked/drifted → blocking), flags
+uncited quantitative prose (advisory), and renders the validated Markdown to PDF (pandoc+LaTeX
+primary, `markdown`+`xhtml2pdf` fallback) with the cited claims emitted as a traceable
+"Grounded claims" appendix. Report-specific figures come from a **program-level grounded
+derivation** (`grounding.derivation(program, __file__)` → `program/analysis/`). First real use:
+`program/reports/aso154-lead-therapeutic-window/` in the data repo. *Open follow-ups:* index the
+finished report into libkit (`kind=report`) + extend `sci trace` through the report node; a
+program-aware `sci reproduce` mode (a program derivation legitimately reads cross-experiment
+`analysis/` tables, so the per-experiment `reads_only_data` invariant does not fit it).
+
+### 5 (original design notes)
 
 Where a **claim** is one machine-checkable assertion, a **report** is a human-facing narrative
 built *from* claims. It collects grounded claims — potentially fanning in from across experiments —

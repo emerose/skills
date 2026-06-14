@@ -100,7 +100,7 @@ def _find_experiment_dir(home: Path, ident: str) -> tuple[Path, dict[str, Any]] 
 # --------------------------------------------------------------------------- #
 # commands
 # --------------------------------------------------------------------------- #
-async def cmd_init(store: Store, args: argparse.Namespace) -> None:
+async def cmd_init(store: Store, _args: argparse.Namespace) -> None:
     # opening already created the store; ensure a .gitignore covers it.
     gi = store.home / ".gitignore"
     needed = [f"{STORE_DIRNAME}/", ".DS_Store"]
@@ -323,7 +323,8 @@ async def cmd_list(store: Store, args: argparse.Namespace) -> None:
         elif args.kind == "entity":
             print(f"  {r.get('entity_id')}  — {r.get('title') or ''}")
         elif args.kind == "claim":
-            label = _meta.CLAIM_OUTCOME_LABEL.get(r.get("outcome"), r.get("outcome") or "?")
+            outcome = r.get("outcome") or "?"
+            label = _meta.CLAIM_OUTCOME_LABEL.get(outcome, outcome)
             stmt = (r.get("statement") or "").strip().replace("\n", " ")[:90]
             print(f"  [{label} · {r.get('strength','?')}] {r.get('exp_id')}  {stmt}")
         else:
@@ -411,7 +412,8 @@ async def cmd_query(store: Store, args: argparse.Namespace) -> None:
         return
     for h in out:
         if h.get("kind") == "claim":
-            label = _meta.CLAIM_OUTCOME_LABEL.get(h.get("outcome"), h.get("outcome") or "?")
+            outcome = h.get("outcome") or "?"
+            label = _meta.CLAIM_OUTCOME_LABEL.get(outcome, outcome)
             stmt = (h.get("statement") or h.get("text") or "").strip().replace("\n", " ")[:200]
             print(f"  [claim · {label} · strength: {h.get('strength','?')}] {h.get('exp_id')}\n"
                   f"      {stmt}")

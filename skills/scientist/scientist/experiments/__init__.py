@@ -198,6 +198,13 @@ class Program:
     ``program/claims/test_*.py`` is the natural home for grounded cross-cutting claims —
     collected by the same pytest plugin as any claims dir."""
 
+    # A stable id so the Program accessor can stand in for a Study where one is
+    # expected — notably ``grounding.derivation(program, __file__)`` for *program-level*
+    # figures/tables (ROADMAP §5): the derivation writes artifacts under
+    # ``program/analysis/`` and records provenance into ``program/experiment.yml``,
+    # exactly as a per-experiment derivation does under its own folder.
+    id = "program"
+
     def __init__(self):
         self.path = root() / "program"
         self._conv = None    # cached conventions dict (loaded + recorded once)
@@ -217,6 +224,29 @@ class Program:
         """A reference table ``program/<name>[.csv]`` as a tracked DataFrame."""
         p = self.path / (name if name.endswith(".csv") else f"{name}.csv")
         return grounding.load(p, kind="reference")
+
+    @property
+    def derive(self):
+        """The program's ``program/analysis/derive.py`` as a module (mirrors
+        :attr:`Study.derive`), so the program-level derivation re-runs the same way a
+        per-experiment one does — e.g. under ``sci reproduce``. Cached per process.
+
+        Note: a program derivation legitimately reads *other experiments'* ``analysis/``
+        tables, so ``sci reproduce``'s per-experiment ``reads_only_data`` invariant does
+        not apply to it (the ``runs`` / ``reproduces`` verdicts still do)."""
+        import importlib.util
+        import sys
+        name = "experiments_derive_program"
+        if name in sys.modules:
+            return sys.modules[name]
+        p = self.path / "analysis" / "derive.py"
+        if not p.is_file():
+            raise AttributeError("program has no analysis/derive.py")
+        spec = importlib.util.spec_from_file_location(name, p)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+        return mod
 
     def canonical(self, name) -> int | None:
         """Resolve an entity alias to its canonical numeric id using the program's documented

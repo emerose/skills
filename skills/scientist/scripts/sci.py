@@ -9,6 +9,8 @@
 #   "pdfplumber>=0.11",
 #   "libkit>=0.2.3",
 #   "platformdirs>=4.0",
+#   "markdown>=3.5",
+#   "xhtml2pdf>=0.2.16",
 # ]
 # ///
 """scientist CLI — zero-install entry point for the whole skill.
@@ -62,6 +64,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scientist import extraction as EXT  # noqa: E402
+from scientist import report as REPORT  # noqa: E402
 from scientist.provenance import trace as TRACE  # noqa: E402
 from scientist.provenance import reproduce as REPRODUCE  # noqa: E402
 from scientist.store import cli as STORE_CLI  # noqa: E402
@@ -95,6 +98,21 @@ def main() -> int:
     p_tr.add_argument("--report", help="grounding_report.json to use "
                       "(default <exp>/analysis/grounding_report.json then <exp>/grounding_report.json)")
 
+    # ---- report: build + audit + render a grounded human narrative (ROADMAP §5) ----
+    p_rep = sub.add_parser("report",
+                           help="validate a report's claim citations + sha-pinned exhibits and "
+                                "render it to PDF (claims -> report)")
+    p_rep.add_argument("path", help="report markdown file or its directory "
+                       "(program/reports/<slug>/ or <exp>/reports/<slug>/)")
+    p_rep.add_argument("--format", dest="fmt", choices=["pdf", "md"], default="pdf",
+                       help="render format (default pdf; 'md' emits the processed source)")
+    p_rep.add_argument("--out", help="output path (default: the report .md with a .pdf suffix)")
+    p_rep.add_argument("--audit-only", action="store_true",
+                       help="validate citations + exhibits without rendering")
+    p_rep.add_argument("--strict", action="store_true",
+                       help="treat advisory findings (uncited quantitative sentences) as failures")
+    p_rep.add_argument("--json", action="store_true", help="machine-readable output")
+
     # ---- reproduce: re-run analysis/derive.py and check it reproduces the recorded artifacts ----
     p_rp = sub.add_parser("reproduce",
                           help="re-run analysis/derive.py and check it reproduces the recorded "
@@ -125,6 +143,9 @@ def main() -> int:
         return EXT.cellcov(args.exp, args.script, args.examples)
     if args.cmd == "trace":
         return _trace(args)
+    if args.cmd == "report":
+        return REPORT.run(args.path, fmt=args.fmt, out=args.out,
+                          audit_only=args.audit_only, strict=args.strict, as_json=args.json)
     if args.cmd == "reproduce":
         return _reproduce(args)
     if args.cmd == "audit":

@@ -48,6 +48,7 @@ Each phase's detail lives in `references/` and is loaded only when you need it. 
 | Re-derive analysis (fits/stats/figures) and author grounded scientific **claims** | [references/derive-claims.md](references/derive-claims.md) |
 | Index / search / catalog the tree, file a delivery, scaffold a new experiment | [references/search-index.md](references/search-index.md) |
 | Review provenance, audit staleness, structural check, **trace** a result raw→claims, **enforce** prose↔claims | [references/review-audit.md](references/review-audit.md) |
+| Write a **report** — a grounded human narrative from claims (`sci report`: cite claims, embed sha-pinned exhibits, render PDF) | [references/report.md](references/report.md) |
 
 `data/` naming convention + assay vocabulary: [references/naming.md](references/naming.md).
 Private CRO vocabulary (your real vendor names): [references/vocab.example.yml](references/vocab.example.yml).
