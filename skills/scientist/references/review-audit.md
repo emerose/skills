@@ -46,30 +46,50 @@ backing it**. As part of the semantic pass, for each prose doc (the root `README
    knockdown", "comparable to vehicle", "dose-dependent"). Skip background / method / motivation prose
    ("6 animals per group", "incubated 30 min", "we designed ASOs targeting X").
 
-2. **Map each to a claim.** A result should carry an explicit citation **`[claim:<id>]`** in the prose
-   (the stable `claim_id` `<exp>::<test-file>::<node>`, or its trailing node name). Pull the claims with
-   `sci query "<topic>" --kind claim` or `sci list --kind claim --experiment <exp> --json` (live index),
-   or read `<exp>/analysis/grounding_report.json` directly (each claim: `{id, statement, outcome,
-   strength, kind}`). For an *un-cited* result, find the claim it ought to map to by reading the
-   statements — if none exists, that's the finding.
+2. **Pull the experiment's claims once, then map each result.** Don't query per sentence — read the whole
+   claim set for the experiment up front (`sci list --kind claim --experiment <exp> --json`, or
+   `<exp>/analysis/grounding_report.json` directly: each claim `{id, statement, outcome, strength, kind}`;
+   `sci query "<topic>" --kind claim` is for *finding* the right claim when a statement is hard to match),
+   then map each result against that in-context list. A result should carry an explicit citation
+   **`[claim:<id>]`** in the prose (the stable `claim_id` `<exp>::<test-file>::<node>`, or its trailing
+   node name). For an *un-cited* result, find the claim it ought to map to by reading the statements.
 
-3. **Apply the grounded rule.** A result is **backed** only if its claim is *grounded* — `outcome` is
-   `passed` or `xpass` **and** `strength` is `strong` or `moderate`. Otherwise flag it:
-   - **unbacked** — no claim asserts this result (or the result has no citation and no matching claim);
+3. **Apply the grounded rule — a `kind=claim` is the only accepted backing.** A result is **backed** only
+   if a *grounded* claim asserts it — `outcome` is `passed` or `xpass` **and** `strength` is `strong` or
+   `moderate`. A raw `analysis/` cell is *grounded provenance* but not *judged evidence* (no outcome, no
+   strength, nothing vouching it's the right/headline number), so it does **not** by itself back prose —
+   the claim is where that judgment, drift-tracking, and search-indexing live, and a claim is what cites
+   the artifact. When no grounded claim covers a result, use **artifact-tracing as triage** (not as an
+   alternative backing) to set severity: does the asserted number appear verbatim (within rounding) as a
+   cell in a *current, non-drifted* sha-pinned `analysis/` artifact whose edge is live in the ledger
+   (confirm with `sci read <path>`; check drift with `sci trace <exp>` / `sci audit`)? Classify:
+   - **backed** — a grounded claim asserts the result;
+   - **artifact-only** — *no* claim asserts it, but the number traces to a current analysis artifact. A
+     **finding to clear, not a pass** — but a cheap one: author the claim citing that cell (`[claim:<id>]`),
+     so the result becomes judged, drift-tracked, and searchable. Name the artifact path + cell.
+   - **unbacked** — *no* claim **and** *no* analysis artifact carries this result (a pure prose assertion —
+     invented or from an untracked source; find the source before anything else);
    - **weak-backing** — the only backing claim is contradicted (`xfail`), drifted (`failed`),
      unverifiable (`skipped`), or weak/unspecified strength → report it *with* the claim's
      `outcome`+`strength`, so prose leaning on a contradicted result is caught, not silently passed;
    - **off-topic** — the cited claim is grounded but isn't actually *about* this sentence (a tolerability
      claim cited next to an efficacy number).
 
-4. **Grade severity, then report.** An *unbacked qualitative* conclusion is **advisory** (note it; a
-   missing citation on soft prose isn't a failure). An unbacked numeric result, a `weak-backing`, an
-   `off-topic` citation, or any contradicted backing is **blocking** — fix the prose or the citation.
-   Don't rewrite silently; report each finding with its doc, line, the sentence, the claim it maps to
-   (or that it's missing), and the claim's outcome/strength.
+4. **Grade severity, then report.** Three tiers:
+   - **blocking** — an `unbacked` numeric result, a `weak-backing`, an `off-topic` citation, or any
+     contradicted backing. Fix the prose or the citation.
+   - **finding (clear it)** — an `artifact-only` result: the number is real but uncovered by a claim →
+     author the claim citing the cell. Not blocking (the evidence exists), but not a pass either — it
+     stays on the worklist until a claim covers it.
+   - **advisory** — an *unbacked qualitative* conclusion (soft prose with no number; note it, not a failure).
 
-The grounded rule and `claim_id` format match `index-claims` / `sci query --kind claim` / `sci trace`.
-The planned report phase (`sci report`) runs the identical procedure over generated report Markdown.
+   Don't rewrite silently; report each finding with its doc, line, the sentence, the claim it maps to (or
+   that it's missing, plus the artifact cell when `artifact-only`), and the claim's outcome/strength.
+
+The grounded rule and `claim_id` format match `index-claims` / `sci query --kind claim` / `sci trace`. The
+claim is the sole backing unit; it cites the sha-pinned artifact, and `sci trace` walks the full chain
+(claim → artifact → data → raw). The report phase (`sci report`, §5) runs the identical procedure over
+generated report Markdown — reports cite claims the same way, never a bare artifact.
 
 ## Structural check
 

@@ -42,12 +42,16 @@ slides under `Shared/`). `sci audit` re-hashes them and compares:
 
 ## 2b. Prose ↔ claims (part of the semantic pass)
 
-A result asserted in prose must map to a grounded `kind=claim`. While reading each prose
-doc, run the **prose ↔ claims check** — find every asserted result (quantitative or
-qualitative), map it to its claim (`sci query --kind claim` / the `grounding_report.json`),
-confirm the claim is grounded (`passed`/`xpass` **and** strong/moderate), else flag it
-(`unbacked` / `weak-backing` / `off-topic`; unbacked qualitative is advisory, the rest
-blocking). Full procedure: [review-audit.md](review-audit.md) §"Prose ↔ claims check".
+A result asserted in prose must map to a grounded `kind=claim` — the sole accepted backing (a raw
+`analysis/` cell is grounded provenance but not *judged* evidence; the claim is what cites the
+artifact). While reading each prose doc, run the **prose ↔ claims check** — find every asserted
+result (quantitative or qualitative), map it to its claim (`sci query --kind claim` / the
+`grounding_report.json`), confirm the claim is grounded (`passed`/`xpass` **and** strong/moderate).
+When no claim covers a number, artifact-tracing is *triage*: if it traces to a current sha-pinned
+artifact it's `artifact-only` (a cheap-to-clear **finding** — author the claim citing the cell),
+else `unbacked`. Severity: blocking (`unbacked` numeric / `weak-backing` / `off-topic`), finding
+(`artifact-only`), advisory (unbacked *qualitative*). Full procedure:
+[review-audit.md](review-audit.md) §"Prose ↔ claims check".
 
 ## 3. Semantic — the parallel-agent pass (authoritative for content)
 
@@ -63,8 +67,10 @@ Fan out one agent per experiment:
 > exact list of files you actually relied on. Don't rewrite; report.
 >
 > Then run the prose↔claims check (procedure in `references/review-audit.md`
-> §"Prose ↔ claims check") over `README.md` and `reports/*.md`, reporting each unbacked
-> result, weak/contradicted backing (with its outcome+strength), or off-topic citation.
+> §"Prose ↔ claims check") over `README.md` and `reports/*.md` — pull the experiment's claim set
+> once up front — reporting each unbacked result, artifact-only result (traces to a sha-pinned
+> analysis artifact but no claim asserts it — a finding to clear by authoring the claim),
+> weak/contradicted backing (with its outcome+strength), or off-topic citation.
 
 The verdict is a **pointer to where to look**, not the truth — always re-verify against
 the primary data before changing prose (the agent can over-read; see the discipline
