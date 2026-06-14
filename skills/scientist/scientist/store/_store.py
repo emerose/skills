@@ -138,6 +138,16 @@ class Store:
             filters["exp_id"] = exp_id
         return await self.all_records(filters)
 
+    async def get_report(self, report_id: str) -> dict[str, Any] | None:
+        docs = await self.lib.list_documents(filters={"kind": "report", "report_id": report_id})
+        return _meta.document_to_record(docs[0]) if docs else None
+
+    async def reports(self, exp_id: str | None = None) -> list[dict[str, Any]]:
+        filters: dict[str, Any] = {"kind": "report"}
+        if exp_id:
+            filters["exp_id"] = exp_id
+        return await self.all_records(filters)
+
     async def query(self, text: str, *, limit: int = 8,
                     filters: dict[str, Any] | None = None) -> list[Any]:
         """Semantic + full-text search inside the indexed content (libkit hybrid)."""
@@ -297,6 +307,28 @@ class Store:
         elif result.already_existed:
             # Byte-identical card already stored (same statement/outcome/…). Refresh
             # the logical metadata (outcome/strength/inputs may carry fresh shas).
+            await self._merge_metadata(result.document_id, _meta.record_to_metadata(rec))
+        return await self._record_for_id(result.document_id)
+
+    async def upsert_report(self, rec: dict[str, Any]) -> dict[str, Any]:
+        """Create or update a report card (``kind=report``), keyed by a stable
+        ``report_id``. Mirrors :meth:`upsert_claim`: the card's bytes derive from the
+        report's content (title/abstract/sections/cited claims), so any change yields a new
+        ``document_id``; we ingest the new card and delete the prior one (if its id
+        differs), preserving the logical ``report_id`` identity and ``added_at``."""
+        report_id = rec.get("report_id")
+        if not report_id:
+            raise ValueError("report record needs a report_id")
+        rec = dict(rec)
+        rec["kind"] = "report"
+        existing = await self.get_report(report_id)
+        rec["added_at"] = (existing or {}).get("added_at") or rec.get("added_at") or _now_iso()
+        rec["updated_at"] = _now_iso()
+
+        result = await self._ingest_card(_meta.report_card_markdown(rec), rec)
+        if existing and existing.get("document_id") and existing["document_id"] != result.document_id:
+            await self.lib.delete(existing["document_id"])
+        elif result.already_existed:
             await self._merge_metadata(result.document_id, _meta.record_to_metadata(rec))
         return await self._record_for_id(result.document_id)
 

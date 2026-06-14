@@ -46,6 +46,15 @@ install (which carries pandas/scipy/matplotlib), not the bare PEP723 env:
     SCIENTIST_HOME=… uv run --with-editable skills/scientist \
         skills/scientist/scripts/sci.py reproduce "<exp dir>"
 
+`report` is the terminal claims->report phase: it audits a human-facing report
+Markdown's [claim:<id>] citations and figure/table embeds (each citation must resolve
+to a live, grounded claim; each embed to a current sha-pinned analysis artifact),
+renders it to PDF/HTML/docx via pandoc, traces it (report -> claims -> raw), and
+indexes it as kind=report. The *semantic* "is every result cited / on-topic" check
+stays the audit semantic pass (references/review-audit.md); `sci report` mechanizes
+citation + artifact resolution and render. `sci trace <report.md>` is the same
+report-rooted walk.
+
 `extract`'s recipe lives at <exp>/data/extract.py and defines build(x); see the
 extraction package and references/extract.md. The data-tree root is $SCIENTIST_HOME,
 the private vocab is $SCIENTIST_VOCAB, and the store lives at
@@ -64,7 +73,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scientist import extraction as EXT  # noqa: E402
 from scientist.provenance import trace as TRACE  # noqa: E402
 from scientist.provenance import reproduce as REPRODUCE  # noqa: E402
+from scientist.provenance import report as REPORT  # noqa: E402
 from scientist.store import cli as STORE_CLI  # noqa: E402
+from scientist.store import _meta as STORE_META  # noqa: E402
 
 
 def main() -> int:
@@ -89,11 +100,13 @@ def main() -> int:
     # ---- trace: end-to-end provenance walk (claim -> analysis -> data -> raw) ----
     p_tr = sub.add_parser("trace",
                           help="walk the provenance DAG: claim/artifact -> data -> raw, flagging breaks")
-    p_tr.add_argument("exp", help="experiment folder (path)")
+    p_tr.add_argument("exp", help="experiment folder, OR a report .md (report-rooted trace)")
     p_tr.add_argument("--json", action="store_true", help="machine-readable output")
     p_tr.add_argument("--claim", help="trace just this claim id (full nodeid or its trailing name)")
     p_tr.add_argument("--report", help="grounding_report.json to use "
                       "(default <exp>/analysis/grounding_report.json then <exp>/grounding_report.json)")
+    p_tr.add_argument("--home", help="data-tree root for a report-rooted trace "
+                      "(default: $SCIENTIST_HOME or inferred)")
 
     # ---- reproduce: re-run analysis/derive.py and check it reproduces the recorded artifacts ----
     p_rp = sub.add_parser("reproduce",
@@ -105,6 +118,23 @@ def main() -> int:
                       help=f"relative tolerance for derived floats (default {REPRODUCE.DEFAULT_RTOL})")
     p_rp.add_argument("--atol", type=float, default=REPRODUCE.DEFAULT_ATOL,
                       help=f"absolute tolerance for derived floats (default {REPRODUCE.DEFAULT_ATOL})")
+
+    # ---- report: build / audit / render the terminal claims -> report phase ----
+    p_rep = sub.add_parser("report",
+                           help="audit a report's [claim:<id>] citations + figure/table embeds "
+                                "(grounded rule), render it to PDF/HTML/docx, trace it, or index it")
+    p_rep.add_argument("path", help="report Markdown file (program/reports/<slug>/… or <exp>/reports/<slug>/…)")
+    p_rep.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
+    p_rep.add_argument("--json", action="store_true", help="machine-readable output")
+    p_rep.add_argument("--render", metavar="OUT", help="render the validated report to OUT")
+    p_rep.add_argument("--to", choices=["pdf", "html", "docx"], default="pdf",
+                       help="render format (default pdf; via pandoc)")
+    p_rep.add_argument("--force", action="store_true",
+                       help="render even if the audit is BROKEN (default: refuse)")
+    p_rep.add_argument("--trace", action="store_true",
+                       help="also print the report-rooted provenance trace (report -> claims -> raw)")
+    p_rep.add_argument("--index", action="store_true",
+                       help="index the report into the store as kind=report (needs the store)")
 
     # ---- store subcommands (init/index/reindex/list/show/search/query/file/read/
     #      entity/new/intake/meta/review/fingerprint/catalog/check/audit/pr) ----
@@ -127,6 +157,8 @@ def main() -> int:
         return _trace(args)
     if args.cmd == "reproduce":
         return _reproduce(args)
+    if args.cmd == "report":
+        return _report(args)
     if args.cmd == "audit":
         return _audit_both(args)
     return STORE_CLI.dispatch(args)
@@ -134,15 +166,86 @@ def main() -> int:
 
 def _trace(args: argparse.Namespace) -> int:
     """`sci trace <exp>`: pure provenance walk — no libkit store. Exit 0 if fully
-    grounded, 1 if any break."""
+    grounded, 1 if any break.
+
+    If the target is a report Markdown file (``<…>/reports/…/*.md``), trace it
+    report-rooted instead: a report node atop the DAG, walked down through each cited
+    claim to raw."""
     import json
 
-    result = TRACE.trace(Path(args.exp), report_path=args.report, claim_id=args.claim)
+    target = Path(args.exp)
+    if target.is_file() and target.suffix.lower() == ".md":
+        home = Path(args.home).resolve() if getattr(args, "home", None) else None
+        result = TRACE.trace_report(target, repo_root=home)
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+        else:
+            print(TRACE.render_report_trace(result))
+        return 0 if result["status"] == "GROUNDED" else 1
+
+    result = TRACE.trace(target, report_path=args.report, claim_id=args.claim)
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
     else:
         print(TRACE.render(result))
     return 0 if result["status"] == "GROUNDED" else 1
+
+
+def _report(args: argparse.Namespace) -> int:
+    """`sci report <path>`: audit a report's citations + embeds (the mechanical half of
+    the report phase), and optionally render / trace / index it. Exit 0 if the audit is
+    GROUNDED (and any requested render succeeded), 1 otherwise."""
+    import json
+    import os
+
+    path = Path(args.path)
+    home = Path(args.home).resolve() if getattr(args, "home", None) else (
+        Path(os.environ["SCIENTIST_HOME"]).resolve() if os.environ.get("SCIENTIST_HOME") else None)
+
+    result = REPORT.audit(path, home=home)
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    else:
+        print(REPORT.render_audit(result))
+
+    rc = 0 if result["status"] == "GROUNDED" else 1
+
+    if args.trace:
+        tr = TRACE.trace_report(path, repo_root=home)
+        if args.json:
+            print(json.dumps(tr, indent=2, ensure_ascii=False, default=str))
+        else:
+            print("\n" + TRACE.render_report_trace(tr))
+        if tr["status"] != "GROUNDED":
+            rc = 1
+
+    if args.render:
+        if result["status"] != "GROUNDED" and not args.force:
+            print(f"refusing to render a BROKEN report (fix the findings, or --force): {args.render}",
+                  file=sys.stderr)
+            rc = 1
+        else:
+            try:
+                out = REPORT.render(path, Path(args.render), home=home, to=args.to)
+                print(f"rendered {out['format'].upper()} → {out['output']}")
+            except REPORT.RenderError as e:
+                print(f"render failed: {e}", file=sys.stderr)
+                rc = 1
+
+    if args.index:
+        sc = REPORT.report_scope(path, home or REPORT._infer_home(path.resolve()))
+        sec = REPORT.parse_sections(path.read_text(encoding="utf-8"))
+        cited = sorted({c.get("claim_id") or c["id"] for c in result["citations"]})
+        card = {
+            "report_id": STORE_META.report_id_for(sc["scope"], sc["exp_id"], sc["slug"]),
+            "scope": sc["scope"], "exp_id": sc["exp_id"], "slug": sc["slug"],
+            "title": sec["title"], "abstract": sec["abstract"], "sections": sec["sections"],
+            "cited_claims": cited, "audit_status": result["status"],
+            "path": result["report"],
+        }
+        STORE_CLI.index_report(args, card)
+
+    return rc
 
 
 def _reproduce(args: argparse.Namespace) -> int:

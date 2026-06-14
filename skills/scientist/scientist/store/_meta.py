@@ -32,6 +32,12 @@ of three *kinds*, distinguished by the ``kind`` metadata key:
   the test-file basename + the node name (the raw pytest nodeid embeds an absolute
   path, so it's normalized to be reproducible across runs/machines).
 
+* ``kind="report"`` — one per finished human-facing **report** (the terminal phase
+  ``claims → report``). The card leads with the report's **title + abstract** and lists
+  its **section summaries** + the **claim ids it cites**, so "which report makes the case
+  for X" is answerable via ``sci query``. Keyed by a stable ``report_id`` derived from its
+  scope (``program`` or the ``exp_id``) + the report slug.
+
 libkit owns byte-level identity (``document_id`` = SHA-256 of the ingested bytes).
 scientist layers logical identity on top: an experiment is keyed by ``exp_id``, a
 file by its ``path``.
@@ -47,7 +53,7 @@ from typing import Any
 # ``ingest(metadata=...)`` is free-form JSON. Never reuse these names for our data.
 LIBKIT_TOP_LEVEL = frozenset({"title", "date", "source_url", "content_type"})
 
-KINDS = ("experiment", "file", "entity", "claim")
+KINDS = ("experiment", "file", "entity", "claim", "report")
 
 # How a file is represented in libkit's index.
 INDEXED_CONTENT = "content"      # the real file was ingested + embedded
@@ -141,6 +147,50 @@ def claim_id_for(exp_id: str, nodeid: str) -> str:
     node = rest if sep else ""
     parts = [p for p in (exp_id, basename, node) if p]
     return "::".join(parts)
+
+
+def report_id_for(scope: str, exp_id: str | None, slug: str) -> str:
+    """A STABLE logical key for a report: ``<exp_id-or-scope>::<slug>`` — e.g.
+    ``program::tox-overview`` (cross-experiment) or ``K1-230101::summary``
+    (per-experiment). Reproducible so re-indexing the same report upserts in place."""
+    head = exp_id or scope or "report"
+    return f"{head}::{slug}"
+
+
+def report_card_markdown(rec: dict[str, Any]) -> str:
+    """Deterministic Markdown for a report card (``kind=report``).
+
+    Leads with the report **title** and **abstract** (the primary searchable text), then
+    its **section summaries** and the **claims it cites** (by id). Determinism (sorted
+    cited ids, no timestamps in the body) keeps re-ingest stable: the same report content
+    yields the same bytes, hence the same ``document_id``."""
+    title = (rec.get("title") or rec.get("slug") or rec.get("report_id") or "(report)").strip()
+    lines = [f"# Report: {title}", ""]
+    facts = _facts_block([
+        ("Scope", rec.get("scope")),
+        ("Experiment", rec.get("exp_id")),
+        ("Path", rec.get("path")),
+        ("Status", rec.get("audit_status")),
+    ])
+    if facts:
+        lines += facts + [""]
+    if rec.get("abstract"):
+        lines += ["## Abstract", "", str(rec["abstract"]).strip(), ""]
+    sections = rec.get("sections") or []
+    if sections:
+        lines += ["## Sections", ""]
+        for s in sections:
+            if isinstance(s, dict):
+                head = str(s.get("heading", "")).strip()
+                summ = str(s.get("summary", "")).strip()
+                lines.append(f"- **{head}** — {summ}" if summ else f"- **{head}**")
+            else:
+                lines.append(f"- {s}")
+        lines.append("")
+    cited = sorted({str(c) for c in (rec.get("cited_claims") or []) if c})
+    if cited:
+        lines += ["## Cites", ""] + [f"- `{c}`" for c in cited] + [""]
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def classify_ext(suffix: str) -> str:

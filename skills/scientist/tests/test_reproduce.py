@@ -256,6 +256,51 @@ def test_png_dims_helper():
     assert R._png_dims(b"not a png") is None
 
 
+# A PROGRAM-level derivation (program/analysis/derive.py): the home for cross-experiment
+# *report* comparison artifacts. It legitimately fans in another experiment's tracked
+# data — which would be an off-data read for a per-experiment derivation, but is allowed
+# at program scope.
+PROGRAM_DERIVE = '''\
+from scientist import grounding
+from scientist.experiments import program
+from scientist.experiments import {code} as k
+
+def main():
+    with grounding.derivation(program, __file__) as d:
+        df = k.assay                       # cross-experiment tracked read (allowed at program scope)
+        d.write_table("compare.csv", df.assign(value2=df["value"] * 2))
+'''
+
+
+def test_program_derivation_reproduces(tmp_path, monkeypatch):
+    pytest.importorskip("pandas")
+    from scientist import experiments as E
+
+    exp_id = "K1-000020"
+    _build_exp(tmp_path, exp_id, FAITHFUL_DERIVE)        # supplies k.assay (data/01_assay.csv)
+    prog = tmp_path / "program"
+    (prog / "analysis").mkdir(parents=True)
+    code = exp_id.lower().replace("-", "_")
+    (prog / "analysis" / "derive.py").write_text(PROGRAM_DERIVE.format(code=code), encoding="utf-8")
+    monkeypatch.setenv("SCIENTIST_HOME", str(tmp_path))
+
+    # fresh caches so program + study resolve against this tmp root
+    E._program = None
+    sys.modules.pop("experiments_derive_program", None)
+    E.program.derive.main()                              # record baseline normally
+
+    result = R.reproduce(prog)
+
+    assert result["status"] == "REPRODUCES", result
+    assert result["runs"] and result["reproduces"]
+    # the cross-experiment data read is NOT flagged at program scope
+    assert result["reads_only_data"] is True
+    assert result["off_data_reads"] == []
+    arts = {a["artifact"]: a for a in result["artifacts"]}
+    assert "analysis/tables/compare.csv" in arts
+    assert arts["analysis/tables/compare.csv"]["verdict"] == "exact"
+
+
 def test_render_smoke(tmp_path, monkeypatch):
     pytest.importorskip("pandas")
     exp_id = "K1-000016"
