@@ -7,9 +7,12 @@ them into a coherent argument, and embeds figures/tables to make a point. It is 
 — readable, concise, compelling — but holds the same grounding discipline as the rest of
 the pipeline:
 
-> **No quantitative prose without a backing**, where the backing is an *existing* grounded
-> `kind=claim` (or a sha-pinned analysis artifact). To assert something new, write the
-> claim first — reports never re-litigate grounding.
+> **No quantitative prose without a backing**, and — as in §3 — the **sole accepted backing
+> is an *existing* grounded `kind=claim`** (cited `[claim:<id>]`). A sha-pinned `analysis/`
+> artifact is grounded *provenance* but not *judged* evidence (no outcome/strength), so it
+> never backs a prose result on its own; it is what an embedded *figure/table* points at,
+> and what the claim itself cites. To assert something new, write the claim first — reports
+> never re-litigate grounding.
 
 `sci report` mechanizes the parts that are genuinely mechanical (citation + artifact
 resolution, render). The *semantic* judgment — "is every quantitative sentence actually
