@@ -188,13 +188,18 @@ them; true bottom-of-page footnotes could not — that needs the typesetter's pa
 Mono, Source Code Pro, …; probed via `fc-list`), deliberately **not** a LaTeX-world face
 (no Computer Modern Typewriter), scaled to fit a long id on the measure.
 
+**Full-width exhibits.** `layout.lua` gives figures and tables the page's horizontal room:
+tables fill the full text measure (equal `p{}` columns), and a figure bleeds slightly into
+the margins (a centred image at 115%) so the hero comparison plot uses the space. Both are
+AST tweaks — no LaTeX package. (An author-set image width is respected.)
+
 **Classification + revision stamps.** A front-matter `classification:` field (e.g.
 `CONFIDENTIAL`, `INTERNAL`, `DRAFT`) is stamped in the page header (muted red) of the PDF;
 omit it for an unmarked document. The footer carries the **source revision** — the data
-repo's short git sha, suffixed `-dirty` when the tree has uncommitted changes — so a
-circulated PDF is traceable to a commit. (Rendering necessarily makes the tree dirty by
-writing the PDF, so the stamp reflects HEAD at render time; render on a clean checkout, or
-in CI, for a clean sha.)
+repo's short git sha, with a trailing **`*`** when the tree has uncommitted changes (an
+unobtrusive "provisional" marker, legible to a non-technical reader) — so a circulated PDF
+is traceable to a commit. (Rendering writes the PDF and thus dirties the tree, so the stamp
+reflects HEAD at render time; render on a clean checkout, or in CI, for an unmarked sha.)
 
 **PDF house style.** The PDF target applies a restrained, modern style: the KOMA
 `scrartcl` class (so headings and the title come out **sans-serif** for free), a **serif

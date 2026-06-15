@@ -555,28 +555,26 @@ def _report_title(text: str) -> str:
     return _front_field(text, "title")
 
 
-def _git_revision(folder: Path) -> str:
-    """``<short-sha>`` (``-dirty`` if the tree has uncommitted changes) for the repo that
-    contains ``folder`` — stamps the rendered PDF with the source revision. Empty when not
-    a git repo / git is unavailable."""
+def _git_revision(folder: Path) -> tuple[str, bool]:
+    """``(<short-sha>, dirty)`` for the repo containing ``folder`` — stamps the rendered PDF
+    with the source revision. ``dirty`` is True when the tree has uncommitted changes.
+    ``("", False)`` when not a git repo / git is unavailable."""
     import shutil
     import subprocess
     git = shutil.which("git")
     if not git:
-        return ""
+        return "", False
     try:
         sha = subprocess.run([git, "-C", str(folder), "rev-parse", "--short", "HEAD"],
                              capture_output=True, text=True, timeout=10)
         if sha.returncode != 0 or not sha.stdout.strip():
-            return ""
-        rev = sha.stdout.strip()
+            return "", False
         dirty = subprocess.run([git, "-C", str(folder), "status", "--porcelain"],
                                capture_output=True, text=True, timeout=10)
-        if dirty.returncode == 0 and dirty.stdout.strip():
-            rev += "-dirty"
-        return rev
+        is_dirty = dirty.returncode == 0 and bool(dirty.stdout.strip())
+        return sha.stdout.strip(), is_dirty
     except (OSError, subprocess.SubprocessError):
-        return ""
+        return "", False
 
 
 def _short_running_title(title: str, limit: int = 60) -> str:
@@ -633,8 +631,9 @@ def _pick_font(candidates: list[str], available: set[str]) -> str | None:
     return next((c for c in candidates if c in available), None)
 
 
-# The bundled pandoc filter that relocates footnotes → an endnotes section (all formats).
+# Bundled pandoc filters: relocate footnotes → endnotes, and widen exhibits (all formats).
 _ENDNOTES_LUA = Path(__file__).with_name("endnotes.lua")
+_LAYOUT_LUA = Path(__file__).with_name("layout.lua")
 
 
 class RenderError(RuntimeError):
@@ -673,10 +672,11 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
         tf.write(md)
         tmp_md = Path(tf.name)
     try:
-        # endnotes.lua relocates footnotes → a "Grounding notes" endnotes section, for
-        # every target (PDF/HTML/docx) — a structural AST transform, no LaTeX package.
+        # endnotes.lua relocates footnotes → a "Grounding notes" endnotes section;
+        # layout.lua widens tables/figures. Both are structural AST transforms (every
+        # target, no LaTeX package).
         cmd = [pandoc, str(tmp_md), "-o", str(out), "--standalone",
-               f"--lua-filter={_ENDNOTES_LUA}",
+               f"--lua-filter={_ENDNOTES_LUA}", f"--lua-filter={_LAYOUT_LUA}",
                f"--resource-path={rp.parent}", f"--resource-path={home}"]
         if to == "pdf":
             # modern house style: KOMA `scrartcl` (sans headings), serif body + modern
@@ -688,9 +688,12 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             classification = _front_field(src, "classification")
             head_right = (rf"\textcolor{{red!60!black}}{{\textbf{{{_latex_escape(classification)}}}}}"
                           if classification else "")
-            # footer-left: the source revision, so the rendered PDF is traceable to a commit
-            rev = _git_revision(rp.parent)
-            foot_left = rf"rev~\texttt{{{_latex_escape(rev)}}}" if rev else ""
+            # footer-left: the source revision, so the rendered PDF is traceable to a
+            # commit. A trailing asterisk (rather than "-dirty") marks an uncommitted tree
+            # — unobtrusive and legible to a non-technical reader.
+            sha, dirty = _git_revision(rp.parent)
+            foot_left = (rf"rev~\texttt{{{_latex_escape(sha)}}}{'*' if dirty else ''}"
+                         if sha else "")
             header_tex = (_PDF_HEADER_TEX
                           .replace("@@RUNNING_TITLE@@", running)
                           .replace("@@HEAD_RIGHT@@", head_right)
