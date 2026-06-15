@@ -555,10 +555,11 @@ def _report_title(text: str) -> str:
     return _front_field(text, "title")
 
 
-def _git_revision(folder: Path) -> tuple[str, bool]:
+def _git_revision(folder: Path, ignore: Path | None = None) -> tuple[str, bool]:
     """``(<short-sha>, dirty)`` for the repo containing ``folder`` — stamps the rendered PDF
-    with the source revision. ``dirty`` is True when the tree has uncommitted changes.
-    ``("", False)`` when not a git repo / git is unavailable."""
+    with the source revision. ``dirty`` reflects uncommitted changes to *source*, excluding
+    ``ignore`` (the output file we are about to write — otherwise rendering would always mark
+    its own PDF dirty). ``("", False)`` when not a git repo / git is unavailable."""
     import shutil
     import subprocess
     git = shutil.which("git")
@@ -569,10 +570,27 @@ def _git_revision(folder: Path) -> tuple[str, bool]:
                              capture_output=True, text=True, timeout=10)
         if sha.returncode != 0 or not sha.stdout.strip():
             return "", False
-        dirty = subprocess.run([git, "-C", str(folder), "status", "--porcelain"],
-                               capture_output=True, text=True, timeout=10)
-        is_dirty = dirty.returncode == 0 and bool(dirty.stdout.strip())
-        return sha.stdout.strip(), is_dirty
+        top = subprocess.run([git, "-C", str(folder), "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, timeout=10)
+        root = Path(top.stdout.strip()) if top.returncode == 0 else None
+        ignore_rel = None
+        if ignore is not None and root is not None:
+            try:
+                ignore_rel = ignore.resolve().relative_to(root.resolve()).as_posix()
+            except ValueError:
+                ignore_rel = None
+        st = subprocess.run([git, "-C", str(folder), "status", "--porcelain"],
+                            capture_output=True, text=True, timeout=10)
+        dirty = False
+        if st.returncode == 0:
+            for line in st.stdout.splitlines():
+                path = line[3:].strip().strip('"')        # "XY <path>"; rename keeps new name after "->"
+                if "->" in path:
+                    path = path.split("->")[-1].strip()
+                if path and path != ignore_rel:
+                    dirty = True
+                    break
+        return sha.stdout.strip(), dirty
     except (OSError, subprocess.SubprocessError):
         return "", False
 
@@ -691,7 +709,7 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             # footer-left: the source revision, so the rendered PDF is traceable to a
             # commit. A trailing asterisk (rather than "-dirty") marks an uncommitted tree
             # — unobtrusive and legible to a non-technical reader.
-            sha, dirty = _git_revision(rp.parent)
+            sha, dirty = _git_revision(rp.parent, ignore=out)
             foot_left = (rf"rev~\texttt{{{_latex_escape(sha)}}}{'*' if dirty else ''}"
                          if sha else "")
             header_tex = (_PDF_HEADER_TEX
