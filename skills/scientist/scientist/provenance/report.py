@@ -522,17 +522,30 @@ def _csv_to_md_table(path: Path) -> str:
 # sans-serif for free from the KOMA `scrartcl` class; the body is a serif via fontspec
 # `mainfont`. This header only adds a thin running header (section · page) + tightened
 # rules — it touches no colors, so it is order-independent w.r.t. pandoc's hyperref setup.
+# Tufte-style asymmetric page: a narrow, readable body column with a wide right margin;
+# headings sit at body width, while full-width figures (see layout.lua) extend into that
+# margin. `\fullwidth` = the body + the usable part of the right margin. The header/footer
+# are offset right so the running title / classification / page number / revision sit at
+# the page's edges, not the body's. Margins set via -V geometry in render().
+_PDF_RIGHT_EXTEND = "1.45in"      # how far figures + header/footer reach into the right margin
 _PDF_HEADER_TEX = r"""
 % --- modern report style (injected by `sci report`) ---
+\usepackage{graphicx}   % layout.lua emits raw \includegraphics, so load it unconditionally
+                        % (pandoc only auto-loads graphicx when it still sees an Image)
 \usepackage{fancyhdr}
+\usepackage{caption}
+\newlength{\scifullwidth}
+\setlength{\scifullwidth}{\dimexpr\textwidth+@@RIGHT_EXTEND@@\relax}
+\captionsetup{font=small,labelfont=bf,justification=raggedright,singlelinecheck=false}
 \pagestyle{fancy}
 \fancyhf{}
+\fancyhfoffset[R]{@@RIGHT_EXTEND@@}
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\footrulewidth}{0pt}
 \fancyhead[L]{\footnotesize\sffamily @@RUNNING_TITLE@@}
 \fancyhead[R]{\footnotesize\sffamily @@HEAD_RIGHT@@}
 \fancyfoot[L]{\scriptsize\sffamily @@FOOT_LEFT@@}
-\fancyfoot[C]{\footnotesize\sffamily \thepage}
+\fancyfoot[R]{\footnotesize\sffamily \thepage}
 \setlength{\headheight}{14pt}
 """
 
@@ -713,6 +726,7 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             foot_left = (rf"rev~\texttt{{{_latex_escape(sha)}}}{'*' if dirty else ''}"
                          if sha else "")
             header_tex = (_PDF_HEADER_TEX
+                          .replace("@@RIGHT_EXTEND@@", _PDF_RIGHT_EXTEND)
                           .replace("@@RUNNING_TITLE@@", running)
                           .replace("@@HEAD_RIGHT@@", head_right)
                           .replace("@@FOOT_LEFT@@", foot_left))
@@ -728,7 +742,10 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
                 "--pdf-engine=xelatex",
                 "-V", "documentclass=scrartcl",
                 "-V", "classoption=parskip=half",
-                "-V", "geometry:margin=1in",
+                # Tufte asymmetric page: narrow readable body, wide right margin (figures
+                # extend into it via layout.lua + \fullwidth).
+                "-V", "geometry:left=1.1in", "-V", "geometry:right=2.2in",
+                "-V", "geometry:top=1in", "-V", "geometry:bottom=1in",
                 "-V", "fontsize=11pt",
                 "-V", "linestretch=1.12",
                 "-V", "colorlinks=true", "-V", "linkcolor=teal",

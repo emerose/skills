@@ -188,10 +188,12 @@ them; true bottom-of-page footnotes could not — that needs the typesetter's pa
 Mono, Source Code Pro, …; probed via `fc-list`), deliberately **not** a LaTeX-world face
 (no Computer Modern Typewriter), scaled to fit a long id on the measure.
 
-**Full-width exhibits.** `layout.lua` gives figures and tables the page's horizontal room:
-tables fill the full text measure (equal `p{}` columns), and a figure bleeds slightly into
-the margins (a centred image at 115%) so the hero comparison plot uses the space. Both are
-AST tweaks — no LaTeX package. (An author-set image width is respected.)
+**Full-width exhibits.** `layout.lua` gives the exhibits room: tables fill the full body
+measure (equal `p{}` columns), and — for the PDF target — each figure is replaced by an
+**in-place, `\fullwidth` block** (left-anchored, `\captionof{figure}` keeping the
+numbering) so it extends into the Tufte right margin exactly where written, rather than
+floating to its own page or sitting cramped in the narrow body. Both are AST tweaks — no
+LaTeX package (graphicx/caption are stock). HTML/docx figures are left untouched.
 
 **Classification + revision stamps.** A front-matter `classification:` field (e.g.
 `CONFIDENTIAL`, `INTERNAL`, `DRAFT`) is stamped in the page header (muted red) of the PDF;
@@ -205,9 +207,12 @@ reflects HEAD at render time; render on a clean checkout, or in CI, for an unmar
 `scrartcl` class (so headings and the title come out **sans-serif** for free), a **serif
 body** + sans headings via fontspec (it probes `fc-list` and prefers Times / Helvetica,
 then portable equivalents — TeX Gyre Termes/Heros, Liberation, etc. — skipping any that
-aren't installed), 1-inch margins, half-line block paragraphs, a thin running header (short
-title · page in the footer), and subtle link colours. It's deliberately plain — no styling
-knobs in the report Markdown; the content carries the report, not the chrome.
+aren't installed), and half-line block paragraphs. The page is a **Tufte-style asymmetric**
+layout: a narrow, readable body column (~5.25") with a wide right margin that full-width
+figures extend into (see *Full-width exhibits*). A thin running header (short title · page
+edge) carries the classification stamp at the right; the footer carries the revision (left)
+and page number (right) — offset to the page edges, not the body's. Subtle link colours. No
+styling knobs in the report Markdown; the content carries the report, not the chrome.
 
 ### Indexing + traceability
 
