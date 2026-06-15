@@ -93,18 +93,29 @@ supposed to be reaching.
 Reports are how the program's understanding grows, so a report should *leave the system
 smarter*, not just answer one question:
 
-- **Do the literature search in subagents.** A literature-heavy report needs real depth.
-  Fan out parallel research subagents — one per sub-question (e.g. "what UBE3A restoration
-  level rescues which phenotype," "the IT ASO CNS biodistribution gradient") — each tasked to
-  search (PubMed / Consensus / web), read, and return a structured digest: ranked papers with
-  **DOI + PMID**, the quantitative findings attributed to each, and an explicit evidence-
-  strength/gaps assessment. Synthesize their digests; don't do a thin single-pass search.
+- **Do the literature search in subagents, and make it broad.** A literature-heavy report
+  needs real depth. Fan out parallel research subagents — one per sub-topic spanning the
+  report's whole subject area, not just its headline question (for a per-tissue knockdown
+  target, that means *separate* sweeps for the dosage/overexpression biology, the Angelman
+  restoration dose-response, the ASO CNS biodistribution gradient, the delivery routes, the
+  clinical ASO programs, the BBB-crossing delivery methods, the target's molecular biology…).
+  Each subagent searches (PubMed / Consensus / bioRxiv / web), reads, and returns a structured
+  digest: papers with **DOI + PMID**, the quantitative findings attributed to each, and an
+  evidence-strength/gaps assessment. Eight focused sub-topic agents will surface ~100+ relevant
+  papers; a thin single-pass search surfaces a dozen. If your sweep returns only the handful you
+  end up citing, it was too shallow — go wider.
+- **Bank every relevant paper, not just the ones you cite.** The point of the research phase is
+  to grow the program's durable knowledge: the bibliographer library is the asset that outlives
+  any single report. Add **everything on-topic** the sweep surfaces (`bib add <DOI|PMID>`), even
+  papers this report won't cite — the next report reuses them and can search inside their full
+  text. Citations are a small subset of what you bank. A library that only contains this
+  report's footnotes is a symptom of citation-driven research, not a literature review.
 - **Put third-party papers in the bibliographer library, not in the data repo.** A paper
-  belongs in the shared bibliographer library (`bib add <DOI|PMID>`), where every future
-  report can reuse it and search inside it — *not* copied into `program/refs/`. Cite it in the
-  report's References by DOI as a **clickable link** (`[10.x/y](https://doi.org/10.x/y)`).
-  (Vendoring a PDF into the repo to `doc()`-ground a literature claim is a last resort and
-  usually the wrong tool — see below.)
+  belongs in the shared bibliographer library, where every future report can reuse it and
+  search inside it — *not* copied into `program/refs/`. Cite it in the report's References by
+  DOI as a **clickable link** (`[10.x/y](https://doi.org/10.x/y)`). (Vendoring a PDF into the
+  repo to `doc()`-ground a literature claim is a last resort and usually the wrong tool — see
+  below.)
 - **Decompose a big sub-question into its own "lemma" report.** When a report rests on a
   substantial question of its own — a piece of biology that deserves its own evidence review
   (a "lemma") — write *that* as a separate grounded report and have the main report build on
