@@ -55,7 +55,8 @@ report needs:
 or a summary table usually argues better than a paragraph. Produce them through a grounded
 derivation (above) and embed them; refer to each in the text and draw the conclusion (with
 its citation) rather than leaving the reader to infer it. Caveats belong in the prose or the
-cited claim's caveats, not buried.
+cited claim's caveats, not buried. (In status tables use words or an em dash "—", not ✓/✗ —
+the serif body font has no dingbat glyphs and they render as empty boxes.)
 
 **Keep the plumbing out of the prose.** Write about the science, not the data pipeline.
 Don't surface internal tooling in the narrative — column names (`canonical_id`), join
