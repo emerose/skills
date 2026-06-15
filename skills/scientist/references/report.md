@@ -57,6 +57,26 @@ derivation (above) and embed them; refer to each in the text and draw the conclu
 its citation) rather than leaving the reader to infer it. Caveats belong in the prose or the
 cited claim's caveats, not buried.
 
+**Keep the plumbing out of the prose.** Write about the science, not the data pipeline.
+Don't surface internal tooling in the narrative — column names (`canonical_id`), join
+mechanics ("joined on …"), claim-id infrastructure, file names, or the grounding machinery.
+Name entities by their scientific meaning; when two datasets label the same thing
+differently, just say they're the same thing ("ASO-64, the same molecule screened in vitro
+as ASO3607_64"), not how the pipeline matched them.
+
+**Don't restate what's true of every report.** Skip boilerplate about the system — that
+results are grounded/cited, that `sci report` validates citations, that claims carry an
+outcome/strength. The reader assumes it. A *methods / caveats* section should carry only
+what's specific to **this** report's data: assay limitations, exclusions, model caveats,
+which of two assays a number came from.
+
+**Program reports: identify your studies.** A cross-experiment report cites several studies,
+and a program usually has *many* similar ones (e.g. several "rat IT screens"). The first time
+you reference a study, identify it — its id plus the system/model and the design that matters
+(route, dose, n, assay) — so the reader isn't sent to the endnotes to learn which one. A
+short "studies drawn on here" orientation near the top earns its place, and where two studies
+could be confused, say what distinguishes them and why each is the right source for its claim.
+
 ## Authoring model
 
 Reports are **git-diffable Markdown** with inline `[claim:<id>]` citations and Markdown

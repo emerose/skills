@@ -490,7 +490,10 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
         alt = alt_m.group(1) if alt_m else ""
         return f"![{alt}]({ap.resolve().as_posix()})"
 
-    body = _CITE_RE.sub(_cite_sub, text)
+    # Bind each note marker to the preceding word: drop any whitespace (incl. a soft line
+    # wrap) immediately before a citation, so the superscript attaches like a footnote mark
+    # rather than drifting onto the next line.
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _CITE_RE.pattern, _cite_sub, text)
     # embeds can span only a line each; substitute per match on the citation-substituted text
     body = _EMBED_RE.sub(_embed_sub, body)
 

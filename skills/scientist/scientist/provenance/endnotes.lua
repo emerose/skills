@@ -17,16 +17,30 @@ The collected notes keep their order of first appearance in the text.
 --]]
 
 local notes = {}
+local seen = {}   -- note content (stringified) -> existing index, so a claim cited more
+                  -- than once shares ONE numbered note (proper citation reuse) rather than
+                  -- producing a duplicate endnote per occurrence.
 
 -- Replace each footnote with a superscript marker that links to its endnote; stash the
 -- note's content (a list of Blocks) for the end section.
 local function Note(el)
-  local n = #notes + 1
-  local note_id = "en-" .. n          -- anchor on the endnote entry
-  local back_id = "en-ref-" .. n      -- anchor on the in-text marker (note links back)
-  notes[n] = { num = n, id = note_id, back = back_id, content = el.content }
-  local marker = pandoc.Link({ pandoc.Str(tostring(n)) }, "#" .. note_id, "",
-                             pandoc.Attr(back_id))
+  local key = pandoc.utils.stringify(pandoc.Div(el.content))
+  local idx = seen[key]
+  if not idx then
+    idx = #notes + 1
+    seen[key] = idx
+    notes[idx] = { num = idx, id = "en-" .. idx, back = "en-ref-" .. idx,
+                   content = el.content }
+  end
+  local note = notes[idx]
+  -- only the first occurrence carries the back-anchor (the note links back to it);
+  -- later markers just link forward, so ids/labels stay unique.
+  local attr = pandoc.Attr("")
+  if not note.back_emitted then
+    note.back_emitted = true
+    attr = pandoc.Attr(note.back)
+  end
+  local marker = pandoc.Link({ pandoc.Str(tostring(note.num)) }, "#" .. note.id, "", attr)
   return pandoc.Superscript({ marker })
 end
 
@@ -35,14 +49,38 @@ local function Pandoc(doc)
   if #notes == 0 then return doc end
   local blocks = doc.blocks
   blocks:insert(pandoc.Header(1, { pandoc.Str("Notes") }, pandoc.Attr("notes")))
+
+  if FORMAT:match("latex") then
+    -- a tight, hanging-indent endnotes list (small; the back-linked number hangs in the
+    -- margin, wrapped lines align under the text) — the clean endnotes look, single-pass,
+    -- with no external .ent file or LaTeX package.
+    local out = {
+      "\\begingroup\\small\\setlength{\\parindent}{0pt}",
+      "\\begin{list}{}{%",
+      "  \\setlength{\\leftmargin}{1.9em}\\setlength{\\labelwidth}{1.5em}",
+      "  \\setlength{\\labelsep}{0.4em}\\setlength{\\itemindent}{0pt}",
+      "  \\setlength{\\listparindent}{0pt}\\setlength{\\itemsep}{2.5pt}",
+      "  \\setlength{\\parsep}{0pt}\\setlength{\\topsep}{4pt}",
+      "  \\renewcommand{\\makelabel}[1]{\\hss#1}}",   -- right-align the number (hanging)
+    }
+    for _, note in ipairs(notes) do
+      local body = pandoc.write(pandoc.Pandoc(note.content), "latex"):gsub("%s+$", "")
+      -- brace-wrap the label: the `]` inside \hyperref[...] would otherwise close \item[
+      out[#out + 1] = "\\item[{\\hyperref[" .. note.back .. "]{" .. note.num .. ".}}]" ..
+                      "\\phantomsection\\label{" .. note.id .. "}" .. body
+    end
+    out[#out + 1] = "\\end{list}\\endgroup"
+    blocks:insert(pandoc.RawBlock("latex", table.concat(out, "\n")))
+    return doc
+  end
+
+  -- HTML / docx: one Div per note (a back-linked number leads each).
   for _, note in ipairs(notes) do
-    -- a back-linked number "N." leading the note
     local lead = { pandoc.Link({ pandoc.Str(note.num .. ".") }, "#" .. note.back),
                    pandoc.Space() }
     local content = note.content
     local body
     if #content > 0 and (content[1].t == "Para" or content[1].t == "Plain") then
-      -- prepend the number to the first paragraph so it flows inline
       local inlines = {}
       for _, x in ipairs(lead) do inlines[#inlines + 1] = x end
       for _, x in ipairs(content[1].content) do inlines[#inlines + 1] = x end
