@@ -174,14 +174,19 @@ statement + `[outcome · strength]` + its `claim_id`; `.csv` embeds inlined as M
 tables; figure paths absolutised. `--to html` needs no LaTeX engine (the portable target).
 A `BROKEN` audit refuses to render unless `--force`.
 
-**Grounding as endnotes.** Citations are emitted as native (hyperlinked, auto-numbered)
-footnotes so they behave well across targets: on HTML/docx they collect at the document
-end (endnote-like); on **PDF** the renderer redirects them to *real endnotes* with the
-`endnotes` package (`\let\footnote\endnote` + `\theendnotes`, under a *Grounding notes*
-heading) so a citation-dense report isn't crowded by per-page footnotes. If the `endnotes`
-package isn't installed (a minimal TeX such as basictex — `sudo tlmgr install endnotes` to
-add it), the PDF path falls back to a package-free manual endnotes rendering (superscript
-markers + a hand-built *Grounding notes* section), so render never hard-fails.
+**Grounding as endnotes (a pandoc filter, not a LaTeX package).** Citations are emitted as
+native (hyperlinked, auto-numbered) footnotes, then the bundled `endnotes.lua` pandoc
+filter relocates them into a single *Grounding notes* section at the document end, with the
+in-text marker and the note cross-linked. It runs for **every** target (PDF / HTML / docx),
+so a citation-dense report is never crowded by per-page footnotes. This is a structural
+*AST* transform — pandoc's writers still typeset — so it needs **no** LaTeX endnotes
+package (works on a minimal TeX such as basictex) and behaves identically across formats.
+(Endnotes are position-independent, which is exactly why a pre-typesetting filter can do
+them; true bottom-of-page footnotes could not — that needs the typesetter's page knowledge.)
+
+**Modern monospace.** Inline code / `claim_id`s use a modern coding font (Menlo, JetBrains
+Mono, Source Code Pro, …; probed via `fc-list`), deliberately **not** a LaTeX-world face
+(no Computer Modern Typewriter), scaled to fit a long id on the measure.
 
 **PDF house style.** The PDF target applies a restrained, modern style: the KOMA
 `scrartcl` class (so headings and the title come out **sans-serif** for free), a **serif

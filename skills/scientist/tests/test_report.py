@@ -250,17 +250,10 @@ def test_render_markdown_assembles(tmp_path):
     md = _report_md(exp, _GOOD_BODY)
 
     out = R.render_markdown(md, home=tmp_path)
-    # default: native pandoc footnotes (hyperlinked; redirected to real endnotes on PDF,
-    # collected at the document end on HTML/docx)
+    # citations are native pandoc footnotes (endnotes.lua relocates them on render)
     assert "[^claim-1]" in out
     assert "K1-230101::test_kd.py::test_knockdown" in out
     assert "passed · strong" in out
-    # fallback: manual endnotes (superscript marker + a "Grounding notes" section) for a
-    # minimal TeX without the endnotes package
-    manual = R.render_markdown(md, home=tmp_path, notes="endnote-manual")
-    assert "^1^" in manual
-    assert "## Grounding notes" in manual
-    assert "passed · strong" in manual
     # the csv embed was inlined as a Markdown table (header row present, image gone)
     assert "| metric | value |" in out
     assert "kd.csv)" not in out
@@ -276,7 +269,11 @@ def test_render_pdf_if_pandoc(tmp_path):
     # HTML needs no LaTeX engine, so it's the portable render to assert end-to-end
     res = R.render(md, out, home=tmp_path, to="html")
     assert Path(res["output"]).is_file()
-    assert out.read_text(encoding="utf-8").strip()
+    html = out.read_text(encoding="utf-8")
+    assert html.strip()
+    # endnotes.lua relocated the footnote into a "Grounding notes" section with anchors
+    assert 'id="grounding-notes"' in html
+    assert 'id="en-1"' in html and 'href="#en-1"' in html
 
 
 # --------------------------------------------------------------------------- #

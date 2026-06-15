@@ -438,25 +438,18 @@ def _rel_or_name(path: Path, home: Path) -> str:
 # --------------------------------------------------------------------------- #
 # render — assemble a self-contained Markdown, then (optionally) call pandoc
 # --------------------------------------------------------------------------- #
-def render_markdown(report_path: Path, home: Path | None = None,
-                    *, notes: str = "footnote") -> str:
+def render_markdown(report_path: Path, home: Path | None = None) -> str:
     """Assemble a self-contained Markdown from the report (pure; no external tools):
 
-    * ``[claim:<id>]`` → a grounding note carrying the cited claim's statement +
+    * ``[claim:<id>]`` → a native pandoc **footnote** carrying the cited claim's statement +
       ``[outcome · strength]`` + its ``claim_id``;
     * ``![cap](*.csv)`` → the CSV inlined as a Markdown table (the derived table, embedded);
     * ``![cap](fig)`` → the same image with its path absolutised so pandoc resolves it.
 
-    ``notes`` selects how the grounding notes are emitted:
-
-    * ``"footnote"`` (default) — native pandoc footnotes (``[^id]`` + a definition block).
-      Hyperlinked + auto-numbered; on HTML/docx they collect at the document end, and on
-      PDF they become real **endnotes** when the renderer redirects them with the
-      ``endnotes`` LaTeX package (``\\let\\footnote\\endnote``).
-    * ``"endnote-manual"`` — a superscript marker + a hand-built "Grounding notes" section
-      at the end. The package-free fallback for a minimal TeX that lacks ``endnotes``.
-
-    The result is what the PDF/HTML/docx render is produced from."""
+    Citations are footnotes (hyperlinked, auto-numbered); :func:`render` runs the bundled
+    ``endnotes.lua`` pandoc filter so they are relocated to a single "Grounding notes"
+    endnotes section at the document end — uniformly across PDF / HTML / docx, with no
+    LaTeX-package dependency. The result is what the render is produced from."""
     rp = Path(report_path).resolve()
     home = Path(home).resolve() if home is not None else _infer_home(rp)
     text = rp.read_text(encoding="utf-8")
@@ -470,7 +463,7 @@ def render_markdown(report_path: Path, home: Path | None = None,
         if cid not in num:
             order.append(cid)
             num[cid] = len(order)
-        return f"[^claim-{num[cid]}]" if notes == "footnote" else f"^{num[cid]}^"
+        return f"[^claim-{num[cid]}]"
 
     def _embed_sub(m: re.Match) -> str:
         path = m.group(1).strip()
@@ -497,17 +490,10 @@ def render_markdown(report_path: Path, home: Path | None = None,
             return f"**{cands[0]}** — {stmt} _[{c.get('outcome')} · {c.get('strength')}]_"
         return f"claim `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
 
-    if order and notes == "footnote":
-        # pandoc footnote definitions (rendered at the end on HTML/docx; redirected to
-        # real endnotes on PDF via the endnotes package)
+    if order:
+        # pandoc footnote definitions; endnotes.lua relocates them to the end on render
         defs = [f"[^claim-{num[cid]}]: {_note_text(cid)}" for cid in order]
         body = body.rstrip() + "\n\n" + "\n".join(defs) + "\n"
-    elif order:
-        # manual endnotes: superscript markers + a hand-built section (each its own
-        # paragraph so the printed number matches its marker — no list auto-renumbering)
-        lines = ["", "", "## Grounding notes", ""]
-        lines += [f"**{num[cid]}.** {_note_text(cid)}\n" for cid in order]
-        body = body.rstrip() + "\n" + "\n".join(lines) + "\n"
     return body
 
 
@@ -583,6 +569,13 @@ _SERIF_CANDIDATES = ["Times New Roman", "TeX Gyre Termes", "Times", "Liberation 
                      "Georgia", "Nimbus Roman"]
 _SANS_CANDIDATES = ["Helvetica Neue", "Helvetica", "TeX Gyre Heros", "Arial",
                     "Liberation Sans", "Nimbus Sans"]
+# A modern monospace for inline code / claim ids — deliberately NOT a LaTeX-world font
+# (no Latin Modern / Computer Modern Typewriter). Prefer clean coding faces without
+# distracting programming ligatures (claim ids are full of `::` / `_`); ligature-heavy
+# faces like Fira Code come last.
+_MONO_CANDIDATES = ["JetBrains Mono", "Cascadia Mono", "SF Mono", "Source Code Pro",
+                    "IBM Plex Mono", "DejaVu Sans Mono", "Menlo", "Roboto Mono",
+                    "Monaco", "Fira Mono", "Fira Code"]
 
 
 def _available_font_families() -> set[str]:
@@ -609,29 +602,8 @@ def _pick_font(candidates: list[str], available: set[str]) -> str | None:
     return next((c for c in candidates if c in available), None)
 
 
-# Grounding citations → real, hyperlinked endnotes: redirect pandoc's `\footnote` to the
-# `endnotes` package's `\endnote`, collected by `\theendnotes` at the document end (emitted
-# as a raw block by `render`). The note section heading inherits the KOMA sans disposition.
-_PDF_ENDNOTES_TEX = r"""
-% grounding citations -> real endnotes (endnotes package)
-\usepackage{endnotes}
-\let\footnote\endnote
-\renewcommand{\notesname}{Grounding notes}
-"""
-
-
-def _has_latex_pkg(name: str) -> bool:
-    """Whether ``<name>.sty`` is resolvable by the active TeX (via ``kpsewhich``)."""
-    import shutil
-    import subprocess
-    kp = shutil.which("kpsewhich")
-    if not kp:
-        return False
-    try:
-        r = subprocess.run([kp, f"{name}.sty"], capture_output=True, text=True, timeout=10)
-        return r.returncode == 0 and bool(r.stdout.strip())
-    except (OSError, subprocess.SubprocessError):
-        return False
+# The bundled pandoc filter that relocates footnotes → an endnotes section (all formats).
+_ENDNOTES_LUA = Path(__file__).with_name("endnotes.lua")
 
 
 class RenderError(RuntimeError):
@@ -662,16 +634,7 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             "e.g. `brew install --cask basictex`), or render to a format you have "
             "(`--to html`).")
 
-    # Grounding notes: native pandoc footnotes everywhere — on HTML/docx they collect at
-    # the document end (endnote-like); on PDF they become real endnotes via the `endnotes`
-    # package. Only when that package is absent (a minimal TeX) do we fall back to the
-    # package-free manual endnotes rendering.
-    use_endnotes_pkg = to == "pdf" and _has_latex_pkg("endnotes")
-    md = render_markdown(rp, home,
-                         notes="endnote-manual" if (to == "pdf" and not use_endnotes_pkg)
-                         else "footnote")
-    if use_endnotes_pkg:
-        md = md.rstrip() + "\n\n```{=latex}\n\\theendnotes\n```\n"
+    md = render_markdown(rp, home)        # citations as native footnotes
 
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp_md = tmp_header = None
@@ -679,23 +642,24 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
         tf.write(md)
         tmp_md = Path(tf.name)
     try:
+        # endnotes.lua relocates footnotes → a "Grounding notes" endnotes section, for
+        # every target (PDF/HTML/docx) — a structural AST transform, no LaTeX package.
         cmd = [pandoc, str(tmp_md), "-o", str(out), "--standalone",
+               f"--lua-filter={_ENDNOTES_LUA}",
                f"--resource-path={rp.parent}", f"--resource-path={home}"]
         if to == "pdf":
-            # modern house style: KOMA `scrartcl` (sans headings), serif body via
-            # fontspec, half-space block paragraphs, thin running header, subtle links.
+            # modern house style: KOMA `scrartcl` (sans headings), serif body + modern
+            # monospace via fontspec, half-space block paragraphs, running header, links.
             running = _latex_escape(_short_running_title(
                 _report_title(rp.read_text(encoding="utf-8"))))
-            header_tex = _PDF_HEADER_TEX.replace("@@RUNNING_TITLE@@", running)
-            if use_endnotes_pkg:
-                header_tex += _PDF_ENDNOTES_TEX
             with tempfile.NamedTemporaryFile("w", suffix=".tex", delete=False,
                                              encoding="utf-8") as hf:
-                hf.write(header_tex)
+                hf.write(_PDF_HEADER_TEX.replace("@@RUNNING_TITLE@@", running))
                 tmp_header = Path(hf.name)
             fams = _available_font_families()
             serif = _pick_font(_SERIF_CANDIDATES, fams)
             sans = _pick_font(_SANS_CANDIDATES, fams)
+            mono = _pick_font(_MONO_CANDIDATES, fams)
             cmd += [
                 "--pdf-engine=xelatex",
                 "-V", "documentclass=scrartcl",
@@ -711,6 +675,9 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
                 cmd += ["-V", f"mainfont={serif}"]
             if sans:
                 cmd += ["-V", f"sansfont={sans}"]
+            if mono:
+                # smaller so a long claim_id fits the measure; modern coding face
+                cmd += ["-V", f"monofont={mono}", "-V", "monofontoptions=Scale=0.85"]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise RenderError(f"pandoc failed ({proc.returncode}):\n{proc.stderr.strip()}")
