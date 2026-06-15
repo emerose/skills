@@ -67,6 +67,9 @@ GROUNDED_STRENGTHS = {"strong", "moderate"}
 _CITE_RE = re.compile(r"\[claim:\s*([^\[\]]+(?:\[[^\]]*\])?)\s*\]")
 # Markdown image embed: ![alt](target "optional title"). Captures the target path.
 _EMBED_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)")
+# Inline report citation: [report:<id>] — grounds a report on another (a "lemma" sub-report).
+# <id> is <exp-or-program>::<slug> (e.g. program::ube3a-dosage-window) or a bare <slug>.
+_REPORT_RE = re.compile(r"\[report:\s*([^\[\]]+?)\s*\]")
 # An experiment folder id prefix (K1-YYMMXX …), to derive an exp_id from a folder name.
 _EXP_ID_RE = re.compile(r"^\s*(K1-[A-Za-z0-9]+)")
 
@@ -117,6 +120,7 @@ def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
     """
     citations: list[dict[str, Any]] = []
     embeds: list[dict[str, Any]] = []
+    report_cites: list[dict[str, Any]] = []
     in_fence = False
     fence_marker = ""
     for n, line in enumerate(text.splitlines(), start=1):
@@ -132,9 +136,11 @@ def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
             continue
         for m in _CITE_RE.finditer(line):
             citations.append({"id": m.group(1).strip(), "line": n})
+        for m in _REPORT_RE.finditer(line):
+            report_cites.append({"id": m.group(1).strip(), "line": n})
         for m in _EMBED_RE.finditer(line):
             embeds.append({"target": m.group(1).strip(), "line": n})
-    return {"citations": citations, "embeds": embeds}
+    return {"citations": citations, "embeds": embeds, "report_cites": report_cites}
 
 
 def parse_sections(text: str) -> dict[str, Any]:
@@ -156,6 +162,7 @@ def parse_sections(text: str) -> dict[str, Any]:
 
     def _clean(s: str) -> str:
         s = _CITE_RE.sub("", s)
+        s = _REPORT_RE.sub("", s)
         s = _EMBED_RE.sub("", s)
         return s.strip()
 
@@ -314,18 +321,37 @@ def report_scope(report_path: Path, home: Path) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # audit
 # --------------------------------------------------------------------------- #
-def audit(report_path: Path, home: Path | None = None) -> dict[str, Any]:
-    """Mechanically validate a report's citations + embeds.
+def resolve_report_paths(cid: str, home: Path) -> list[Path]:
+    """Resolve a ``[report:<id>]`` citation to report.md path(s). ``<id>`` is
+    ``<exp-or-program>::<slug>`` or a bare ``<slug>`` (searched tree-wide). Returns 0
+    (missing), 1 (resolved), or >1 (ambiguous) paths."""
+    cid = cid.strip()
+    if "::" in cid:
+        scope_id, slug = cid.split("::", 1)
+        if scope_id == "program":
+            cand = home / "program" / "reports" / slug / "report.md"
+            return [cand] if cand.is_file() else []
+        hits = [d / "reports" / slug / "report.md" for d in sorted(home.glob(f"{scope_id}*"))]
+        return [h for h in hits if h.is_file()]
+    return sorted(home.glob(f"**/reports/{cid}/report.md"))
 
-    Returns ``{report, scope, exp_id, citations, embeds, findings, status}`` where
-    ``status`` is ``GROUNDED`` (no blocking finding) or ``BROKEN``. Each citation verdict
-    is ``backed`` / ``weak-backing`` / ``missing`` / ``ambiguous``; each embed verdict is
-    ``current`` / ``drifted`` / ``missing`` / ``untracked`` / ``dangling``. Everything but
+
+def audit(report_path: Path, home: Path | None = None,
+          _seen: frozenset[str] | None = None) -> dict[str, Any]:
+    """Mechanically validate a report's citations, embeds, and report-citations.
+
+    Returns ``{report, scope, exp_id, citations, embeds, report_cites, findings, status}``
+    where ``status`` is ``GROUNDED`` (no blocking finding) or ``BROKEN``. Claim-citation
+    verdict is ``backed`` / ``weak-backing`` / ``missing`` / ``ambiguous``; embed verdict is
+    ``current`` / ``drifted`` / ``missing`` / ``untracked`` / ``dangling``; a ``[report:<id>]``
+    grounds on another report (a "lemma") and is ``backed`` only if that report resolves AND
+    is itself ``GROUNDED`` (checked recursively, cycle-guarded). Everything but
     ``backed`` / ``current`` is a blocking finding (the *semantic* off-topic check stays
     with the authoring agent — see the module docstring).
     """
     rp = Path(report_path).resolve()
     home = Path(home).resolve() if home is not None else _infer_home(rp)
+    seen = (_seen or frozenset()) | {str(rp)}
     text = rp.read_text(encoding="utf-8")
     parsed = parse_report(text)
     sc = report_scope(rp, home)
@@ -406,6 +432,36 @@ def audit(report_path: Path, home: Path | None = None) -> dict[str, Any]:
                                  "detail": "not a recorded analysis artifact and not on disk"})
         embeds.append(rec)
 
+    # ---- report citations (grounding on another report / "lemma") ---------- #
+    report_cites: list[dict[str, Any]] = []
+    for rc in parsed.get("report_cites", []):
+        cid, line = rc["id"], rc["line"]
+        rec = {"id": cid, "line": line}
+        paths = resolve_report_paths(cid, home)
+        if not paths:
+            rec["verdict"] = "missing"
+            findings.append({"kind": "missing-report", "line": line, "cite": cid,
+                             "detail": "no report with this id; write the lemma report first"})
+        elif len(paths) > 1:
+            rec["verdict"] = "ambiguous"
+            findings.append({"kind": "ambiguous-report", "line": line, "cite": cid,
+                             "detail": f"matches {len(paths)} reports — qualify with <scope>::<slug>"})
+        else:
+            target = paths[0].resolve()
+            rec["report"] = _rel_or_name(target, home)
+            if str(target) in seen:                  # cycle: treat as backed (already on the stack)
+                rec["verdict"] = "backed"
+            else:
+                sub = audit(target, home, _seen=seen)
+                rec["sub_status"] = sub["status"]
+                if sub["status"] == "GROUNDED":
+                    rec["verdict"] = "backed"
+                else:
+                    rec["verdict"] = "weak-backing"
+                    findings.append({"kind": "broken-report-cite", "line": line, "cite": cid,
+                                     "detail": "cited report is itself BROKEN — fix it first"})
+        report_cites.append(rec)
+
     status = "GROUNDED" if not findings else "BROKEN"
     return {
         "report": _rel_or_name(rp, home),
@@ -414,6 +470,7 @@ def audit(report_path: Path, home: Path | None = None) -> dict[str, Any]:
         "slug": sc["slug"],
         "citations": citations,
         "embeds": embeds,
+        "report_cites": report_cites,
         "findings": findings,
         "status": status,
     }
@@ -469,6 +526,8 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
 
     order: list[str] = []
     num: dict[str, int] = {}           # cid -> 1-based index, first-seen order
+    rorder: list[str] = []
+    rnum: dict[str, int] = {}          # report-cite id -> 1-based index
 
     def _cite_sub(m: re.Match) -> str:
         cid = m.group(1).strip()
@@ -476,6 +535,13 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
             order.append(cid)
             num[cid] = len(order)
         return f"[^claim-{num[cid]}]"
+
+    def _report_sub(m: re.Match) -> str:
+        cid = m.group(1).strip()
+        if cid not in rnum:
+            rorder.append(cid)
+            rnum[cid] = len(rorder)
+        return f"[^report-{rnum[cid]}]"
 
     def _embed_sub(m: re.Match) -> str:
         path = m.group(1).strip()
@@ -494,8 +560,16 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     # wrap) immediately before a citation, so the superscript attaches like a footnote mark
     # rather than drifting onto the next line.
     body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _CITE_RE.pattern, _cite_sub, text)
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _REPORT_RE.pattern, _report_sub, body)
     # embeds can span only a line each; substitute per match on the citation-substituted text
     body = _EMBED_RE.sub(_embed_sub, body)
+
+    def _report_note_text(cid: str) -> str:
+        paths = resolve_report_paths(cid, home)
+        if len(paths) == 1:
+            title = _report_title(paths[0].read_text(encoding="utf-8")) or cid
+            return f"Lemma report: *{title}* — `{cid}`"
+        return f"report `{cid}` ({'unresolved' if not paths else 'ambiguous'})"
 
     def _note_text(cid: str) -> str:
         # A true endnote: the claim's statement reads as the note, followed by a compact
@@ -509,9 +583,10 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
             return f"{stmt} `{_short_claim_id(cands[0])}`"
         return f"claim `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
 
-    if order:
+    defs = [f"[^claim-{num[cid]}]: {_note_text(cid)}" for cid in order]
+    defs += [f"[^report-{rnum[cid]}]: {_report_note_text(cid)}" for cid in rorder]
+    if defs:
         # pandoc footnote definitions; endnotes.lua relocates them to the end on render
-        defs = [f"[^claim-{num[cid]}]: {_note_text(cid)}" for cid in order]
         body = body.rstrip() + "\n\n" + "\n".join(defs) + "\n"
     return body
 
@@ -806,6 +881,10 @@ def render_audit(result: dict[str, Any]) -> str:
     for e in result["embeds"]:
         mark = _EMBED_MARK.get(e["verdict"], e["verdict"])
         lines.append(f"  [embed L{e['line']}] {e.get('rel') or e['target']}: {mark}")
+    for r in result.get("report_cites", []):
+        mark = _CITE_MARK.get(r["verdict"], r["verdict"])
+        tail = f"  → {r.get('report')}" if r["verdict"] == "backed" and r.get("report") else ""
+        lines.append(f"  [report L{r['line']}] {r['id']}: {mark}{tail}")
     for f in result["findings"]:
         if f.get("detail"):
             loc = f.get("cite") or f.get("embed") or ""

@@ -55,8 +55,10 @@ report needs:
 or a summary table usually argues better than a paragraph. Produce them through a grounded
 derivation (above) and embed them; refer to each in the text and draw the conclusion (with
 its citation) rather than leaving the reader to infer it. Caveats belong in the prose or the
-cited claim's caveats, not buried. (In status tables use words or an em dash "—", not ✓/✗ —
-the serif body font has no dingbat glyphs and they render as empty boxes.)
+cited claim's caveats, not buried. (Glyph caveat: the rendered PDF's fonts don't have every
+Unicode glyph — the serif body lacks dingbats (✓/✗) and some math symbols (≫, ≈), and the
+sans/mono faces lack more. They render as empty boxes. In tables and prose use words or
+plain ASCII — ">>", "~", "->" — not the fancy glyph, unless you've confirmed it renders.)
 
 **Keep the plumbing out of the prose.** Write about the science, not the data pipeline.
 Don't surface internal tooling in the narrative — column names (`canonical_id`), join
@@ -77,6 +79,44 @@ you reference a study, identify it — its id plus the system/model and the desi
 (route, dose, n, assay) — so the reader isn't sent to the endnotes to learn which one. A
 short "studies drawn on here" orientation near the top earns its place, and where two studies
 could be confused, say what distinguishes them and why each is the right source for its claim.
+
+**Derive; don't presuppose what the report exists to establish.** If the report's question is
+"what should parameter X be," do not ground the answer in a Kicho claim that already *states*
+X — that is circular. Derive X from independent evidence (the literature, first-principles
+biology, the raw measurements) and only then compare it to the program's current value as
+corroboration or as a discrepancy to explain. Reserve `[claim:<id>]` for the inputs to the
+derivation (a measured normalization, a dose-response), not for the conclusion you are
+supposed to be reaching.
+
+## Research and composition
+
+Reports are how the program's understanding grows, so a report should *leave the system
+smarter*, not just answer one question:
+
+- **Do the literature search in subagents.** A literature-heavy report needs real depth.
+  Fan out parallel research subagents — one per sub-question (e.g. "what UBE3A restoration
+  level rescues which phenotype," "the IT ASO CNS biodistribution gradient") — each tasked to
+  search (PubMed / Consensus / web), read, and return a structured digest: ranked papers with
+  **DOI + PMID**, the quantitative findings attributed to each, and an explicit evidence-
+  strength/gaps assessment. Synthesize their digests; don't do a thin single-pass search.
+- **Put third-party papers in the bibliographer library, not in the data repo.** A paper
+  belongs in the shared bibliographer library (`bib add <DOI|PMID>`), where every future
+  report can reuse it and search inside it — *not* copied into `program/refs/`. Cite it in the
+  report's References by DOI as a **clickable link** (`[10.x/y](https://doi.org/10.x/y)`).
+  (Vendoring a PDF into the repo to `doc()`-ground a literature claim is a last resort and
+  usually the wrong tool — see below.)
+- **Decompose a big sub-question into its own "lemma" report.** When a report rests on a
+  substantial question of its own — a piece of biology that deserves its own evidence review
+  (a "lemma") — write *that* as a separate grounded report and have the main report build on
+  it with a **`[report:<id>]`** citation. `sci report` validates that the cited report
+  resolves and is itself `GROUNDED` (recursively), so a chain main → lemma → claims/literature
+  is checked end-to-end. This keeps each report focused and makes the sub-conclusion reusable.
+- **Literature vs. grounded claims — know which is which.** `[claim:<id>]` grounds on Kicho's
+  own measured data (and `[report:<id>]` on a vetted sub-report). The external literature is
+  *referenced* (bibliographer + DOIs), not claim-grounded — `sci report` does not (and should
+  not) try to turn an arbitrary citation into a grounded claim. State a literature-derived
+  number as referenced, and flag its assumptions and weak support; don't dress it up as a
+  Kicho claim.
 
 ## Authoring model
 
@@ -105,6 +145,18 @@ be qualified to the full id — `sci report` flags the ambiguity.
 Pull the claims to cite with `sci query "<topic>" --kind claim`, `sci list --kind claim
 --experiment <exp> --json`, or `<exp>/analysis/grounding_report.json` (each claim: `{id,
 statement, outcome, strength, kind}`) — the identical sources §3 / `sci trace` use.
+
+Two more citation forms, same audit:
+
+- **`[report:<id>]`** — ground on another report (a "lemma"). `<id>` is
+  `<exp-or-program>::<slug>` (e.g. `program::ube3a-dosage-window`) or a bare `<slug>`.
+  `sci report` resolves it and requires the cited report to be itself `GROUNDED` (checked
+  recursively) — so it is `backed` only if the lemma holds, `missing` if it doesn't exist,
+  `weak-backing` if the lemma is `BROKEN`. Use it to build a report on a sub-report.
+- **Literature** is *not* a `[claim:]`. Cite papers in a **References** section by DOI as a
+  clickable link, e.g. `1. Author et al. *Journal* (Year). doi:[10.x/y](https://doi.org/10.x/y)`,
+  and refer to them inline by author-year ("(Monine et al. 2021)") — author-year avoids
+  colliding with the numbered grounded-claim endnotes the renderer generates.
 
 ### Figures & tables — embed a *grounded derivation*, never an ad-hoc graphic
 

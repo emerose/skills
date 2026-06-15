@@ -252,11 +252,44 @@ def test_render_markdown_assembles(tmp_path):
     out = R.render_markdown(md, home=tmp_path)
     # citations are native pandoc footnotes (endnotes.lua relocates them on render)
     assert "[^claim-1]" in out
-    assert "K1-230101::test_kd.py::test_knockdown" in out
-    assert "passed · strong" in out
+    # the note reads statement-first, then a compact claim-id citation (test-file + the
+    # `test_` prefix dropped); no outcome / strength
+    assert "knockdown is 53% at the top dose" in out
+    assert "`K1-230101::knockdown`" in out
+    assert "passed" not in out and "strong" not in out
     # the csv embed was inlined as a Markdown table (header row present, image gone)
     assert "| metric | value |" in out
     assert "kd.csv)" not in out
+
+
+def test_report_citation_grounds_on_lemma(tmp_path):
+    exp = _exp(tmp_path)
+    _report_json(exp)
+    _report_md(exp, _GOOD_BODY, slug="lemma")                       # itself GROUNDED
+    main = _report_md(exp, "# Main\n\nBuilds on the lemma [report:K1-230101::lemma].\n",
+                      slug="main")
+    res = R.audit(main, home=tmp_path)
+    assert res["status"] == "GROUNDED", res
+    assert res["report_cites"][0]["verdict"] == "backed"
+
+
+def test_report_citation_missing_is_blocking(tmp_path):
+    exp = _exp(tmp_path)
+    _report_json(exp)
+    main = _report_md(exp, "# Main\n\nSee [report:K1-230101::nope].\n", slug="main")
+    res = R.audit(main, home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["report_cites"][0]["verdict"] == "missing"
+
+
+def test_report_citation_to_broken_lemma_is_weak(tmp_path):
+    exp = _exp(tmp_path)
+    _report_json(exp)
+    _report_md(exp, "# L\n\nResult [claim:test_does_not_exist].\n", slug="badlemma")  # BROKEN
+    main = _report_md(exp, "# Main\n\nSee [report:K1-230101::badlemma].\n", slug="main")
+    res = R.audit(main, home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["report_cites"][0]["verdict"] == "weak-backing"
 
 
 def test_render_pdf_if_pandoc(tmp_path):
@@ -271,8 +304,8 @@ def test_render_pdf_if_pandoc(tmp_path):
     assert Path(res["output"]).is_file()
     html = out.read_text(encoding="utf-8")
     assert html.strip()
-    # endnotes.lua relocated the footnote into a "Grounding notes" section with anchors
-    assert 'id="grounding-notes"' in html
+    # endnotes.lua relocated the footnote into a "Notes" endnotes section with anchors
+    assert 'id="notes"' in html
     assert 'id="en-1"' in html and 'href="#en-1"' in html
 
 
