@@ -6,12 +6,10 @@ alongside endnotes.lua). Structural AST tweaks; pandoc's writers still typeset.
     `p{...}` columns that fill `\linewidth` (a bare pipe table otherwise renders narrow).
     Harmless on HTML (relative column widths).
 
-  * Figures (PDF/LaTeX only) — the page geometry is asymmetric (narrow body, wide right
-    margin; see report.py). A normal figure would sit in the narrow body and a forced-wide
-    one floats off to its own page. Instead, replace the float with an in-place block, left-
-    anchored at the body edge and `\fullwidth` wide, so the figure extends into the right
-    margin exactly where it is written — keeping `\captionof{figure}` numbering. The caption
-    inlines are written back to LaTeX so their formatting / endnote markers survive.
+  * Figures (PDF/LaTeX only) — replace the floating figure with an in-place, full-text-width
+    block (so it stays where written and centred, rather than floating off to its own page),
+    keeping `\captionof{figure}` numbering. The caption inlines are written back to LaTeX so
+    their formatting / endnote markers survive.
 --]]
 
 function Table(t)
@@ -33,11 +31,11 @@ function Figure(fig)
   if not src then return nil end
   local caption = pandoc.write(pandoc.Pandoc(fig.caption.long or {}), "latex")
   local tex = table.concat({
-    "\\par\\medskip\\noindent\\makebox[\\linewidth][l]{%",
-    "\\begin{minipage}{\\scifullwidth}\\centering",
-    "\\includegraphics[width=\\scifullwidth,keepaspectratio]{" .. src .. "}",
+    "\\par\\medskip\\begin{center}",
+    "\\includegraphics[width=\\linewidth,keepaspectratio]{" .. src .. "}",
+    "\\end{center}",
     "\\captionof{figure}{" .. caption .. "}",
-    "\\end{minipage}}\\par\\medskip",
+    "\\par\\medskip",
   }, "\n")
   return pandoc.RawBlock("latex", tex)
 end

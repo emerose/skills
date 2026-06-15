@@ -169,15 +169,16 @@ does **not** detect assertions — it resolves the citations/embeds you wrote.
 
 Render is via **pandoc** (`brew install pandoc`; a PDF target also needs a LaTeX engine,
 e.g. `brew install --cask basictex` → `xelatex`). The renderer assembles a self-contained
-Markdown: each `[claim:<id>]` → a native pandoc **footnote** carrying the cited claim's
-statement + `[outcome · strength]` + its `claim_id`; `.csv` embeds inlined as Markdown
-tables; figure paths absolutised. `--to html` needs no LaTeX engine (the portable target).
-A `BROKEN` audit refuses to render unless `--force`.
+Markdown: each `[claim:<id>]` → a native pandoc **footnote** whose note is the cited
+claim's *statement* followed by a compact `claim_id` citation (the test-file and the
+`test_` node prefix dropped, set in monospace); `.csv` embeds inlined as Markdown tables;
+figure paths absolutised. `--to html` needs no LaTeX engine (the portable target). A
+`BROKEN` audit refuses to render unless `--force`.
 
 **Grounding as endnotes (a pandoc filter, not a LaTeX package).** Citations are emitted as
 native (hyperlinked, auto-numbered) footnotes, then the bundled `endnotes.lua` pandoc
-filter relocates them into a single *Grounding notes* section at the document end, with the
-in-text marker and the note cross-linked. It runs for **every** target (PDF / HTML / docx),
+filter relocates them into a single **Notes** section at the document end, with the in-text
+marker and the note cross-linked. It runs for **every** target (PDF / HTML / docx),
 so a citation-dense report is never crowded by per-page footnotes. This is a structural
 *AST* transform — pandoc's writers still typeset — so it needs **no** LaTeX endnotes
 package (works on a minimal TeX such as basictex) and behaves identically across formats.
@@ -188,12 +189,11 @@ them; true bottom-of-page footnotes could not — that needs the typesetter's pa
 Mono, Source Code Pro, …; probed via `fc-list`), deliberately **not** a LaTeX-world face
 (no Computer Modern Typewriter), scaled to fit a long id on the measure.
 
-**Full-width exhibits.** `layout.lua` gives the exhibits room: tables fill the full body
+**Full-width exhibits.** `layout.lua` gives the exhibits room: tables fill the full text
 measure (equal `p{}` columns), and — for the PDF target — each figure is replaced by an
-**in-place, `\fullwidth` block** (left-anchored, `\captionof{figure}` keeping the
-numbering) so it extends into the Tufte right margin exactly where written, rather than
-floating to its own page or sitting cramped in the narrow body. Both are AST tweaks — no
-LaTeX package (graphicx/caption are stock). HTML/docx figures are left untouched.
+**in-place, full-text-width block** (centred, `\captionof{figure}` keeping the numbering)
+so it stays where written rather than floating off to its own page. Both are AST tweaks —
+no LaTeX package (graphicx/caption are stock). HTML/docx figures are left untouched.
 
 **Classification + revision stamps.** A front-matter `classification:` field (e.g.
 `CONFIDENTIAL`, `INTERNAL`, `DRAFT`) is stamped in the page header (muted red) of the PDF;
@@ -204,14 +204,14 @@ is traceable to a commit. (Rendering writes the PDF and thus dirties the tree, s
 reflects HEAD at render time; render on a clean checkout, or in CI, for an unmarked sha.)
 
 **PDF house style.** The PDF target applies a restrained, modern style: the KOMA
-`scrartcl` class (so headings and the title come out **sans-serif** for free), a **serif
-body** + sans headings via fontspec (it probes `fc-list` and prefers Times / Helvetica,
-then portable equivalents — TeX Gyre Termes/Heros, Liberation, etc. — skipping any that
-aren't installed), and half-line block paragraphs. The page is a **Tufte-style asymmetric**
-layout: a narrow, readable body column (~5.25") with a wide right margin that full-width
-figures extend into (see *Full-width exhibits*). A thin running header (short title · page
-edge) carries the classification stamp at the right; the footer carries the revision (left)
-and page number (right) — offset to the page edges, not the body's. Subtle link colours. No
+`scrartcl` class (so headings, the title, **and the byline/date** come out **sans-serif**),
+a **serif body** + sans headings via fontspec (it probes `fc-list` and prefers Times /
+Helvetica, then portable equivalents — TeX Gyre Termes/Heros, Liberation, etc. — skipping
+any that aren't installed), and half-line block paragraphs. A centered single column with
+1-inch margins (a Tufte asymmetric layout was tried and dropped — an empty wide margin is
+wasted space unless it carries sidenotes, which a citation-dense report can't use well). A
+thin running header carries the short title (left) and the classification stamp (right);
+the footer carries the revision (left) and page number (right). Subtle link colours. No
 styling knobs in the report Markdown; the content carries the report, not the chrome.
 
 ### Indexing + traceability

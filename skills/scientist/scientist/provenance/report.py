@@ -93,6 +93,18 @@ def _exp_id_for_dir(folder: Path) -> str:
     return m.group(1) if m else folder.name
 
 
+def _short_claim_id(claim_id: str) -> str:
+    """A compact display form of a ``<exp>::<test-file>::<node>`` claim id for an endnote
+    citation: drop the test-file component and the ``test_`` node prefix, leaving
+    ``<exp>::<node>`` (e.g. ``program::lead_is_deepest_protein_knockdown``). Display only —
+    the report source still cites the full, unambiguous id."""
+    parts = claim_id.split("::")
+    exp, node = parts[0], parts[-1]
+    if node.startswith("test_"):
+        node = node[len("test_"):]
+    return f"{exp}::{node}" if node else exp
+
+
 # --------------------------------------------------------------------------- #
 # parsing
 # --------------------------------------------------------------------------- #
@@ -483,11 +495,15 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     body = _EMBED_RE.sub(_embed_sub, body)
 
     def _note_text(cid: str) -> str:
+        # A true endnote: the claim's statement reads as the note, followed by a compact
+        # claim-id citation. No outcome (a cited claim passed by construction) and no
+        # strength (low signal in prose); the id is shortened (drop the test-file and the
+        # `test_` node prefix) and set in monospace so it reads as a subdued reference.
         cands = resolve_citation(cid, claim_index)
         if len(cands) == 1:
             c = claim_index[cands[0]]
             stmt = (c.get("statement") or "").strip().replace("\n", " ")
-            return f"**{cands[0]}** — {stmt} _[{c.get('outcome')} · {c.get('strength')}]_"
+            return f"{stmt} `{_short_claim_id(cands[0])}`"
         return f"claim `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
 
     if order:
@@ -522,24 +538,21 @@ def _csv_to_md_table(path: Path) -> str:
 # sans-serif for free from the KOMA `scrartcl` class; the body is a serif via fontspec
 # `mainfont`. This header only adds a thin running header (section · page) + tightened
 # rules — it touches no colors, so it is order-independent w.r.t. pandoc's hyperref setup.
-# Tufte-style asymmetric page: a narrow, readable body column with a wide right margin;
-# headings sit at body width, while full-width figures (see layout.lua) extend into that
-# margin. `\fullwidth` = the body + the usable part of the right margin. The header/footer
-# are offset right so the running title / classification / page number / revision sit at
-# the page's edges, not the body's. Margins set via -V geometry in render().
-_PDF_RIGHT_EXTEND = "1.45in"      # how far figures + header/footer reach into the right margin
+# A centered single column with conventional margins (Tufte margins were dropped — an
+# empty wide margin is wasted space unless it holds sidenotes, which a citation-dense
+# report can't use well). Title block, headings, and the running header/footer all come
+# out sans-serif; the body is serif. Margins set via -V geometry:margin in render().
 _PDF_HEADER_TEX = r"""
 % --- modern report style (injected by `sci report`) ---
 \usepackage{graphicx}   % layout.lua emits raw \includegraphics, so load it unconditionally
                         % (pandoc only auto-loads graphicx when it still sees an Image)
 \usepackage{fancyhdr}
 \usepackage{caption}
-\newlength{\scifullwidth}
-\setlength{\scifullwidth}{\dimexpr\textwidth+@@RIGHT_EXTEND@@\relax}
 \captionsetup{font=small,labelfont=bf,justification=raggedright,singlelinecheck=false}
+\setkomafont{author}{\normalfont\sffamily}   % subtitle/byline + date in sans, like the title
+\setkomafont{date}{\normalfont\sffamily}
 \pagestyle{fancy}
 \fancyhf{}
-\fancyhfoffset[R]{@@RIGHT_EXTEND@@}
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\footrulewidth}{0pt}
 \fancyhead[L]{\footnotesize\sffamily @@RUNNING_TITLE@@}
@@ -726,7 +739,6 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             foot_left = (rf"rev~\texttt{{{_latex_escape(sha)}}}{'*' if dirty else ''}"
                          if sha else "")
             header_tex = (_PDF_HEADER_TEX
-                          .replace("@@RIGHT_EXTEND@@", _PDF_RIGHT_EXTEND)
                           .replace("@@RUNNING_TITLE@@", running)
                           .replace("@@HEAD_RIGHT@@", head_right)
                           .replace("@@FOOT_LEFT@@", foot_left))
@@ -742,10 +754,7 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
                 "--pdf-engine=xelatex",
                 "-V", "documentclass=scrartcl",
                 "-V", "classoption=parskip=half",
-                # Tufte asymmetric page: narrow readable body, wide right margin (figures
-                # extend into it via layout.lua + \fullwidth).
-                "-V", "geometry:left=1.1in", "-V", "geometry:right=2.2in",
-                "-V", "geometry:top=1in", "-V", "geometry:bottom=1in",
+                "-V", "geometry:margin=1in",
                 "-V", "fontsize=11pt",
                 "-V", "linestretch=1.12",
                 "-V", "colorlinks=true", "-V", "linkcolor=teal",

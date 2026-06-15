@@ -34,8 +34,7 @@ end
 local function Pandoc(doc)
   if #notes == 0 then return doc end
   local blocks = doc.blocks
-  blocks:insert(pandoc.Header(1, { pandoc.Str("Grounding"), pandoc.Space(),
-                                   pandoc.Str("notes") }, pandoc.Attr("grounding-notes")))
+  blocks:insert(pandoc.Header(1, { pandoc.Str("Notes") }, pandoc.Attr("notes")))
   for _, note in ipairs(notes) do
     -- a back-linked number "N." leading the note
     local lead = { pandoc.Link({ pandoc.Str(note.num .. ".") }, "#" .. note.back),
