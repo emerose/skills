@@ -250,8 +250,9 @@ def test_render_markdown_assembles(tmp_path):
     md = _report_md(exp, _GOOD_BODY)
 
     out = R.render_markdown(md, home=tmp_path)
-    # the [claim:...] became a footnote reference + a grounding footnote
-    assert "[^claim-1]" in out
+    # the [claim:...] became a superscript endnote marker + a "Grounding notes" endnote
+    assert "^1^" in out
+    assert "## Grounding notes" in out
     assert "K1-230101::test_kd.py::test_knockdown" in out
     assert "passed · strong" in out
     # the csv embed was inlined as a Markdown table (header row present, image gone)

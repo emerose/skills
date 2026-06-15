@@ -452,16 +452,18 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     text = rp.read_text(encoding="utf-8")
     claim_index = index_claims(home)
 
-    # footnotes: stable per cited id, in first-seen order
-    fn_order: list[str] = []
-    fn_label: dict[str, str] = {}
+    # endnotes: a superscript marker at each citation, collected into a single
+    # "Grounding notes" section at the END of the document (not per-page footnotes,
+    # which crowd a citation-dense report). Stable per cited id, first-seen order.
+    en_order: list[str] = []
+    en_num: dict[str, int] = {}
 
     def _cite_sub(m: re.Match) -> str:
         cid = m.group(1).strip()
-        if cid not in fn_label:
-            fn_label[cid] = f"claim-{len(fn_order) + 1}"
-            fn_order.append(cid)
-        return f"[^{fn_label[cid]}]"
+        if cid not in en_num:
+            en_order.append(cid)
+            en_num[cid] = len(en_order)
+        return f"^{en_num[cid]}^"          # pandoc superscript -> endnote marker
 
     def _embed_sub(m: re.Match) -> str:
         path = m.group(1).strip()
@@ -480,19 +482,21 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     # embeds can span only a line each; substitute per match on the citation-substituted text
     body = _EMBED_RE.sub(_embed_sub, body)
 
-    # append the grounding footnotes
-    if fn_order:
-        notes = ["", ""]
-        for cid in fn_order:
+    # append the grounding notes as an endnotes section (each its own paragraph so the
+    # printed number matches its superscript marker exactly — no list auto-renumbering)
+    if en_order:
+        notes = ["", "", "## Grounding notes", ""]
+        for cid in en_order:
+            n = en_num[cid]
             cands = resolve_citation(cid, claim_index)
             if len(cands) == 1:
                 c = claim_index[cands[0]]
                 stmt = (c.get("statement") or "").strip().replace("\n", " ")
-                notes.append(f"[^{fn_label[cid]}]: **{cands[0]}** — {stmt} "
-                             f"_[{c.get('outcome')} · {c.get('strength')}]_")
+                notes.append(f"**{n}.** **{cands[0]}** — {stmt} "
+                             f"_[{c.get('outcome')} · {c.get('strength')}]_\n")
             else:
-                notes.append(f"[^{fn_label[cid]}]: claim `{cid}` "
-                             f"({'unresolved' if not cands else 'ambiguous'})")
+                notes.append(f"**{n}.** claim `{cid}` "
+                             f"({'unresolved' if not cands else 'ambiguous'})\n")
         body = body.rstrip() + "\n" + "\n".join(notes) + "\n"
     return body
 
@@ -516,6 +520,83 @@ def _csv_to_md_table(path: Path) -> str:
         cells = (r + [""] * len(header))[:len(header)]
         out.append("| " + " | ".join(esc(c) for c in cells) + " |")
     return "\n".join(out)
+
+
+# A restrained, modern house style for the PDF target (xelatex). Headings come out
+# sans-serif for free from the KOMA `scrartcl` class; the body is a serif via fontspec
+# `mainfont`. This header only adds a thin running header (section · page) + tightened
+# rules — it touches no colors, so it is order-independent w.r.t. pandoc's hyperref setup.
+_PDF_HEADER_TEX = r"""
+% --- modern report style (injected by `sci report`) ---
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancyhead[L]{\footnotesize\sffamily @@RUNNING_TITLE@@}
+\fancyfoot[C]{\footnotesize\sffamily \thepage}
+\setlength{\headheight}{14pt}
+"""
+
+
+def _report_title(text: str) -> str:
+    """The report's YAML front-matter ``title`` (empty if none) — used for the running
+    header. Front matter is a leading ``---``-fenced block."""
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+    if not m:
+        return ""
+    for line in m.group(1).splitlines():
+        mt = re.match(r"\s*title\s*:\s*(.+?)\s*$", line)
+        if mt:
+            return mt.group(1).strip().strip("\"'")
+    return ""
+
+
+def _short_running_title(title: str, limit: int = 60) -> str:
+    """A compact running-header form of the title: the part before a colon, truncated."""
+    head = title.split(":", 1)[0].strip() or title.strip()
+    if len(head) > limit:
+        head = head[:limit].rstrip() + "…"
+    return head
+
+
+def _latex_escape(s: str) -> str:
+    repl = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$",
+            "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}",
+            "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
+    return "".join(repl.get(ch, ch) for ch in s)
+
+# Serif body / sans headings: prefer the named fonts the user asked for (Times /
+# Helvetica), then portable equivalents. Probed against the system via `fc-list`, so a
+# missing font is skipped rather than failing the xelatex run.
+_SERIF_CANDIDATES = ["Times New Roman", "TeX Gyre Termes", "Times", "Liberation Serif",
+                     "Georgia", "Nimbus Roman"]
+_SANS_CANDIDATES = ["Helvetica Neue", "Helvetica", "TeX Gyre Heros", "Arial",
+                    "Liberation Sans", "Nimbus Sans"]
+
+
+def _available_font_families() -> set[str]:
+    """The set of font family names xelatex can resolve, via ``fc-list`` (empty if the
+    tool is absent — callers then fall back to the LaTeX default font)."""
+    import shutil
+    import subprocess
+    fc = shutil.which("fc-list")
+    if not fc:
+        return set()
+    try:
+        out = subprocess.run([fc, ":", "family"], capture_output=True, text=True,
+                             timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    fams: set[str] = set()
+    for line in out.splitlines():
+        for fam in line.split(","):
+            fams.add(fam.strip())
+    return fams
+
+
+def _pick_font(candidates: list[str], available: set[str]) -> str | None:
+    return next((c for c in candidates if c in available), None)
 
 
 class RenderError(RuntimeError):
@@ -548,6 +629,7 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             "(`--to html`).")
 
     out.parent.mkdir(parents=True, exist_ok=True)
+    tmp_md = tmp_header = None
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
         tf.write(md)
         tmp_md = Path(tf.name)
@@ -555,12 +637,39 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
         cmd = [pandoc, str(tmp_md), "-o", str(out), "--standalone",
                f"--resource-path={rp.parent}", f"--resource-path={home}"]
         if to == "pdf":
-            cmd += ["--pdf-engine=xelatex"]
+            # modern house style: KOMA `scrartcl` (sans headings), serif body via
+            # fontspec, half-space block paragraphs, thin running header, subtle links.
+            running = _latex_escape(_short_running_title(
+                _report_title(rp.read_text(encoding="utf-8"))))
+            with tempfile.NamedTemporaryFile("w", suffix=".tex", delete=False,
+                                             encoding="utf-8") as hf:
+                hf.write(_PDF_HEADER_TEX.replace("@@RUNNING_TITLE@@", running))
+                tmp_header = Path(hf.name)
+            fams = _available_font_families()
+            serif = _pick_font(_SERIF_CANDIDATES, fams)
+            sans = _pick_font(_SANS_CANDIDATES, fams)
+            cmd += [
+                "--pdf-engine=xelatex",
+                "-V", "documentclass=scrartcl",
+                "-V", "classoption=parskip=half",
+                "-V", "geometry:margin=1in",
+                "-V", "fontsize=11pt",
+                "-V", "linestretch=1.12",
+                "-V", "colorlinks=true", "-V", "linkcolor=teal",
+                "-V", "urlcolor=teal", "-V", "toccolor=teal",
+                "--include-in-header", str(tmp_header),
+            ]
+            if serif:
+                cmd += ["-V", f"mainfont={serif}"]
+            if sans:
+                cmd += ["-V", f"sansfont={sans}"]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise RenderError(f"pandoc failed ({proc.returncode}):\n{proc.stderr.strip()}")
     finally:
         tmp_md.unlink(missing_ok=True)
+        if tmp_header is not None:
+            tmp_header.unlink(missing_ok=True)
     return {"output": str(out), "format": to}
 
 
