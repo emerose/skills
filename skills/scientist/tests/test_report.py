@@ -250,11 +250,17 @@ def test_render_markdown_assembles(tmp_path):
     md = _report_md(exp, _GOOD_BODY)
 
     out = R.render_markdown(md, home=tmp_path)
-    # the [claim:...] became a superscript endnote marker + a "Grounding notes" endnote
-    assert "^1^" in out
-    assert "## Grounding notes" in out
+    # default: native pandoc footnotes (hyperlinked; redirected to real endnotes on PDF,
+    # collected at the document end on HTML/docx)
+    assert "[^claim-1]" in out
     assert "K1-230101::test_kd.py::test_knockdown" in out
     assert "passed · strong" in out
+    # fallback: manual endnotes (superscript marker + a "Grounding notes" section) for a
+    # minimal TeX without the endnotes package
+    manual = R.render_markdown(md, home=tmp_path, notes="endnote-manual")
+    assert "^1^" in manual
+    assert "## Grounding notes" in manual
+    assert "passed · strong" in manual
     # the csv embed was inlined as a Markdown table (header row present, image gone)
     assert "| metric | value |" in out
     assert "kd.csv)" not in out

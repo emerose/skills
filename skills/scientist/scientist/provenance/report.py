@@ -438,13 +438,23 @@ def _rel_or_name(path: Path, home: Path) -> str:
 # --------------------------------------------------------------------------- #
 # render — assemble a self-contained Markdown, then (optionally) call pandoc
 # --------------------------------------------------------------------------- #
-def render_markdown(report_path: Path, home: Path | None = None) -> str:
+def render_markdown(report_path: Path, home: Path | None = None,
+                    *, notes: str = "footnote") -> str:
     """Assemble a self-contained Markdown from the report (pure; no external tools):
 
-    * ``[claim:<id>]`` → a footnote reference; a **Grounding** footnote section lists each
-      cited claim's statement + ``[outcome · strength]`` + its ``claim_id``;
+    * ``[claim:<id>]`` → a grounding note carrying the cited claim's statement +
+      ``[outcome · strength]`` + its ``claim_id``;
     * ``![cap](*.csv)`` → the CSV inlined as a Markdown table (the derived table, embedded);
     * ``![cap](fig)`` → the same image with its path absolutised so pandoc resolves it.
+
+    ``notes`` selects how the grounding notes are emitted:
+
+    * ``"footnote"`` (default) — native pandoc footnotes (``[^id]`` + a definition block).
+      Hyperlinked + auto-numbered; on HTML/docx they collect at the document end, and on
+      PDF they become real **endnotes** when the renderer redirects them with the
+      ``endnotes`` LaTeX package (``\\let\\footnote\\endnote``).
+    * ``"endnote-manual"`` — a superscript marker + a hand-built "Grounding notes" section
+      at the end. The package-free fallback for a minimal TeX that lacks ``endnotes``.
 
     The result is what the PDF/HTML/docx render is produced from."""
     rp = Path(report_path).resolve()
@@ -452,18 +462,15 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     text = rp.read_text(encoding="utf-8")
     claim_index = index_claims(home)
 
-    # endnotes: a superscript marker at each citation, collected into a single
-    # "Grounding notes" section at the END of the document (not per-page footnotes,
-    # which crowd a citation-dense report). Stable per cited id, first-seen order.
-    en_order: list[str] = []
-    en_num: dict[str, int] = {}
+    order: list[str] = []
+    num: dict[str, int] = {}           # cid -> 1-based index, first-seen order
 
     def _cite_sub(m: re.Match) -> str:
         cid = m.group(1).strip()
-        if cid not in en_num:
-            en_order.append(cid)
-            en_num[cid] = len(en_order)
-        return f"^{en_num[cid]}^"          # pandoc superscript -> endnote marker
+        if cid not in num:
+            order.append(cid)
+            num[cid] = len(order)
+        return f"[^claim-{num[cid]}]" if notes == "footnote" else f"^{num[cid]}^"
 
     def _embed_sub(m: re.Match) -> str:
         path = m.group(1).strip()
@@ -482,22 +489,25 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     # embeds can span only a line each; substitute per match on the citation-substituted text
     body = _EMBED_RE.sub(_embed_sub, body)
 
-    # append the grounding notes as an endnotes section (each its own paragraph so the
-    # printed number matches its superscript marker exactly — no list auto-renumbering)
-    if en_order:
-        notes = ["", "", "## Grounding notes", ""]
-        for cid in en_order:
-            n = en_num[cid]
-            cands = resolve_citation(cid, claim_index)
-            if len(cands) == 1:
-                c = claim_index[cands[0]]
-                stmt = (c.get("statement") or "").strip().replace("\n", " ")
-                notes.append(f"**{n}.** **{cands[0]}** — {stmt} "
-                             f"_[{c.get('outcome')} · {c.get('strength')}]_\n")
-            else:
-                notes.append(f"**{n}.** claim `{cid}` "
-                             f"({'unresolved' if not cands else 'ambiguous'})\n")
-        body = body.rstrip() + "\n" + "\n".join(notes) + "\n"
+    def _note_text(cid: str) -> str:
+        cands = resolve_citation(cid, claim_index)
+        if len(cands) == 1:
+            c = claim_index[cands[0]]
+            stmt = (c.get("statement") or "").strip().replace("\n", " ")
+            return f"**{cands[0]}** — {stmt} _[{c.get('outcome')} · {c.get('strength')}]_"
+        return f"claim `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
+
+    if order and notes == "footnote":
+        # pandoc footnote definitions (rendered at the end on HTML/docx; redirected to
+        # real endnotes on PDF via the endnotes package)
+        defs = [f"[^claim-{num[cid]}]: {_note_text(cid)}" for cid in order]
+        body = body.rstrip() + "\n\n" + "\n".join(defs) + "\n"
+    elif order:
+        # manual endnotes: superscript markers + a hand-built section (each its own
+        # paragraph so the printed number matches its marker — no list auto-renumbering)
+        lines = ["", "", "## Grounding notes", ""]
+        lines += [f"**{num[cid]}.** {_note_text(cid)}\n" for cid in order]
+        body = body.rstrip() + "\n" + "\n".join(lines) + "\n"
     return body
 
 
@@ -599,6 +609,31 @@ def _pick_font(candidates: list[str], available: set[str]) -> str | None:
     return next((c for c in candidates if c in available), None)
 
 
+# Grounding citations → real, hyperlinked endnotes: redirect pandoc's `\footnote` to the
+# `endnotes` package's `\endnote`, collected by `\theendnotes` at the document end (emitted
+# as a raw block by `render`). The note section heading inherits the KOMA sans disposition.
+_PDF_ENDNOTES_TEX = r"""
+% grounding citations -> real endnotes (endnotes package)
+\usepackage{endnotes}
+\let\footnote\endnote
+\renewcommand{\notesname}{Grounding notes}
+"""
+
+
+def _has_latex_pkg(name: str) -> bool:
+    """Whether ``<name>.sty`` is resolvable by the active TeX (via ``kpsewhich``)."""
+    import shutil
+    import subprocess
+    kp = shutil.which("kpsewhich")
+    if not kp:
+        return False
+    try:
+        r = subprocess.run([kp, f"{name}.sty"], capture_output=True, text=True, timeout=10)
+        return r.returncode == 0 and bool(r.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 class RenderError(RuntimeError):
     """A render toolchain (pandoc) is unavailable or failed."""
 
@@ -618,7 +653,6 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
     rp = Path(report_path).resolve()
     home = Path(home).resolve() if home is not None else _infer_home(rp)
     out = Path(out_path)
-    md = render_markdown(rp, home)
 
     pandoc = shutil.which("pandoc")
     if pandoc is None:
@@ -627,6 +661,17 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             "(macOS: `brew install pandoc`; a PDF target also needs a LaTeX engine, "
             "e.g. `brew install --cask basictex`), or render to a format you have "
             "(`--to html`).")
+
+    # Grounding notes: native pandoc footnotes everywhere — on HTML/docx they collect at
+    # the document end (endnote-like); on PDF they become real endnotes via the `endnotes`
+    # package. Only when that package is absent (a minimal TeX) do we fall back to the
+    # package-free manual endnotes rendering.
+    use_endnotes_pkg = to == "pdf" and _has_latex_pkg("endnotes")
+    md = render_markdown(rp, home,
+                         notes="endnote-manual" if (to == "pdf" and not use_endnotes_pkg)
+                         else "footnote")
+    if use_endnotes_pkg:
+        md = md.rstrip() + "\n\n```{=latex}\n\\theendnotes\n```\n"
 
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp_md = tmp_header = None
@@ -641,9 +686,12 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             # fontspec, half-space block paragraphs, thin running header, subtle links.
             running = _latex_escape(_short_running_title(
                 _report_title(rp.read_text(encoding="utf-8"))))
+            header_tex = _PDF_HEADER_TEX.replace("@@RUNNING_TITLE@@", running)
+            if use_endnotes_pkg:
+                header_tex += _PDF_ENDNOTES_TEX
             with tempfile.NamedTemporaryFile("w", suffix=".tex", delete=False,
                                              encoding="utf-8") as hf:
-                hf.write(_PDF_HEADER_TEX.replace("@@RUNNING_TITLE@@", running))
+                hf.write(header_tex)
                 tmp_header = Path(hf.name)
             fams = _available_font_families()
             serif = _pick_font(_SERIF_CANDIDATES, fams)

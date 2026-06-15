@@ -168,13 +168,20 @@ does **not** detect assertions — it resolves the citations/embeds you wrote.
 ### Render toolchain
 
 Render is via **pandoc** (`brew install pandoc`; a PDF target also needs a LaTeX engine,
-e.g. `brew install --cask basictex` → `xelatex`). The renderer first assembles a
-self-contained Markdown: each `[claim:<id>]` → a superscript **endnote** marker, collected
-into a single *Grounding notes* section at the end (each note carries the cited claim's
-statement + `[outcome · strength]` + its `claim_id`) — endnotes, not per-page footnotes, so
-a citation-dense report isn't crowded; `.csv` embeds inlined as Markdown tables; figure
-paths absolutised. `--to html` needs no LaTeX engine (the portable target). A `BROKEN`
-audit refuses to render unless `--force`.
+e.g. `brew install --cask basictex` → `xelatex`). The renderer assembles a self-contained
+Markdown: each `[claim:<id>]` → a native pandoc **footnote** carrying the cited claim's
+statement + `[outcome · strength]` + its `claim_id`; `.csv` embeds inlined as Markdown
+tables; figure paths absolutised. `--to html` needs no LaTeX engine (the portable target).
+A `BROKEN` audit refuses to render unless `--force`.
+
+**Grounding as endnotes.** Citations are emitted as native (hyperlinked, auto-numbered)
+footnotes so they behave well across targets: on HTML/docx they collect at the document
+end (endnote-like); on **PDF** the renderer redirects them to *real endnotes* with the
+`endnotes` package (`\let\footnote\endnote` + `\theendnotes`, under a *Grounding notes*
+heading) so a citation-dense report isn't crowded by per-page footnotes. If the `endnotes`
+package isn't installed (a minimal TeX such as basictex — `sudo tlmgr install endnotes` to
+add it), the PDF path falls back to a package-free manual endnotes rendering (superscript
+markers + a hand-built *Grounding notes* section), so render never hard-fails.
 
 **PDF house style.** The PDF target applies a restrained, modern style: the KOMA
 `scrartcl` class (so headings and the title come out **sans-serif** for free), a **serif
