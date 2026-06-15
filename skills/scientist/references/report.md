@@ -188,6 +188,14 @@ them; true bottom-of-page footnotes could not — that needs the typesetter's pa
 Mono, Source Code Pro, …; probed via `fc-list`), deliberately **not** a LaTeX-world face
 (no Computer Modern Typewriter), scaled to fit a long id on the measure.
 
+**Classification + revision stamps.** A front-matter `classification:` field (e.g.
+`CONFIDENTIAL`, `INTERNAL`, `DRAFT`) is stamped in the page header (muted red) of the PDF;
+omit it for an unmarked document. The footer carries the **source revision** — the data
+repo's short git sha, suffixed `-dirty` when the tree has uncommitted changes — so a
+circulated PDF is traceable to a commit. (Rendering necessarily makes the tree dirty by
+writing the PDF, so the stamp reflects HEAD at render time; render on a clean checkout, or
+in CI, for a clean sha.)
+
 **PDF house style.** The PDF target applies a restrained, modern style: the KOMA
 `scrartcl` class (so headings and the title come out **sans-serif** for free), a **serif
 body** + sans headings via fontspec (it probes `fc-list` and prefers Times / Helvetica,

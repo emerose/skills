@@ -530,22 +530,53 @@ _PDF_HEADER_TEX = r"""
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\footrulewidth}{0pt}
 \fancyhead[L]{\footnotesize\sffamily @@RUNNING_TITLE@@}
+\fancyhead[R]{\footnotesize\sffamily @@HEAD_RIGHT@@}
+\fancyfoot[L]{\scriptsize\sffamily @@FOOT_LEFT@@}
 \fancyfoot[C]{\footnotesize\sffamily \thepage}
 \setlength{\headheight}{14pt}
 """
 
 
-def _report_title(text: str) -> str:
-    """The report's YAML front-matter ``title`` (empty if none) — used for the running
-    header. Front matter is a leading ``---``-fenced block."""
+def _front_field(text: str, key: str) -> str:
+    """A scalar YAML front-matter field (empty if absent). Front matter is a leading
+    ``---``-fenced block."""
     m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
     if not m:
         return ""
     for line in m.group(1).splitlines():
-        mt = re.match(r"\s*title\s*:\s*(.+?)\s*$", line)
+        mt = re.match(rf"\s*{re.escape(key)}\s*:\s*(.+?)\s*$", line)
         if mt:
             return mt.group(1).strip().strip("\"'")
     return ""
+
+
+def _report_title(text: str) -> str:
+    """The report's YAML front-matter ``title`` — used for the running header."""
+    return _front_field(text, "title")
+
+
+def _git_revision(folder: Path) -> str:
+    """``<short-sha>`` (``-dirty`` if the tree has uncommitted changes) for the repo that
+    contains ``folder`` — stamps the rendered PDF with the source revision. Empty when not
+    a git repo / git is unavailable."""
+    import shutil
+    import subprocess
+    git = shutil.which("git")
+    if not git:
+        return ""
+    try:
+        sha = subprocess.run([git, "-C", str(folder), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=10)
+        if sha.returncode != 0 or not sha.stdout.strip():
+            return ""
+        rev = sha.stdout.strip()
+        dirty = subprocess.run([git, "-C", str(folder), "status", "--porcelain"],
+                               capture_output=True, text=True, timeout=10)
+        if dirty.returncode == 0 and dirty.stdout.strip():
+            rev += "-dirty"
+        return rev
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 
 def _short_running_title(title: str, limit: int = 60) -> str:
@@ -650,11 +681,23 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
         if to == "pdf":
             # modern house style: KOMA `scrartcl` (sans headings), serif body + modern
             # monospace via fontspec, half-space block paragraphs, running header, links.
-            running = _latex_escape(_short_running_title(
-                _report_title(rp.read_text(encoding="utf-8"))))
+            src = rp.read_text(encoding="utf-8")
+            running = _latex_escape(_short_running_title(_report_title(src)))
+            # header-right: a classification stamp (front-matter `classification:`,
+            # e.g. CONFIDENTIAL / INTERNAL / DRAFT), in a muted red so it reads as a warning
+            classification = _front_field(src, "classification")
+            head_right = (rf"\textcolor{{red!60!black}}{{\textbf{{{_latex_escape(classification)}}}}}"
+                          if classification else "")
+            # footer-left: the source revision, so the rendered PDF is traceable to a commit
+            rev = _git_revision(rp.parent)
+            foot_left = rf"rev~\texttt{{{_latex_escape(rev)}}}" if rev else ""
+            header_tex = (_PDF_HEADER_TEX
+                          .replace("@@RUNNING_TITLE@@", running)
+                          .replace("@@HEAD_RIGHT@@", head_right)
+                          .replace("@@FOOT_LEFT@@", foot_left))
             with tempfile.NamedTemporaryFile("w", suffix=".tex", delete=False,
                                              encoding="utf-8") as hf:
-                hf.write(_PDF_HEADER_TEX.replace("@@RUNNING_TITLE@@", running))
+                hf.write(header_tex)
                 tmp_header = Path(hf.name)
             fams = _available_font_families()
             serif = _pick_font(_SERIF_CANDIDATES, fams)
