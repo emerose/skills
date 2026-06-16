@@ -164,14 +164,29 @@ smarter*, not just answer one question:
   DOI as a **clickable link** (`[10.x/y](https://doi.org/10.x/y)`). (Vendoring a PDF into the
   repo to `doc()`-ground a literature claim is a last resort and usually the wrong tool — see
   below.)
-- **Decompose a big sub-question into its own supporting report.** When a report rests on a
-  substantial question of its own — a piece of biology that deserves its own evidence review —
-  write *that* as a separate grounded report and have the main report build on it with a
-  **`[report:<id>]`** citation. `sci report` validates that the cited report resolves and is
-  itself `GROUNDED` (recursively), so a chain main → supporting report → claims/literature is
-  checked end-to-end. This keeps each report focused and makes the sub-conclusion reusable.
-  (Internal shorthand only: don't call these "lemmas" or anything jargon-y in the report
-  text — each is just a report.)
+- **Decompose a sub-question into its own supporting report — liberally.** Whenever a report
+  rests on a substantial question of its own — a piece of biology that deserves its own evidence
+  review, *especially* one reusable across future investigations — write *that* as a separate
+  grounded report and have the main report build on it with a **`[report:<id>]`** citation.
+  Don't wait until a report is overloaded; a self-contained sub-question that several reports
+  will need is better extracted early, where it gets its own independent derivation and becomes
+  a reusable asset. `sci report` validates that the cited report resolves and is itself
+  `GROUNDED` (recursively), so a chain main → supporting report → claims/literature is checked
+  end-to-end. This keeps each report focused and the sub-conclusion reusable. (Internal
+  shorthand only: don't call these "lemmas" or anything jargon-y in the report text — each is
+  just a report.)
+  - **A supporting report is a natural unit of work to hand a sub-agent.** Just as the
+    literature sweep fans out (above), you can spawn a sub-agent to *author* a whole supporting
+    report — it returns a `GROUNDED`, `[report:]`-able result the parent cites. Escalate to this
+    when the sub-question is **separable, substantial, and reusable**; for mere breadth-gathering
+    within one report, a research sub-agent returning a digest is enough.
+  - **Give each report its own claim module so parallel authors don't collide.** Literature
+    claims can live in a per-report module (e.g. `program/claims/test_literature_<slug>.py`)
+    rather than one shared file — the pytest plugin collects every `test_*.py`, and the
+    decomposition boundary is a natural file boundary. A single report keeping one
+    `test_literature.py` is fine; split per-report once you have several, or whenever
+    report-writing sub-agents would otherwise contend on the same claims file or the shared
+    bibliographer library. When two must touch one module, author their claims sequentially.
 - **Literature vs. grounded claims — know which is which.** `[claim:<id>]` grounds on Kicho's
   own measured data (and `[report:<id>]` on a vetted sub-report). The external literature is
   *referenced* (bibliographer + DOIs), not claim-grounded — `sci report` does not (and should
@@ -189,6 +204,29 @@ smarter*, not just answer one question:
   that cite it inherit the change. (Watch for two failure modes when re-checking via subagents: a subagent can return
   a plausible but wrong DOI — verify identifiers against PubMed/Crossref before citing — and a
   finding may be real but its citation mislabeled, so confirm which paper actually says what.)
+
+### Keep the generation brief in git, alongside the report
+
+A report should be **re-derivable**, not just readable. Save the prompt that generated it as a
+sibling file — `<report-dir>/prompt.md` — committed alongside the report and its claims. The
+brief fixes the *question, scope, and grounding discipline*, **never the conclusions**: it says
+what to investigate (the sub-topics to sweep), how to ground it (quote-pinned `[lit:]` /
+`[claim:]`, independence accounting, the disconfirming-evidence requirement), and what *not* to
+presuppose — then tells a regenerator to re-derive every number from the literature rather than
+carry it over. Two reasons it earns its place:
+
+- **Reproducibility.** Re-running the brief should reproduce a report of the same shape and
+  rigor. It won't be byte-for-byte (the library and the model move), but the question and method
+  are pinned, so a regeneration that lands *materially* elsewhere is a signal — the evidence
+  moved, or a draft was steered.
+- **Steer-detection.** Writing the brief down separates the *intent* (audit-able, stable) from
+  the *output*. Editorial meddling and tunnel-vision then surface as a divergence between the
+  two: a regeneration that quietly narrows scope, drops contrary evidence, or retrofits a
+  conclusion is visible against the brief's standing requirements. Keep the brief
+  conclusion-free for exactly this reason — bake in an answer and you lose the ability to detect
+  that the answer was assumed. Where the report must derive a value the program already holds an
+  opinion on, the brief should direct the derivation to ignore that value and compare only
+  afterward, walled off (see "Derive; don't presuppose what the report exists to establish").
 
 ## Authoring model
 
