@@ -254,9 +254,12 @@ argument-from-authority and the machinery would launder it as rigor.
 **Running.** Generating the literature grounding report needs libkit + `BIBLIOGRAPHER_HOME`
 (source `~/.env`): `uv run --with-editable <scientist> --with libkit pytest program/claims/
 --grounding-out program/analysis`. The report **audit/render** then read that JSON and need
-*neither* (data-claim audits stay light). Re-validation rides drift: each `source()` sha-pins
-the paper text as a provenance input, so `--check-drift` flags a claim whose cited text moved
-since its `@reviewed` commit — re-read and re-stamp.
+*neither* (data-claim audits stay light). **Re-validation:** each `source()` sha-pins the cited
+paper's text as a provenance input; pin the review to those texts by stamping
+`@reviewed(sha="<combined sha>")` (the audit prints the current value when a review is unpinned).
+If a cited paper's library text later changes, the recomputed sha no longer matches and the
+citation flips to `stale-review` (blocking) — re-read the paper and re-stamp. An un-pinned review
+still backs but the audit nudges you to pin it.
 
 ### Figures & tables — embed a *grounded derivation*, never an ad-hoc graphic
 

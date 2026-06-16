@@ -47,6 +47,7 @@ Stdlib + PyYAML (pandas only for ``*.csv`` table inlining); pure, store-free —
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -310,6 +311,22 @@ def lit_verdict(claim: dict[str, Any]) -> tuple[str, str | None]:
     return ("backed", None)
 
 
+def lit_review_sha(claim: dict[str, Any]) -> str | None:
+    """A combined sha over the claim's cited paper texts (each ``source()`` records a
+    ``kind="paper"`` input pinned by its text sha). Stamp this in ``@reviewed(sha=…)``; the
+    audit recomputes it and flags ``stale-review`` if a cited paper's library text has changed
+    since the review — the literature analogue of input-drift, since the "input" is library
+    content, not a repo file."""
+    paps = sorted((str(i.get("path", "")), str(i.get("sha256", "")))
+                  for i in (claim.get("inputs") or []) if i.get("kind") == "paper")
+    if not paps:
+        return None
+    h = hashlib.sha256()
+    for ck, sha in paps:
+        h.update(f"{ck}:{sha}\n".encode())
+    return h.hexdigest()
+
+
 def index_analysis_artifacts(home: Path) -> dict[str, str | None]:
     """``{repo-relative analysis artifact path -> recorded artifact_sha256}`` across every
     experiment's ledger under ``home`` (including ``program/``). The key is how a report's
@@ -523,11 +540,23 @@ def audit(report_path: Path, home: Path | None = None,
             claim = claim_index[cands[0]]
             verdict, detail = lit_verdict(claim)
             rec["claim_id"] = cands[0]
-            rec["verdict"] = verdict
             rec["strength"] = claim.get("strength")
             rec["statement"] = claim.get("statement")
             rec["sources"] = (claim.get("evidence") or {}).get("lit_sources", [])
             rec["reviewed"] = claim.get("reviewed")
+            # re-validation: if the review was pinned (@reviewed(sha=…)) and a cited paper's
+            # text has since changed, the review is stale → re-read and re-stamp (blocking).
+            if verdict == "backed":
+                cur = lit_review_sha(claim)
+                stamped = (claim.get("reviewed") or {}).get("sha")
+                rec["review_sha"] = cur
+                if stamped and cur and not str(cur).startswith(str(stamped)):
+                    verdict, detail = ("stale-review",
+                                       "a cited paper's library text changed since the review "
+                                       f"(stamp={str(stamped)[:12]}, now={cur[:12]}) — re-read and re-stamp")
+                elif not stamped:
+                    rec["review_unpinned"] = True   # advisory, non-blocking
+            rec["verdict"] = verdict
             if verdict != "backed":
                 findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cands[0],
                                  "detail": detail})
@@ -972,7 +1001,8 @@ _CITE_MARK = {"backed": "✅ backed", "weak-backing": "⚠️ weak-backing",
               "missing": "❌ missing", "ambiguous": "❌ ambiguous"}
 _LIT_MARK = {"backed": "✅ backed", "needs-review": "❌ needs-review",
              "unsupported": "❌ unsupported", "broken": "❌ broken (quote absent)",
-             "wrong-kind": "❌ wrong-kind", "missing": "❌ missing", "ambiguous": "❌ ambiguous"}
+             "wrong-kind": "❌ wrong-kind", "missing": "❌ missing", "ambiguous": "❌ ambiguous",
+             "stale-review": "❌ stale-review (paper text changed)"}
 _EMBED_MARK = {"current": "✅ current", "drifted": "❌ drifted", "missing": "❌ missing",
                "untracked": "❌ untracked", "dangling": "❌ dangling"}
 
@@ -1004,6 +1034,8 @@ def render_audit(result: dict[str, Any]) -> str:
         if lc["verdict"] == "backed":
             nsrc = len(lc.get("sources") or [])
             tail = f"  ({lc.get('strength')}, {nsrc} source{'s' if nsrc != 1 else ''})"
+            if lc.get("review_unpinned"):
+                tail += f"  [review unpinned — stamp @reviewed(sha=\"{(lc.get('review_sha') or '')[:12]}\")]"
         lines.append(f"  [lit L{lc['line']}] {lc['id']}: {mark}{tail}")
     if lits:
         # A separate literature line so the green badge never launders attribution as

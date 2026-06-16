@@ -296,7 +296,7 @@ def test_report_citation_to_broken_lemma_is_weak(tmp_path):
 # literature citations ([lit:]) — quote-pinned, agent-reviewed, second-class
 # --------------------------------------------------------------------------- #
 def _lit_json(tmp_path: Path, *, node="test_lit", outcome="passed", kind="literature",
-              strength="strong", reviewed=None, sources=None) -> Path:
+              strength="strong", reviewed=None, sources=None, inputs=None) -> Path:
     """A program-scope grounding report carrying one literature claim."""
     prog = tmp_path / "program" / "analysis"
     prog.mkdir(parents=True, exist_ok=True)
@@ -308,7 +308,7 @@ def _lit_json(tmp_path: Path, *, node="test_lit", outcome="passed", kind="litera
         "evidence": {"lit_sources": sources or [
             {"citekey": "noor2015q", "system": "human", "test": "direct", "primary": True,
              "group": "noor"}]},
-        "inputs": [], "reconcile": [],
+        "inputs": inputs if inputs is not None else [], "reconcile": [],
     }
     (prog / "grounding_report.json").write_text(json.dumps({"claims": [claim]}), encoding="utf-8")
     return prog
@@ -372,6 +372,30 @@ def test_lit_missing_blocks(tmp_path):
     res = R.audit(_lit_report(tmp_path, node="test_ghost"), home=tmp_path)
     assert res["status"] == "BROKEN"
     assert res["lit_cites"][0]["verdict"] == "missing"
+
+
+def test_lit_review_pinned_to_paper_sha(tmp_path):
+    paper_in = [{"kind": "paper", "path": "noor2015q", "sha256": "a" * 64, "via": "literature"}]
+    _lit_json(tmp_path, inputs=paper_in)            # discover the current combined sha
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    cur = res["lit_cites"][0]["review_sha"]
+    assert cur and res["lit_cites"][0].get("review_unpinned")   # unpinned → advisory, still backed
+    assert res["status"] == "GROUNDED"
+    # stamp the matching sha → backed, no longer advisory
+    _lit_json(tmp_path, inputs=paper_in, reviewed={"support": True, "sha": cur})
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "GROUNDED"
+    assert res["lit_cites"][0]["verdict"] == "backed"
+    assert not res["lit_cites"][0].get("review_unpinned")
+
+
+def test_lit_stale_review_blocks(tmp_path):
+    # review pinned to an old sha; the cited paper's text has since changed
+    paper_in = [{"kind": "paper", "path": "noor2015q", "sha256": "b" * 64, "via": "literature"}]
+    _lit_json(tmp_path, inputs=paper_in, reviewed={"support": True, "sha": "deadbeef" * 8})
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "stale-review"
 
 
 def test_render_pdf_if_pandoc(tmp_path):
