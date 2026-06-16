@@ -102,6 +102,18 @@ result as confirmation is circular — it shows the target is *achievable* (feas
 it is *correct* (validation). Say which of the two the Kicho data establishes, and keep the
 validation resting on the independent evidence.
 
+**Be willing to disagree with program choices.** The report's loyalty is to the evidence, not to
+decisions the program has already made. When an independent derivation lands somewhere other
+than the program's current target, lead molecule, dose, route, or working assumption, say so
+plainly and quantify the gap — do **not** soften it into "consistent with," retrofit the
+derivation to bless the existing number, or stretch a band so the program's value falls inside
+it. A program choice is a hypothesis to test against the evidence, not a conclusion to support.
+If the evidence backs only part of it (say, a derived 40–60% window against an operating 50–66%
+one), state which part it backs and which it doesn't, do the arithmetic that exposes the gap, and
+frame the divergence as a finding or a recommendation to resolve. A report that always concludes
+the program was already right is usually laundering an assumption into a conclusion — the more
+useful report is the one that surfaces where the program may be wrong.
+
 ## Research and composition
 
 Reports are how the program's understanding grows, so a report should *leave the system
