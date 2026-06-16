@@ -73,6 +73,15 @@ outcome/strength. The reader assumes it. A *methods / caveats* section should ca
 what's specific to **this** report's data: assay limitations, exclusions, model caveats,
 which of two assays a number came from.
 
+**Each report stands on its own — no diffs against earlier versions or your process.** Write the
+current state of the evidence as if this were the first and only draft. Don't narrate how the
+report changed or how you got there: phrases like "now grounded in human data", "newly added",
+"recently", "the updated/expanded analysis", "as discussed earlier", "this revision", or
+"previously we assumed" must not appear. The reader has only this document — they don't know
+there were prior drafts, literature sweeps, or conversations. Comparative framing is fine when
+it's about the *science* ("the human cases sharpen the mouse picture"), never about your
+*workflow* ("the report now includes human cases").
+
 **Program reports: identify your studies.** A cross-experiment report cites several studies,
 and a program usually has *many* similar ones (e.g. several "rat IT screens"). The first time
 you reference a study, identify it — its id plus the system/model and the design that matters
@@ -86,7 +95,12 @@ X — that is circular. Derive X from independent evidence (the literature, firs
 biology, the raw measurements) and only then compare it to the program's current value as
 corroboration or as a discrepancy to explain. Reserve `[claim:<id>]` for the inputs to the
 derivation (a measured normalization, a dose-response), not for the conclusion you are
-supposed to be reaching.
+supposed to be reaching. Subtler trap: a measurement taken from an experiment that was *designed
+around* the hypothesis under test is **not** independent corroboration of it. If a study chose
+its parameter (e.g. knocked down to a particular level) *because* of the hypothesis, citing its
+result as confirmation is circular — it shows the target is *achievable* (feasibility), not that
+it is *correct* (validation). Say which of the two the Kicho data establishes, and keep the
+validation resting on the independent evidence.
 
 ## Research and composition
 
@@ -121,12 +135,14 @@ smarter*, not just answer one question:
   DOI as a **clickable link** (`[10.x/y](https://doi.org/10.x/y)`). (Vendoring a PDF into the
   repo to `doc()`-ground a literature claim is a last resort and usually the wrong tool — see
   below.)
-- **Decompose a big sub-question into its own "lemma" report.** When a report rests on a
-  substantial question of its own — a piece of biology that deserves its own evidence review
-  (a "lemma") — write *that* as a separate grounded report and have the main report build on
-  it with a **`[report:<id>]`** citation. `sci report` validates that the cited report
-  resolves and is itself `GROUNDED` (recursively), so a chain main → lemma → claims/literature
-  is checked end-to-end. This keeps each report focused and makes the sub-conclusion reusable.
+- **Decompose a big sub-question into its own supporting report.** When a report rests on a
+  substantial question of its own — a piece of biology that deserves its own evidence review —
+  write *that* as a separate grounded report and have the main report build on it with a
+  **`[report:<id>]`** citation. `sci report` validates that the cited report resolves and is
+  itself `GROUNDED` (recursively), so a chain main → supporting report → claims/literature is
+  checked end-to-end. This keeps each report focused and makes the sub-conclusion reusable.
+  (Internal shorthand only: don't call these "lemmas" or anything jargon-y in the report
+  text — each is just a report.)
 - **Literature vs. grounded claims — know which is which.** `[claim:<id>]` grounds on Kicho's
   own measured data (and `[report:<id>]` on a vetted sub-report). The external literature is
   *referenced* (bibliographer + DOIs), not claim-grounded — `sci report` does not (and should
@@ -139,9 +155,9 @@ smarter*, not just answer one question:
   since added papers that strengthen, qualify, or contradict the argument. So when you do a
   broad sweep (or add a batch of on-topic papers) *after* a report was written, treat that as a
   trigger to re-examine the affected reports: check the new papers against each load-bearing
-  claim, assumption, and weak-support flag, and revise. Decompose via `[report:<id>]` lemmas so
-  the re-examination is localized — re-derive the lemma, and the reports that cite it inherit
-  the change. (Watch for two failure modes when re-checking via subagents: a subagent can return
+  claim, assumption, and weak-support flag, and revise. Decompose via `[report:<id>]` supporting
+  reports so the re-examination is localized — re-derive the supporting report, and the reports
+  that cite it inherit the change. (Watch for two failure modes when re-checking via subagents: a subagent can return
   a plausible but wrong DOI — verify identifiers against PubMed/Crossref before citing — and a
   finding may be real but its citation mislabeled, so confirm which paper actually says what.)
 
@@ -175,11 +191,11 @@ statement, outcome, strength, kind}`) — the identical sources §3 / `sci trace
 
 Two more citation forms, same audit:
 
-- **`[report:<id>]`** — ground on another report (a "lemma"). `<id>` is
+- **`[report:<id>]`** — ground on another (supporting) report. `<id>` is
   `<exp-or-program>::<slug>` (e.g. `program::ube3a-dosage-window`) or a bare `<slug>`.
   `sci report` resolves it and requires the cited report to be itself `GROUNDED` (checked
-  recursively) — so it is `backed` only if the lemma holds, `missing` if it doesn't exist,
-  `weak-backing` if the lemma is `BROKEN`. Use it to build a report on a sub-report.
+  recursively) — so it is `backed` only if that report holds, `missing` if it doesn't exist,
+  `weak-backing` if it is `BROKEN`. Use it to build a report on a supporting report.
 - **Literature** is *not* a `[claim:]`. Cite papers in a **References** section by DOI as a
   clickable link, e.g. `1. Author et al. *Journal* (Year). doi:[10.x/y](https://doi.org/10.x/y)`,
   and refer to them inline by author-year ("(Monine et al. 2021)") — author-year avoids
