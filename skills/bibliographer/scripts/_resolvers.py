@@ -135,6 +135,16 @@ def _user_agent() -> str:
     return f"bibliographer/0.2 (mailto:{mailto()})"
 
 
+# Publisher CDNs and the Europe PMC render endpoint serve PDFs to browsers but
+# 403/HTML-challenge a bot-shaped UA. The polite-pool ``_user_agent()`` is right
+# for the metadata APIs (Crossref/Unpaywall reward a real mailto), but PDF byte
+# downloads need a browser-like UA. ``download_pdf`` overrides per request.
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+
 # --------------------------------------------------------------------------- #
 # classification
 # --------------------------------------------------------------------------- #
@@ -352,18 +362,29 @@ async def ncbi_idconv(ids: str, client: httpx.AsyncClient) -> dict[str, str]:
 async def download_pdf(url: str, dest: Path, client: httpx.AsyncClient) -> bool:
     """Download a PDF to ``dest``. Returns True only if it really looks like a PDF.
 
-    Many "OA" URLs are HTML landing pages; we verify the magic bytes so we never
-    ingest a web page as if it were the paper.
+    Many "OA" URLs are HTML landing pages (or Cloudflare "Just a moment…"
+    challenges) that *also* answer 200, sometimes even with an
+    ``application/pdf`` content-type. We therefore trust the magic bytes alone:
+    a real PDF carries ``%PDF-`` within its first kilobyte (the spec allows a
+    little leading junk). Anything else — HTML, JSON error bodies — is rejected
+    so we never ingest a web page as if it were the paper.
+
+    Uses a browser-like UA and follows redirects per request: the polite-pool UA
+    on the shared client is correct for metadata APIs, but publisher CDNs and the
+    Europe PMC render endpoint serve PDFs only to browser-shaped clients.
     """
     try:
-        r = await client.get(url)
+        r = await client.get(
+            url,
+            headers={"User-Agent": _BROWSER_UA, "Accept": "application/pdf,*/*"},
+            follow_redirects=True,
+        )
     except httpx.HTTPError:
         return False
     if r.status_code != 200:
         return False
     data = r.content
-    ctype = r.headers.get("content-type", "")
-    if not (data[:5] == b"%PDF-" or "application/pdf" in ctype):
+    if b"%PDF-" not in data[:1024]:
         return False
     dest.write_bytes(data)
     return True
@@ -371,14 +392,94 @@ async def download_pdf(url: str, dest: Path, client: httpx.AsyncClient) -> bool:
 
 async def fetch_unpaywall(doi: str, client: httpx.AsyncClient) -> str | None:
     """Return the best open-access PDF URL for a DOI, or None."""
+    urls = await fetch_unpaywall_pdf_urls(doi, client)
+    return urls[0] if urls else None
+
+
+async def fetch_unpaywall_pdf_urls(doi: str, client: httpx.AsyncClient) -> list[str]:
+    """All advertised OA PDF URLs for a DOI, best first, de-duped.
+
+    Unpaywall's ``best_oa_location`` often points at a publisher landing page
+    that returns HTML; the ``oa_locations[*]`` list frequently also carries a
+    repository (PMC, institutional) mirror that downloads cleanly. Returning the
+    whole list lets ``acquire_oa_pdf`` try each rather than giving up on the
+    first non-PDF.
+    """
     status, body = await _cached_get(
         client, f"https://api.unpaywall.org/v2/{doi}",
         key=f"unpaywall|{doi.lower()}|v1", params={"email": mailto()},
     )
     if status != 200:
+        return []
+    data = json.loads(body)
+    locs = [data.get("best_oa_location") or {}, *(data.get("oa_locations") or [])]
+    urls: list[str] = []
+    for loc in locs:
+        u = (loc or {}).get("url_for_pdf")
+        if u and u not in urls:
+            urls.append(u)
+    return urls
+
+
+def _europepmc_pdf_urls(pmcid: str) -> list[str]:
+    """Europe PMC render URLs for a PMCID, most-reliable first.
+
+    ``/articles/<PMCID>?pdf=render`` is the scraper-friendly route that works
+    today; the legacy ``ptpmcrender.fcgi`` backend is kept only as a secondary
+    attempt (it has been observed failing to connect).
+    """
+    return [
+        f"https://europepmc.org/articles/{pmcid}?pdf=render",
+        f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmcid}&blobtype=pdf",
+    ]
+
+
+async def fetch_pmc_oa_pdf(pmcid: str, client: httpx.AsyncClient) -> str | None:
+    """NCBI PMC OA service → a direct PDF href for a PMCID, or None.
+
+    A further fallback for the PMC open-access subset when Europe PMC's render
+    endpoint declines. The service returns ``<link format="pdf" href="…">``; the
+    href is usually an ``ftp://`` URL on the NCBI mirror, which is also reachable
+    over HTTPS at the same host. Only direct ``.pdf`` links are returned (the
+    ``.tar.gz`` package form is skipped — we want a single PDF).
+    """
+    status, body = await _cached_get(
+        client, "https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi",
+        key=f"pmc-oa|{pmcid}|v1", params={"id": pmcid},
+    )
+    if status != 200:
         return None
-    loc = json.loads(body).get("best_oa_location") or {}
-    return loc.get("url_for_pdf") or None
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return None
+    for link in root.iter("link"):
+        if link.get("format") == "pdf":
+            href = link.get("href") or ""
+            if href.startswith("ftp://"):
+                href = "https://" + href[len("ftp://"):]
+            return href or None
+    return None
+
+
+async def _derive_pmcid(rec: dict[str, Any], client: httpx.AsyncClient) -> str | None:
+    """The record's PMCID, deriving it from the DOI/PMID via NCBI if absent.
+
+    Citation-only stubs minted from a DOI carry no PMCID, which would otherwise
+    skip the Europe PMC / PMC-OA tiers entirely — the most reliable OA routes.
+    """
+    if rec.get("pmcid"):
+        return rec["pmcid"]
+    for ident in (rec.get("doi"), rec.get("pmid")):
+        if not ident:
+            continue
+        try:
+            conv = await ncbi_idconv(str(ident), client)
+        except (httpx.HTTPError, ResolveError):
+            continue
+        if conv.get("pmcid"):
+            return conv["pmcid"]
+    return None
 
 
 async def acquire_oa_pdf(
@@ -390,11 +491,11 @@ async def acquire_oa_pdf(
     (preprint servers + open repositories); the browser/institutional and
     last-resort routes are manual — see references/getting-pdfs.md. Order favors
     the most reliable, freest sources first; every candidate is byte-verified as
-    a real PDF by :func:`download_pdf`.
+    a real PDF by :func:`download_pdf`, so a publisher landing page or Cloudflare
+    challenge that answers 200 is rejected and the next tier is tried.
     """
     doi = (rec.get("doi") or "").strip()
     arxiv = rec.get("arxiv_id")
-    pmcid = rec.get("pmcid")
 
     async def _try(source: str, url: str | None) -> str | None:
         if url and await download_pdf(url, dest, client):
@@ -406,30 +507,38 @@ async def acquire_oa_pdf(
         aid = re.sub(r"v\d+$", "", str(arxiv))
         if await _try("arxiv", f"https://arxiv.org/pdf/{aid}.pdf"):
             return "arxiv"
-    # 2. Europe PMC OA render (the PMC open-access subset)
-    if pmcid:
-        if await _try(
-            "europepmc",
-            f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmcid}&blobtype=pdf",
-        ):
-            return "europepmc"
-    # 3. bioRxiv / medRxiv (DOI prefix 10.1101)
+    # 2. bioRxiv / medRxiv (DOI prefix 10.1101)
     if doi.startswith("10.1101/"):
         for server in ("biorxiv", "medrxiv"):
             for ver in ("v1", ""):
                 if await _try(server, f"https://www.{server}.org/content/{doi}{ver}.full.pdf"):
                     return server
-    # 4. an OA URL already on the record (from a prior Unpaywall/S2 resolve)
+    # 3. an OA URL already on the record (from a prior Unpaywall/S2 resolve)
     if await _try("oa_url", rec.get("oa_pdf_url")):
         return "oa_url"
-    # 5. Unpaywall (fresh)
+    # 4. Unpaywall — try every advertised PDF location (best is often a publisher
+    #    landing page that serves HTML; a repository mirror further down works).
     if doi:
         try:
-            if await _try("unpaywall", await fetch_unpaywall(doi, client)):
-                return "unpaywall"
+            for url in await fetch_unpaywall_pdf_urls(doi, client):
+                if await _try("unpaywall", url):
+                    return "unpaywall"
         except (httpx.HTTPError, ResolveError):
             pass
-    # 6. Semantic Scholar openAccessPdf (fresh)
+    # 5. Europe PMC OA render — the most scraper-friendly route. Derive the PMCID
+    #    from the DOI/PMID when the record (a citation-only stub) lacks one.
+    pmcid = await _derive_pmcid(rec, client)
+    if pmcid:
+        for url in _europepmc_pdf_urls(pmcid):
+            if await _try("europepmc", url):
+                return "europepmc"
+        # 6. NCBI PMC OA service — last structured fallback for the OA subset.
+        try:
+            if await _try("pmc_oa", await fetch_pmc_oa_pdf(pmcid, client)):
+                return "pmc_oa"
+        except (httpx.HTTPError, ResolveError):
+            pass
+    # 7. Semantic Scholar openAccessPdf (fresh)
     for kind, val in (("doi", doi), ("arxiv", arxiv), ("pmcid", pmcid)):
         if not val:
             continue
