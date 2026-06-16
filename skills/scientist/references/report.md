@@ -251,6 +251,21 @@ implies the claim), or secondary, or contested. Keep author seniority / citation
 *context* in `note`/`caveats`, **never** as a scoring input — weighting by prestige is
 argument-from-authority and the machinery would launder it as rigor.
 
+**When the library has only an abstract or a title — and you need the body, pause and ask.**
+Many papers are paywalled, so the bibliographer ingests only their metadata + abstract (and the
+oldest/most-locked, just the title) — `bib fetch` can't get an open-access PDF. You can still
+quote a real sentence from an abstract, and a title sometimes carries the headline result (mark
+those `suggestive`), but you **cannot pin the specific finding** (an exact number, the actual
+mechanism, the method that makes it *direct*) that lives only in the body. So: check each cited
+paper's available text (a few hundred chars = title only; ~1–3k = abstract; more = full text). If
+a paper is abstract-/title-only **and it is load-bearing** — the claim's strength or a specific
+number genuinely depends on the body you don't have — **stop and ask the user for the full text**
+(they may have institutional access: `bib fetch <key> --pdf <downloaded.pdf>`). Don't silently
+ground a load-bearing claim on a title gloss, and don't silently drop it either; surface it. For
+*corroborating* abstract-only sources, grounding on the abstract as `suggestive` is fine — just
+say so in the `@reviewed` note. Record which cited papers are abstract-/title-only so the gap is
+visible, not buried.
+
 **Running.** Generating the literature grounding report needs libkit + `BIBLIOGRAPHER_HOME`
 (source `~/.env`): `uv run --with-editable <scientist> --with libkit pytest program/claims/
 --grounding-out program/analysis`. The report **audit/render** then read that JSON and need
