@@ -93,6 +93,11 @@ supposed to be reaching.
 Reports are how the program's understanding grows, so a report should *leave the system
 smarter*, not just answer one question:
 
+- **Sweep the literature *before* you write, not after.** The broad search below is step one,
+  not a citation-gathering afterthought: do it first, then write the report on the evidence it
+  surfaces. Writing first and back-filling citations produces a report built on whatever you
+  already knew — and a thin library — which is exactly backwards. If you've already drafted on a
+  thin base, re-derive the conclusions against the full sweep before considering it done.
 - **Do the literature search in subagents, and make it broad.** A literature-heavy report
   needs real depth. Fan out parallel research subagents — one per sub-topic spanning the
   report's whole subject area, not just its headline question (for a per-tissue knockdown
@@ -128,6 +133,17 @@ smarter*, not just answer one question:
   not) try to turn an arbitrary citation into a grounded claim. State a literature-derived
   number as referenced, and flag its assumptions and weak support; don't dress it up as a
   Kicho claim.
+- **A literature-grounded report goes stale when the library grows.** `sci report` audits the
+  Kicho `[claim:]`/`[report:]`/exhibit citations, but it cannot tell you that the *literature*
+  underneath a referenced conclusion has moved — a re-audit is green even if a major sweep has
+  since added papers that strengthen, qualify, or contradict the argument. So when you do a
+  broad sweep (or add a batch of on-topic papers) *after* a report was written, treat that as a
+  trigger to re-examine the affected reports: check the new papers against each load-bearing
+  claim, assumption, and weak-support flag, and revise. Decompose via `[report:<id>]` lemmas so
+  the re-examination is localized — re-derive the lemma, and the reports that cite it inherit
+  the change. (Watch for two failure modes when re-checking via subagents: a subagent can return
+  a plausible but wrong DOI — verify identifiers against PubMed/Crossref before citing — and a
+  finding may be real but its citation mislabeled, so confirm which paper actually says what.)
 
 ## Authoring model
 
