@@ -70,6 +70,10 @@ _EMBED_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[\"'][^\"']*[\"'])?
 # Inline report citation: [report:<id>] — grounds a report on another (a "lemma" sub-report).
 # <id> is <exp-or-program>::<slug> (e.g. program::ube3a-dosage-window) or a bare <slug>.
 _REPORT_RE = re.compile(r"\[report:\s*([^\[\]]+?)\s*\]")
+# Inline literature citation: [lit:<id>] — grounds a third-party statement on a *literature*
+# claim (kind=literature) that verifies a verbatim quote against a paper in the bibliographer
+# library and carries an agent support-review. Epistemically second-class to [claim:].
+_LIT_RE = re.compile(r"\[lit:\s*([^\[\]]+?)\s*\]")
 # An experiment folder id prefix (K1-YYMMXX …), to derive an exp_id from a folder name.
 _EXP_ID_RE = re.compile(r"^\s*(K1-[A-Za-z0-9]+)")
 
@@ -108,6 +112,17 @@ def _short_claim_id(claim_id: str) -> str:
     return f"{exp}::{node}" if node else exp
 
 
+def _author_year(src: dict[str, Any]) -> str:
+    """An author-year label for a literature source, parsed from its bibliographer citekey
+    (``<lastname><year><word>`` → ``Lastname year``); falls back to citekey + recorded year."""
+    ck = str(src.get("citekey") or "")
+    m = re.match(r"^([a-z]+)(\d{4})", ck)
+    if m:
+        return f"{m.group(1).capitalize()} {m.group(2)}"
+    yr = str(src.get("year") or "")
+    return f"{ck} {yr}".strip() or "source"
+
+
 # --------------------------------------------------------------------------- #
 # parsing
 # --------------------------------------------------------------------------- #
@@ -121,6 +136,7 @@ def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
     citations: list[dict[str, Any]] = []
     embeds: list[dict[str, Any]] = []
     report_cites: list[dict[str, Any]] = []
+    lit_cites: list[dict[str, Any]] = []
     in_fence = False
     fence_marker = ""
     for n, line in enumerate(text.splitlines(), start=1):
@@ -138,9 +154,12 @@ def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
             citations.append({"id": m.group(1).strip(), "line": n})
         for m in _REPORT_RE.finditer(line):
             report_cites.append({"id": m.group(1).strip(), "line": n})
+        for m in _LIT_RE.finditer(line):
+            lit_cites.append({"id": m.group(1).strip(), "line": n})
         for m in _EMBED_RE.finditer(line):
             embeds.append({"target": m.group(1).strip(), "line": n})
-    return {"citations": citations, "embeds": embeds, "report_cites": report_cites}
+    return {"citations": citations, "embeds": embeds, "report_cites": report_cites,
+            "lit_cites": lit_cites}
 
 
 def parse_sections(text: str) -> dict[str, Any]:
@@ -163,6 +182,7 @@ def parse_sections(text: str) -> dict[str, Any]:
     def _clean(s: str) -> str:
         s = _CITE_RE.sub("", s)
         s = _REPORT_RE.sub("", s)
+        s = _LIT_RE.sub("", s)
         s = _EMBED_RE.sub("", s)
         return s.strip()
 
@@ -266,6 +286,28 @@ def is_grounded(claim: dict[str, Any]) -> bool:
     """The grounded rule: a clean pass at moderate-or-strong evidence."""
     return (str(claim.get("outcome")) in GROUNDED_OUTCOMES
             and str(claim.get("strength")) in GROUNDED_STRENGTHS)
+
+
+def lit_verdict(claim: dict[str, Any]) -> tuple[str, str | None]:
+    """Verdict for a ``[lit:<id>]`` citation. Literature grounding is two-layer: the tool
+    check is the claim's pass/fail (the verbatim quote was present in the cited paper); the
+    *support* is a one-time agent review stamped via ``@reviewed``. Unlike a data claim, a
+    *weak* (but reviewed-and-supported) literature claim still backs its citation — single,
+    suggestive, or secondary evidence is legitimately weak, not broken. Blocks only on:
+    a failed quote check, a non-literature claim cited via ``[lit:]``, an un-reviewed claim,
+    or an agent verdict of unsupported. Returns ``(verdict, detail|None)``."""
+    if str(claim.get("kind")) != "literature":
+        return ("wrong-kind", "cited via [lit:] but is not a literature claim — use [claim:]")
+    if str(claim.get("outcome")) not in GROUNDED_OUTCOMES:
+        return ("broken", f"the quote check did not pass (outcome={claim.get('outcome')}) — "
+                          "the verbatim quote is not in the cited paper")
+    reviewed = claim.get("reviewed")
+    if not reviewed:
+        return ("needs-review", "no agent support-review (@reviewed) yet — a human/agent must "
+                                "confirm the quote supports the paraphrase before it backs a cite")
+    if not reviewed.get("support", False):
+        return ("unsupported", "agent review judged the source does NOT support the statement")
+    return ("backed", None)
 
 
 def index_analysis_artifacts(home: Path) -> dict[str, str | None]:
@@ -462,6 +504,35 @@ def audit(report_path: Path, home: Path | None = None,
                                      "detail": "cited report is itself BROKEN — fix it first"})
         report_cites.append(rec)
 
+    # ---- literature citations (grounding on a paper in the bibliographer library) -------- #
+    lit_cites: list[dict[str, Any]] = []
+    for lc in parsed.get("lit_cites", []):
+        cid, line = lc["id"], lc["line"]
+        rec = {"id": cid, "line": line}
+        cands = resolve_citation(cid, claim_index)
+        if not cands:
+            rec["verdict"] = "missing"
+            findings.append({"kind": "missing-lit", "line": line, "cite": cid,
+                             "detail": "no literature claim has this id; write the [lit:] claim first"})
+        elif len(cands) > 1:
+            rec["verdict"] = "ambiguous"
+            rec["candidates"] = cands
+            findings.append({"kind": "ambiguous-lit", "line": line, "cite": cid,
+                             "detail": f"matches {len(cands)} claims — qualify it: {cands}"})
+        else:
+            claim = claim_index[cands[0]]
+            verdict, detail = lit_verdict(claim)
+            rec["claim_id"] = cands[0]
+            rec["verdict"] = verdict
+            rec["strength"] = claim.get("strength")
+            rec["statement"] = claim.get("statement")
+            rec["sources"] = (claim.get("evidence") or {}).get("lit_sources", [])
+            rec["reviewed"] = claim.get("reviewed")
+            if verdict != "backed":
+                findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cands[0],
+                                 "detail": detail})
+        lit_cites.append(rec)
+
     status = "GROUNDED" if not findings else "BROKEN"
     return {
         "report": _rel_or_name(rp, home),
@@ -471,6 +542,7 @@ def audit(report_path: Path, home: Path | None = None,
         "citations": citations,
         "embeds": embeds,
         "report_cites": report_cites,
+        "lit_cites": lit_cites,
         "findings": findings,
         "status": status,
     }
@@ -528,6 +600,8 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     num: dict[str, int] = {}           # cid -> 1-based index, first-seen order
     rorder: list[str] = []
     rnum: dict[str, int] = {}          # report-cite id -> 1-based index
+    lorder: list[str] = []
+    lnum: dict[str, int] = {}          # lit-cite id -> 1-based index
 
     def _cite_sub(m: re.Match) -> str:
         cid = m.group(1).strip()
@@ -542,6 +616,13 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
             rorder.append(cid)
             rnum[cid] = len(rorder)
         return f"[^report-{rnum[cid]}]"
+
+    def _lit_sub(m: re.Match) -> str:
+        cid = m.group(1).strip()
+        if cid not in lnum:
+            lorder.append(cid)
+            lnum[cid] = len(lorder)
+        return f"[^lit-{lnum[cid]}]"
 
     def _embed_sub(m: re.Match) -> str:
         path = m.group(1).strip()
@@ -561,6 +642,7 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     # rather than drifting onto the next line.
     body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _CITE_RE.pattern, _cite_sub, text)
     body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _REPORT_RE.pattern, _report_sub, body)
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _LIT_RE.pattern, _lit_sub, body)
     # embeds can span only a line each; substitute per match on the citation-substituted text
     body = _EMBED_RE.sub(_embed_sub, body)
 
@@ -583,8 +665,35 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
             return f"{stmt} `{_short_claim_id(cands[0])}`"
         return f"claim `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
 
+    def _lit_note_text(cid: str) -> str:
+        # A literature endnote shows the convergence set: the synthesized strength, then each
+        # source with its evidential tags (system, direct/suggestive, relay flag). Verbatim
+        # quotes stay in the spec, not the prose, so the endnote reads cleanly while the claim
+        # remains quote-pinned and auditable. Visibly distinct from a data-claim note.
+        cands = resolve_citation(cid, claim_index)
+        if len(cands) != 1:
+            return f"literature `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
+        c = claim_index[cands[0]]
+        strength = c.get("strength") or "unspecified"
+        srcs = (c.get("evidence") or {}).get("lit_sources", [])
+        parts, seen = [], set()
+        for s in srcs:                       # one entry per paper (a paper cited for several
+            ck = s.get("citekey")            # quotes appears once in the endnote)
+            if ck in seen:
+                continue
+            seen.add(ck)
+            ay = _author_year(s)
+            tags = [t for t in (s.get("system"),
+                                None if s.get("test") == "direct" else "suggestive",
+                                None if s.get("primary", True) else "secondary") if t]
+            parts.append(f"{ay} ({', '.join(tags)})" if tags else ay)
+        groups = len({s.get("group") for s in srcs})
+        lead = f"Literature — **{strength}**" + (f", {groups} independent" if groups > 1 else "") + ": "
+        return lead + "; ".join(parts) if parts else f"Literature — {strength} `{cid}`"
+
     defs = [f"[^claim-{num[cid]}]: {_note_text(cid)}" for cid in order]
     defs += [f"[^report-{rnum[cid]}]: {_report_note_text(cid)}" for cid in rorder]
+    defs += [f"[^lit-{lnum[cid]}]: {_lit_note_text(cid)}" for cid in lorder]
     if defs:
         # pandoc footnote definitions; endnotes.lua relocates them to the end on render
         body = body.rstrip() + "\n\n" + "\n".join(defs) + "\n"
@@ -861,6 +970,9 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
 # --------------------------------------------------------------------------- #
 _CITE_MARK = {"backed": "✅ backed", "weak-backing": "⚠️ weak-backing",
               "missing": "❌ missing", "ambiguous": "❌ ambiguous"}
+_LIT_MARK = {"backed": "✅ backed", "needs-review": "❌ needs-review",
+             "unsupported": "❌ unsupported", "broken": "❌ broken (quote absent)",
+             "wrong-kind": "❌ wrong-kind", "missing": "❌ missing", "ambiguous": "❌ ambiguous"}
 _EMBED_MARK = {"current": "✅ current", "drifted": "❌ drifted", "missing": "❌ missing",
                "untracked": "❌ untracked", "dangling": "❌ dangling"}
 
@@ -885,6 +997,22 @@ def render_audit(result: dict[str, Any]) -> str:
         mark = _CITE_MARK.get(r["verdict"], r["verdict"])
         tail = f"  → {r.get('report')}" if r["verdict"] == "backed" and r.get("report") else ""
         lines.append(f"  [report L{r['line']}] {r['id']}: {mark}{tail}")
+    lits = result.get("lit_cites", [])
+    for lc in lits:
+        mark = _LIT_MARK.get(lc["verdict"], lc["verdict"])
+        tail = ""
+        if lc["verdict"] == "backed":
+            nsrc = len(lc.get("sources") or [])
+            tail = f"  ({lc.get('strength')}, {nsrc} source{'s' if nsrc != 1 else ''})"
+        lines.append(f"  [lit L{lc['line']}] {lc['id']}: {mark}{tail}")
+    if lits:
+        # A separate literature line so the green badge never launders attribution as
+        # data-grounding: show the tier spread across all [lit:] citations.
+        from collections import Counter
+        tally = Counter(
+            (lc.get("strength") if lc["verdict"] == "backed" else lc["verdict"]) for lc in lits)
+        spread = ", ".join(f"{n} {k}" for k, n in tally.items())
+        lines.append(f"  literature: {len(lits)} cited — {spread}")
     for f in result["findings"]:
         if f.get("detail"):
             loc = f.get("cite") or f.get("embed") or ""

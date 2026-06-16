@@ -208,10 +208,55 @@ Two more citation forms, same audit:
   `sci report` resolves it and requires the cited report to be itself `GROUNDED` (checked
   recursively) — so it is `backed` only if that report holds, `missing` if it doesn't exist,
   `weak-backing` if it is `BROKEN`. Use it to build a report on a supporting report.
-- **Literature** is *not* a `[claim:]`. Cite papers in a **References** section by DOI as a
-  clickable link, e.g. `1. Author et al. *Journal* (Year). doi:[10.x/y](https://doi.org/10.x/y)`,
-  and refer to them inline by author-year ("(Monine et al. 2021)") — author-year avoids
-  colliding with the numbered grounded-claim endnotes the renderer generates.
+- **`[lit:<id>]`** — ground a *third-party* fact on a paper in the bibliographer library. A
+  literature claim is a pytest spec in `program/claims/test_literature.py` (`@kind("literature")`)
+  that calls `source(citekey, quote=…, test=…, system=…, primary=…, group=…)` — and
+  `converge(...)` for a multi-source fact. The spec **fails if the verbatim quote is not in the
+  cited paper's stored text** (read from the LOCAL library DuckDB — keyless, offline; only the
+  library's semantic *query* embeds). `[lit:program::test_literature.py::<node>]` is `backed`
+  only if that quote check passed **and** the claim carries an agent support-review
+  (`@reviewed`); a *weak* but reviewed-and-supported claim still backs (single/suggestive
+  evidence is legitimately weak). It is **second-class to `[claim:]`** — rendered as a distinct
+  "Literature" endnote and reported on its own audit line — and must never read as data-grounded.
+- **Bare references** (no `[lit:]`) remain fine for *background*: cite the paper in a
+  **References** section by DOI as a clickable link, e.g.
+  `1. Author et al. *Journal* (Year). doi:[10.x/y](https://doi.org/10.x/y)`, and refer to it
+  inline by author-year ("(Monine et al. 2021)"). Promote a citation to `[lit:]` when the fact
+  is **load-bearing** — when the argument leans on it, make it quote-pinned and auditable.
+
+#### Authoring and reviewing a literature claim
+
+A `[lit:]` claim grounds *attribution faithfulness* (the paper really says this), not truth —
+you cite what the field reports. Two layers:
+
+1. **Quote (tool, every audit).** Find a *verbatim* phrase in the paper that states the fact and
+   pass it as `quote=`. Matching folds Unicode dashes/whitespace, but the words must be exact;
+   use `bib show`/`bib query`/`sci`-side reads to copy a real phrase. A short, specific sentence
+   beats a long one (less to break). One paper can back several quotes; it appears once per
+   endnote.
+2. **Support review (agent, once).** Stamp `@reviewed(date=…, by=…, support=…, primary=…,
+   independent_groups=…, note=…)` after actually reading the cited span. Judge:
+   - **support** — does the quote support the *paraphrase*, read in context? Watch for
+     quote-mining (a supportive sentence in a paper whose surrounding text qualifies it).
+     `support=False` ⇒ the claim is broken.
+   - **primary** — is this the *primary* source, or a relay? (The telephone problem: if A says
+     "B showed X", cite **B**; verify A isn't just repeating B.) Mark a relay `primary=False`.
+   - **independence** — set `group=` so co-lab / shared-model papers count as ONE group; the
+     endnote's "N independent" comes from distinct groups.
+
+**Strength is evidential weight, judged — not retrieval location.** `@strength`: **strong** =
+independent (≥2 distinct groups) + direct + primary; **moderate** = a single group's direct,
+primary, unreplicated result; **weak** = single + *suggestive* (a related experiment that only
+implies the claim), or secondary, or contested. Keep author seniority / citation count as
+*context* in `note`/`caveats`, **never** as a scoring input — weighting by prestige is
+argument-from-authority and the machinery would launder it as rigor.
+
+**Running.** Generating the literature grounding report needs libkit + `BIBLIOGRAPHER_HOME`
+(source `~/.env`): `uv run --with-editable <scientist> --with libkit pytest program/claims/
+--grounding-out program/analysis`. The report **audit/render** then read that JSON and need
+*neither* (data-claim audits stay light). Re-validation rides drift: each `source()` sha-pins
+the paper text as a provenance input, so `--check-drift` flags a claim whose cited text moved
+since its `@reviewed` commit — re-read and re-stamp.
 
 ### Figures & tables — embed a *grounded derivation*, never an ad-hoc graphic
 

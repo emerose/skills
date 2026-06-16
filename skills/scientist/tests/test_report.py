@@ -292,6 +292,88 @@ def test_report_citation_to_broken_lemma_is_weak(tmp_path):
     assert res["report_cites"][0]["verdict"] == "weak-backing"
 
 
+# --------------------------------------------------------------------------- #
+# literature citations ([lit:]) — quote-pinned, agent-reviewed, second-class
+# --------------------------------------------------------------------------- #
+def _lit_json(tmp_path: Path, *, node="test_lit", outcome="passed", kind="literature",
+              strength="strong", reviewed=None, sources=None) -> Path:
+    """A program-scope grounding report carrying one literature claim."""
+    prog = tmp_path / "program" / "analysis"
+    prog.mkdir(parents=True, exist_ok=True)
+    claim = {
+        "id": f"claims/test_literature.py::{node}",
+        "statement": "A third-party fact.", "outcome": outcome, "kind": kind,
+        "strength": strength, "caveats": None,
+        "reviewed": reviewed if reviewed is not None else {"date": "2026-06-16", "support": True},
+        "evidence": {"lit_sources": sources or [
+            {"citekey": "noor2015q", "system": "human", "test": "direct", "primary": True,
+             "group": "noor"}]},
+        "inputs": [], "reconcile": [],
+    }
+    (prog / "grounding_report.json").write_text(json.dumps({"claims": [claim]}), encoding="utf-8")
+    return prog
+
+
+def _lit_report(tmp_path: Path, node="test_lit", slug="lit") -> Path:
+    d = tmp_path / "program" / "reports" / slug
+    d.mkdir(parents=True, exist_ok=True)
+    md = d / "report.md"
+    md.write_text(f"# Lit\n\nA fact [lit:program::test_literature.py::{node}].\n", encoding="utf-8")
+    return md
+
+
+def test_lit_backed_grounds(tmp_path):
+    _lit_json(tmp_path)
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "GROUNDED", res
+    assert res["lit_cites"][0]["verdict"] == "backed"
+    assert res["lit_cites"][0]["strength"] == "strong"
+
+
+def test_lit_weak_still_backs(tmp_path):
+    # a single, suggestive, but reviewed-and-supported source is legitimately weak — not broken
+    _lit_json(tmp_path, strength="weak")
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "GROUNDED", res
+    assert res["lit_cites"][0]["verdict"] == "backed"
+
+
+def test_lit_unreviewed_blocks(tmp_path):
+    _lit_json(tmp_path, reviewed=False)          # quote present, but no agent support-review
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "needs-review"
+
+
+def test_lit_unsupported_blocks(tmp_path):
+    _lit_json(tmp_path, reviewed={"support": False})
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "unsupported"
+
+
+def test_lit_quote_absent_blocks(tmp_path):
+    _lit_json(tmp_path, outcome="failed")        # the verbatim quote check failed
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "broken"
+
+
+def test_lit_wrong_kind_blocks(tmp_path):
+    # a data claim cited via [lit:] instead of [claim:] is a category error
+    _lit_json(tmp_path, kind="result")
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "wrong-kind"
+
+
+def test_lit_missing_blocks(tmp_path):
+    (tmp_path / "program" / "analysis").mkdir(parents=True, exist_ok=True)
+    res = R.audit(_lit_report(tmp_path, node="test_ghost"), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "missing"
+
+
 def test_render_pdf_if_pandoc(tmp_path):
     if shutil.which("pandoc") is None:
         pytest.skip("pandoc not installed; render toolchain unavailable")
