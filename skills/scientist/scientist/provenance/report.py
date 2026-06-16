@@ -47,6 +47,7 @@ Stdlib + PyYAML (pandas only for ``*.csv`` table inlining); pure, store-free —
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -67,6 +68,13 @@ GROUNDED_STRENGTHS = {"strong", "moderate"}
 _CITE_RE = re.compile(r"\[claim:\s*([^\[\]]+(?:\[[^\]]*\])?)\s*\]")
 # Markdown image embed: ![alt](target "optional title"). Captures the target path.
 _EMBED_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)")
+# Inline report citation: [report:<id>] — grounds a report on another (a "lemma" sub-report).
+# <id> is <exp-or-program>::<slug> (e.g. program::ube3a-dosage-window) or a bare <slug>.
+_REPORT_RE = re.compile(r"\[report:\s*([^\[\]]+?)\s*\]")
+# Inline literature citation: [lit:<id>] — grounds a third-party statement on a *literature*
+# claim (kind=literature) that verifies a verbatim quote against a paper in the bibliographer
+# library and carries an agent support-review. Epistemically second-class to [claim:].
+_LIT_RE = re.compile(r"\[lit:\s*([^\[\]]+?)\s*\]")
 # An experiment folder id prefix (K1-YYMMXX …), to derive an exp_id from a folder name.
 _EXP_ID_RE = re.compile(r"^\s*(K1-[A-Za-z0-9]+)")
 
@@ -93,6 +101,29 @@ def _exp_id_for_dir(folder: Path) -> str:
     return m.group(1) if m else folder.name
 
 
+def _short_claim_id(claim_id: str) -> str:
+    """A compact display form of a ``<exp>::<test-file>::<node>`` claim id for an endnote
+    citation: drop the test-file component and the ``test_`` node prefix, leaving
+    ``<exp>::<node>`` (e.g. ``program::lead_is_deepest_protein_knockdown``). Display only —
+    the report source still cites the full, unambiguous id."""
+    parts = claim_id.split("::")
+    exp, node = parts[0], parts[-1]
+    if node.startswith("test_"):
+        node = node[len("test_"):]
+    return f"{exp}::{node}" if node else exp
+
+
+def _author_year(src: dict[str, Any]) -> str:
+    """An author-year label for a literature source, parsed from its bibliographer citekey
+    (``<lastname><year><word>`` → ``Lastname year``); falls back to citekey + recorded year."""
+    ck = str(src.get("citekey") or "")
+    m = re.match(r"^([a-z]+)(\d{4})", ck)
+    if m:
+        return f"{m.group(1).capitalize()} {m.group(2)}"
+    yr = str(src.get("year") or "")
+    return f"{ck} {yr}".strip() or "source"
+
+
 # --------------------------------------------------------------------------- #
 # parsing
 # --------------------------------------------------------------------------- #
@@ -105,6 +136,8 @@ def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
     """
     citations: list[dict[str, Any]] = []
     embeds: list[dict[str, Any]] = []
+    report_cites: list[dict[str, Any]] = []
+    lit_cites: list[dict[str, Any]] = []
     in_fence = False
     fence_marker = ""
     for n, line in enumerate(text.splitlines(), start=1):
@@ -120,9 +153,14 @@ def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
             continue
         for m in _CITE_RE.finditer(line):
             citations.append({"id": m.group(1).strip(), "line": n})
+        for m in _REPORT_RE.finditer(line):
+            report_cites.append({"id": m.group(1).strip(), "line": n})
+        for m in _LIT_RE.finditer(line):
+            lit_cites.append({"id": m.group(1).strip(), "line": n})
         for m in _EMBED_RE.finditer(line):
             embeds.append({"target": m.group(1).strip(), "line": n})
-    return {"citations": citations, "embeds": embeds}
+    return {"citations": citations, "embeds": embeds, "report_cites": report_cites,
+            "lit_cites": lit_cites}
 
 
 def parse_sections(text: str) -> dict[str, Any]:
@@ -144,6 +182,8 @@ def parse_sections(text: str) -> dict[str, Any]:
 
     def _clean(s: str) -> str:
         s = _CITE_RE.sub("", s)
+        s = _REPORT_RE.sub("", s)
+        s = _LIT_RE.sub("", s)
         s = _EMBED_RE.sub("", s)
         return s.strip()
 
@@ -249,6 +289,44 @@ def is_grounded(claim: dict[str, Any]) -> bool:
             and str(claim.get("strength")) in GROUNDED_STRENGTHS)
 
 
+def lit_verdict(claim: dict[str, Any]) -> tuple[str, str | None]:
+    """Verdict for a ``[lit:<id>]`` citation. Literature grounding is two-layer: the tool
+    check is the claim's pass/fail (the verbatim quote was present in the cited paper); the
+    *support* is a one-time agent review stamped via ``@reviewed``. Unlike a data claim, a
+    *weak* (but reviewed-and-supported) literature claim still backs its citation — single,
+    suggestive, or secondary evidence is legitimately weak, not broken. Blocks only on:
+    a failed quote check, a non-literature claim cited via ``[lit:]``, an un-reviewed claim,
+    or an agent verdict of unsupported. Returns ``(verdict, detail|None)``."""
+    if str(claim.get("kind")) != "literature":
+        return ("wrong-kind", "cited via [lit:] but is not a literature claim — use [claim:]")
+    if str(claim.get("outcome")) not in GROUNDED_OUTCOMES:
+        return ("broken", f"the quote check did not pass (outcome={claim.get('outcome')}) — "
+                          "the verbatim quote is not in the cited paper")
+    reviewed = claim.get("reviewed")
+    if not reviewed:
+        return ("needs-review", "no agent support-review (@reviewed) yet — a human/agent must "
+                                "confirm the quote supports the paraphrase before it backs a cite")
+    if not reviewed.get("support", False):
+        return ("unsupported", "agent review judged the source does NOT support the statement")
+    return ("backed", None)
+
+
+def lit_review_sha(claim: dict[str, Any]) -> str | None:
+    """A combined sha over the claim's cited paper texts (each ``source()`` records a
+    ``kind="paper"`` input pinned by its text sha). Stamp this in ``@reviewed(sha=…)``; the
+    audit recomputes it and flags ``stale-review`` if a cited paper's library text has changed
+    since the review — the literature analogue of input-drift, since the "input" is library
+    content, not a repo file."""
+    paps = sorted((str(i.get("path", "")), str(i.get("sha256", "")))
+                  for i in (claim.get("inputs") or []) if i.get("kind") == "paper")
+    if not paps:
+        return None
+    h = hashlib.sha256()
+    for ck, sha in paps:
+        h.update(f"{ck}:{sha}\n".encode())
+    return h.hexdigest()
+
+
 def index_analysis_artifacts(home: Path) -> dict[str, str | None]:
     """``{repo-relative analysis artifact path -> recorded artifact_sha256}`` across every
     experiment's ledger under ``home`` (including ``program/``). The key is how a report's
@@ -302,18 +380,37 @@ def report_scope(report_path: Path, home: Path) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # audit
 # --------------------------------------------------------------------------- #
-def audit(report_path: Path, home: Path | None = None) -> dict[str, Any]:
-    """Mechanically validate a report's citations + embeds.
+def resolve_report_paths(cid: str, home: Path) -> list[Path]:
+    """Resolve a ``[report:<id>]`` citation to report.md path(s). ``<id>`` is
+    ``<exp-or-program>::<slug>`` or a bare ``<slug>`` (searched tree-wide). Returns 0
+    (missing), 1 (resolved), or >1 (ambiguous) paths."""
+    cid = cid.strip()
+    if "::" in cid:
+        scope_id, slug = cid.split("::", 1)
+        if scope_id == "program":
+            cand = home / "program" / "reports" / slug / "report.md"
+            return [cand] if cand.is_file() else []
+        hits = [d / "reports" / slug / "report.md" for d in sorted(home.glob(f"{scope_id}*"))]
+        return [h for h in hits if h.is_file()]
+    return sorted(home.glob(f"**/reports/{cid}/report.md"))
 
-    Returns ``{report, scope, exp_id, citations, embeds, findings, status}`` where
-    ``status`` is ``GROUNDED`` (no blocking finding) or ``BROKEN``. Each citation verdict
-    is ``backed`` / ``weak-backing`` / ``missing`` / ``ambiguous``; each embed verdict is
-    ``current`` / ``drifted`` / ``missing`` / ``untracked`` / ``dangling``. Everything but
+
+def audit(report_path: Path, home: Path | None = None,
+          _seen: frozenset[str] | None = None) -> dict[str, Any]:
+    """Mechanically validate a report's citations, embeds, and report-citations.
+
+    Returns ``{report, scope, exp_id, citations, embeds, report_cites, findings, status}``
+    where ``status`` is ``GROUNDED`` (no blocking finding) or ``BROKEN``. Claim-citation
+    verdict is ``backed`` / ``weak-backing`` / ``missing`` / ``ambiguous``; embed verdict is
+    ``current`` / ``drifted`` / ``missing`` / ``untracked`` / ``dangling``; a ``[report:<id>]``
+    grounds on another report (a "lemma") and is ``backed`` only if that report resolves AND
+    is itself ``GROUNDED`` (checked recursively, cycle-guarded). Everything but
     ``backed`` / ``current`` is a blocking finding (the *semantic* off-topic check stays
     with the authoring agent — see the module docstring).
     """
     rp = Path(report_path).resolve()
     home = Path(home).resolve() if home is not None else _infer_home(rp)
+    seen = (_seen or frozenset()) | {str(rp)}
     text = rp.read_text(encoding="utf-8")
     parsed = parse_report(text)
     sc = report_scope(rp, home)
@@ -394,6 +491,77 @@ def audit(report_path: Path, home: Path | None = None) -> dict[str, Any]:
                                  "detail": "not a recorded analysis artifact and not on disk"})
         embeds.append(rec)
 
+    # ---- report citations (grounding on another report / "lemma") ---------- #
+    report_cites: list[dict[str, Any]] = []
+    for rc in parsed.get("report_cites", []):
+        cid, line = rc["id"], rc["line"]
+        rec = {"id": cid, "line": line}
+        paths = resolve_report_paths(cid, home)
+        if not paths:
+            rec["verdict"] = "missing"
+            findings.append({"kind": "missing-report", "line": line, "cite": cid,
+                             "detail": "no report with this id; write the lemma report first"})
+        elif len(paths) > 1:
+            rec["verdict"] = "ambiguous"
+            findings.append({"kind": "ambiguous-report", "line": line, "cite": cid,
+                             "detail": f"matches {len(paths)} reports — qualify with <scope>::<slug>"})
+        else:
+            target = paths[0].resolve()
+            rec["report"] = _rel_or_name(target, home)
+            if str(target) in seen:                  # cycle: treat as backed (already on the stack)
+                rec["verdict"] = "backed"
+            else:
+                sub = audit(target, home, _seen=seen)
+                rec["sub_status"] = sub["status"]
+                if sub["status"] == "GROUNDED":
+                    rec["verdict"] = "backed"
+                else:
+                    rec["verdict"] = "weak-backing"
+                    findings.append({"kind": "broken-report-cite", "line": line, "cite": cid,
+                                     "detail": "cited report is itself BROKEN — fix it first"})
+        report_cites.append(rec)
+
+    # ---- literature citations (grounding on a paper in the bibliographer library) -------- #
+    lit_cites: list[dict[str, Any]] = []
+    for lc in parsed.get("lit_cites", []):
+        cid, line = lc["id"], lc["line"]
+        rec = {"id": cid, "line": line}
+        cands = resolve_citation(cid, claim_index)
+        if not cands:
+            rec["verdict"] = "missing"
+            findings.append({"kind": "missing-lit", "line": line, "cite": cid,
+                             "detail": "no literature claim has this id; write the [lit:] claim first"})
+        elif len(cands) > 1:
+            rec["verdict"] = "ambiguous"
+            rec["candidates"] = cands
+            findings.append({"kind": "ambiguous-lit", "line": line, "cite": cid,
+                             "detail": f"matches {len(cands)} claims — qualify it: {cands}"})
+        else:
+            claim = claim_index[cands[0]]
+            verdict, detail = lit_verdict(claim)
+            rec["claim_id"] = cands[0]
+            rec["strength"] = claim.get("strength")
+            rec["statement"] = claim.get("statement")
+            rec["sources"] = (claim.get("evidence") or {}).get("lit_sources", [])
+            rec["reviewed"] = claim.get("reviewed")
+            # re-validation: if the review was pinned (@reviewed(sha=…)) and a cited paper's
+            # text has since changed, the review is stale → re-read and re-stamp (blocking).
+            if verdict == "backed":
+                cur = lit_review_sha(claim)
+                stamped = (claim.get("reviewed") or {}).get("sha")
+                rec["review_sha"] = cur
+                if stamped and cur and not str(cur).startswith(str(stamped)):
+                    verdict, detail = ("stale-review",
+                                       "a cited paper's library text changed since the review "
+                                       f"(stamp={str(stamped)[:12]}, now={cur[:12]}) — re-read and re-stamp")
+                elif not stamped:
+                    rec["review_unpinned"] = True   # advisory, non-blocking
+            rec["verdict"] = verdict
+            if verdict != "backed":
+                findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cands[0],
+                                 "detail": detail})
+        lit_cites.append(rec)
+
     status = "GROUNDED" if not findings else "BROKEN"
     return {
         "report": _rel_or_name(rp, home),
@@ -402,6 +570,8 @@ def audit(report_path: Path, home: Path | None = None) -> dict[str, Any]:
         "slug": sc["slug"],
         "citations": citations,
         "embeds": embeds,
+        "report_cites": report_cites,
+        "lit_cites": lit_cites,
         "findings": findings,
         "status": status,
     }
@@ -441,27 +611,47 @@ def _rel_or_name(path: Path, home: Path) -> str:
 def render_markdown(report_path: Path, home: Path | None = None) -> str:
     """Assemble a self-contained Markdown from the report (pure; no external tools):
 
-    * ``[claim:<id>]`` → a footnote reference; a **Grounding** footnote section lists each
-      cited claim's statement + ``[outcome · strength]`` + its ``claim_id``;
+    * ``[claim:<id>]`` → a native pandoc **footnote** carrying the cited claim's statement +
+      ``[outcome · strength]`` + its ``claim_id``;
     * ``![cap](*.csv)`` → the CSV inlined as a Markdown table (the derived table, embedded);
     * ``![cap](fig)`` → the same image with its path absolutised so pandoc resolves it.
 
-    The result is what the PDF/HTML/docx render is produced from."""
+    Citations are footnotes (hyperlinked, auto-numbered); :func:`render` runs the bundled
+    ``endnotes.lua`` pandoc filter so they are relocated to a single "Grounding notes"
+    endnotes section at the document end — uniformly across PDF / HTML / docx, with no
+    LaTeX-package dependency. The result is what the render is produced from."""
     rp = Path(report_path).resolve()
     home = Path(home).resolve() if home is not None else _infer_home(rp)
     text = rp.read_text(encoding="utf-8")
     claim_index = index_claims(home)
 
-    # footnotes: stable per cited id, in first-seen order
-    fn_order: list[str] = []
-    fn_label: dict[str, str] = {}
+    order: list[str] = []
+    num: dict[str, int] = {}           # cid -> 1-based index, first-seen order
+    rorder: list[str] = []
+    rnum: dict[str, int] = {}          # report-cite id -> 1-based index
+    lorder: list[str] = []
+    lnum: dict[str, int] = {}          # lit-cite id -> 1-based index
 
     def _cite_sub(m: re.Match) -> str:
         cid = m.group(1).strip()
-        if cid not in fn_label:
-            fn_label[cid] = f"claim-{len(fn_order) + 1}"
-            fn_order.append(cid)
-        return f"[^{fn_label[cid]}]"
+        if cid not in num:
+            order.append(cid)
+            num[cid] = len(order)
+        return f"[^claim-{num[cid]}]"
+
+    def _report_sub(m: re.Match) -> str:
+        cid = m.group(1).strip()
+        if cid not in rnum:
+            rorder.append(cid)
+            rnum[cid] = len(rorder)
+        return f"[^report-{rnum[cid]}]"
+
+    def _lit_sub(m: re.Match) -> str:
+        cid = m.group(1).strip()
+        if cid not in lnum:
+            lorder.append(cid)
+            lnum[cid] = len(lorder)
+        return f"[^lit-{lnum[cid]}]"
 
     def _embed_sub(m: re.Match) -> str:
         path = m.group(1).strip()
@@ -476,24 +666,66 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
         alt = alt_m.group(1) if alt_m else ""
         return f"![{alt}]({ap.resolve().as_posix()})"
 
-    body = _CITE_RE.sub(_cite_sub, text)
+    # Bind each note marker to the preceding word: drop any whitespace (incl. a soft line
+    # wrap) immediately before a citation, so the superscript attaches like a footnote mark
+    # rather than drifting onto the next line.
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _CITE_RE.pattern, _cite_sub, text)
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _REPORT_RE.pattern, _report_sub, body)
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _LIT_RE.pattern, _lit_sub, body)
     # embeds can span only a line each; substitute per match on the citation-substituted text
     body = _EMBED_RE.sub(_embed_sub, body)
 
-    # append the grounding footnotes
-    if fn_order:
-        notes = ["", ""]
-        for cid in fn_order:
-            cands = resolve_citation(cid, claim_index)
-            if len(cands) == 1:
-                c = claim_index[cands[0]]
-                stmt = (c.get("statement") or "").strip().replace("\n", " ")
-                notes.append(f"[^{fn_label[cid]}]: **{cands[0]}** — {stmt} "
-                             f"_[{c.get('outcome')} · {c.get('strength')}]_")
-            else:
-                notes.append(f"[^{fn_label[cid]}]: claim `{cid}` "
-                             f"({'unresolved' if not cands else 'ambiguous'})")
-        body = body.rstrip() + "\n" + "\n".join(notes) + "\n"
+    def _report_note_text(cid: str) -> str:
+        paths = resolve_report_paths(cid, home)
+        if len(paths) == 1:
+            title = _report_title(paths[0].read_text(encoding="utf-8")) or cid
+            return f"Lemma report: *{title}* — `{cid}`"
+        return f"report `{cid}` ({'unresolved' if not paths else 'ambiguous'})"
+
+    def _note_text(cid: str) -> str:
+        # A true endnote: the claim's statement reads as the note, followed by a compact
+        # claim-id citation. No outcome (a cited claim passed by construction) and no
+        # strength (low signal in prose); the id is shortened (drop the test-file and the
+        # `test_` node prefix) and set in monospace so it reads as a subdued reference.
+        cands = resolve_citation(cid, claim_index)
+        if len(cands) == 1:
+            c = claim_index[cands[0]]
+            stmt = (c.get("statement") or "").strip().replace("\n", " ")
+            return f"{stmt} `{_short_claim_id(cands[0])}`"
+        return f"claim `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
+
+    def _lit_note_text(cid: str) -> str:
+        # A literature endnote shows the convergence set: the synthesized strength, then each
+        # source with its evidential tags (system, direct/suggestive, relay flag). Verbatim
+        # quotes stay in the spec, not the prose, so the endnote reads cleanly while the claim
+        # remains quote-pinned and auditable. Visibly distinct from a data-claim note.
+        cands = resolve_citation(cid, claim_index)
+        if len(cands) != 1:
+            return f"literature `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
+        c = claim_index[cands[0]]
+        strength = c.get("strength") or "unspecified"
+        srcs = (c.get("evidence") or {}).get("lit_sources", [])
+        parts, seen = [], set()
+        for s in srcs:                       # one entry per paper (a paper cited for several
+            ck = s.get("citekey")            # quotes appears once in the endnote)
+            if ck in seen:
+                continue
+            seen.add(ck)
+            ay = _author_year(s)
+            tags = [t for t in (s.get("system"),
+                                None if s.get("test") == "direct" else "suggestive",
+                                None if s.get("primary", True) else "secondary") if t]
+            parts.append(f"{ay} ({', '.join(tags)})" if tags else ay)
+        groups = len({s.get("group") for s in srcs})
+        lead = f"Literature — **{strength}**" + (f", {groups} independent" if groups > 1 else "") + ": "
+        return lead + "; ".join(parts) if parts else f"Literature — {strength} `{cid}`"
+
+    defs = [f"[^claim-{num[cid]}]: {_note_text(cid)}" for cid in order]
+    defs += [f"[^report-{rnum[cid]}]: {_report_note_text(cid)}" for cid in rorder]
+    defs += [f"[^lit-{lnum[cid]}]: {_lit_note_text(cid)}" for cid in lorder]
+    if defs:
+        # pandoc footnote definitions; endnotes.lua relocates them to the end on render
+        body = body.rstrip() + "\n\n" + "\n".join(defs) + "\n"
     return body
 
 
@@ -518,6 +750,152 @@ def _csv_to_md_table(path: Path) -> str:
     return "\n".join(out)
 
 
+# A restrained, modern house style for the PDF target (xelatex). Headings come out
+# sans-serif for free from the KOMA `scrartcl` class; the body is a serif via fontspec
+# `mainfont`. This header only adds a thin running header (section · page) + tightened
+# rules — it touches no colors, so it is order-independent w.r.t. pandoc's hyperref setup.
+# A centered single column with conventional margins (Tufte margins were dropped — an
+# empty wide margin is wasted space unless it holds sidenotes, which a citation-dense
+# report can't use well). Title block, headings, and the running header/footer all come
+# out sans-serif; the body is serif. Margins set via -V geometry:margin in render().
+_PDF_HEADER_TEX = r"""
+% --- modern report style (injected by `sci report`) ---
+\usepackage{graphicx}   % layout.lua emits raw \includegraphics, so load it unconditionally
+                        % (pandoc only auto-loads graphicx when it still sees an Image)
+\usepackage{fancyhdr}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf,justification=raggedright,singlelinecheck=false}
+\setkomafont{author}{\normalfont\sffamily}   % subtitle/byline + date in sans, like the title
+\setkomafont{date}{\normalfont\sffamily}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancyhead[L]{\footnotesize\sffamily @@RUNNING_TITLE@@}
+\fancyhead[R]{\footnotesize\sffamily @@HEAD_RIGHT@@}
+\fancyfoot[L]{\scriptsize\sffamily @@FOOT_LEFT@@}
+\fancyfoot[R]{\footnotesize\sffamily \thepage}
+\setlength{\headheight}{14pt}
+"""
+
+
+def _front_field(text: str, key: str) -> str:
+    """A scalar YAML front-matter field (empty if absent). Front matter is a leading
+    ``---``-fenced block."""
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+    if not m:
+        return ""
+    for line in m.group(1).splitlines():
+        mt = re.match(rf"\s*{re.escape(key)}\s*:\s*(.+?)\s*$", line)
+        if mt:
+            return mt.group(1).strip().strip("\"'")
+    return ""
+
+
+def _report_title(text: str) -> str:
+    """The report's YAML front-matter ``title`` — used for the running header."""
+    return _front_field(text, "title")
+
+
+def _git_revision(folder: Path, ignore: Path | None = None) -> tuple[str, bool]:
+    """``(<short-sha>, dirty)`` for the repo containing ``folder`` — stamps the rendered PDF
+    with the source revision. ``dirty`` reflects uncommitted changes to *source*, excluding
+    ``ignore`` (the output file we are about to write — otherwise rendering would always mark
+    its own PDF dirty). ``("", False)`` when not a git repo / git is unavailable."""
+    import shutil
+    import subprocess
+    git = shutil.which("git")
+    if not git:
+        return "", False
+    try:
+        sha = subprocess.run([git, "-C", str(folder), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=10)
+        if sha.returncode != 0 or not sha.stdout.strip():
+            return "", False
+        top = subprocess.run([git, "-C", str(folder), "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, timeout=10)
+        root = Path(top.stdout.strip()) if top.returncode == 0 else None
+        ignore_rel = None
+        if ignore is not None and root is not None:
+            try:
+                ignore_rel = ignore.resolve().relative_to(root.resolve()).as_posix()
+            except ValueError:
+                ignore_rel = None
+        st = subprocess.run([git, "-C", str(folder), "status", "--porcelain"],
+                            capture_output=True, text=True, timeout=10)
+        dirty = False
+        if st.returncode == 0:
+            for line in st.stdout.splitlines():
+                path = line[3:].strip().strip('"')        # "XY <path>"; rename keeps new name after "->"
+                if "->" in path:
+                    path = path.split("->")[-1].strip()
+                if path and path != ignore_rel:
+                    dirty = True
+                    break
+        return sha.stdout.strip(), dirty
+    except (OSError, subprocess.SubprocessError):
+        return "", False
+
+
+def _short_running_title(title: str, limit: int = 60) -> str:
+    """A compact running-header form of the title: the part before a colon, truncated."""
+    head = title.split(":", 1)[0].strip() or title.strip()
+    if len(head) > limit:
+        head = head[:limit].rstrip() + "…"
+    return head
+
+
+def _latex_escape(s: str) -> str:
+    repl = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$",
+            "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}",
+            "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
+    return "".join(repl.get(ch, ch) for ch in s)
+
+# Serif body / sans headings: prefer the named fonts the user asked for (Times /
+# Helvetica), then portable equivalents. Probed against the system via `fc-list`, so a
+# missing font is skipped rather than failing the xelatex run.
+_SERIF_CANDIDATES = ["Times New Roman", "TeX Gyre Termes", "Times", "Liberation Serif",
+                     "Georgia", "Nimbus Roman"]
+_SANS_CANDIDATES = ["Helvetica Neue", "Helvetica", "TeX Gyre Heros", "Arial",
+                    "Liberation Sans", "Nimbus Sans"]
+# A modern monospace for inline code / claim ids — deliberately NOT a LaTeX-world font
+# (no Latin Modern / Computer Modern Typewriter). Prefer clean coding faces without
+# distracting programming ligatures (claim ids are full of `::` / `_`); ligature-heavy
+# faces like Fira Code come last.
+_MONO_CANDIDATES = ["JetBrains Mono", "Cascadia Mono", "SF Mono", "Source Code Pro",
+                    "IBM Plex Mono", "DejaVu Sans Mono", "Menlo", "Roboto Mono",
+                    "Monaco", "Fira Mono", "Fira Code"]
+
+
+def _available_font_families() -> set[str]:
+    """The set of font family names xelatex can resolve, via ``fc-list`` (empty if the
+    tool is absent — callers then fall back to the LaTeX default font)."""
+    import shutil
+    import subprocess
+    fc = shutil.which("fc-list")
+    if not fc:
+        return set()
+    try:
+        out = subprocess.run([fc, ":", "family"], capture_output=True, text=True,
+                             timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    fams: set[str] = set()
+    for line in out.splitlines():
+        for fam in line.split(","):
+            fams.add(fam.strip())
+    return fams
+
+
+def _pick_font(candidates: list[str], available: set[str]) -> str | None:
+    return next((c for c in candidates if c in available), None)
+
+
+# Bundled pandoc filters: relocate footnotes → endnotes, and widen exhibits (all formats).
+_ENDNOTES_LUA = Path(__file__).with_name("endnotes.lua")
+_LAYOUT_LUA = Path(__file__).with_name("layout.lua")
+
+
 class RenderError(RuntimeError):
     """A render toolchain (pandoc) is unavailable or failed."""
 
@@ -537,7 +915,6 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
     rp = Path(report_path).resolve()
     home = Path(home).resolve() if home is not None else _infer_home(rp)
     out = Path(out_path)
-    md = render_markdown(rp, home)
 
     pandoc = shutil.which("pandoc")
     if pandoc is None:
@@ -547,20 +924,73 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             "e.g. `brew install --cask basictex`), or render to a format you have "
             "(`--to html`).")
 
+    md = render_markdown(rp, home)        # citations as native footnotes
+
     out.parent.mkdir(parents=True, exist_ok=True)
+    tmp_md = tmp_header = None
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
         tf.write(md)
         tmp_md = Path(tf.name)
     try:
+        # endnotes.lua relocates footnotes → a "Grounding notes" endnotes section;
+        # layout.lua widens tables/figures. Both are structural AST transforms (every
+        # target, no LaTeX package).
         cmd = [pandoc, str(tmp_md), "-o", str(out), "--standalone",
+               f"--lua-filter={_ENDNOTES_LUA}", f"--lua-filter={_LAYOUT_LUA}",
                f"--resource-path={rp.parent}", f"--resource-path={home}"]
         if to == "pdf":
-            cmd += ["--pdf-engine=xelatex"]
+            # modern house style: KOMA `scrartcl` (sans headings), serif body + modern
+            # monospace via fontspec, half-space block paragraphs, running header, links.
+            src = rp.read_text(encoding="utf-8")
+            running = _latex_escape(_short_running_title(_report_title(src)))
+            # header-right: a classification stamp (front-matter `classification:`,
+            # e.g. CONFIDENTIAL / INTERNAL / DRAFT), in a muted red so it reads as a warning
+            classification = _front_field(src, "classification")
+            head_right = (rf"\textcolor{{red!60!black}}{{\textbf{{{_latex_escape(classification)}}}}}"
+                          if classification else "")
+            # footer-left: the source revision, so the rendered PDF is traceable to a
+            # commit. A trailing asterisk (rather than "-dirty") marks an uncommitted tree
+            # — unobtrusive and legible to a non-technical reader.
+            sha, dirty = _git_revision(rp.parent, ignore=out)
+            foot_left = (rf"rev~\texttt{{{_latex_escape(sha)}}}{'*' if dirty else ''}"
+                         if sha else "")
+            header_tex = (_PDF_HEADER_TEX
+                          .replace("@@RUNNING_TITLE@@", running)
+                          .replace("@@HEAD_RIGHT@@", head_right)
+                          .replace("@@FOOT_LEFT@@", foot_left))
+            with tempfile.NamedTemporaryFile("w", suffix=".tex", delete=False,
+                                             encoding="utf-8") as hf:
+                hf.write(header_tex)
+                tmp_header = Path(hf.name)
+            fams = _available_font_families()
+            serif = _pick_font(_SERIF_CANDIDATES, fams)
+            sans = _pick_font(_SANS_CANDIDATES, fams)
+            mono = _pick_font(_MONO_CANDIDATES, fams)
+            cmd += [
+                "--pdf-engine=xelatex",
+                "-V", "documentclass=scrartcl",
+                "-V", "classoption=parskip=half",
+                "-V", "geometry:margin=1in",
+                "-V", "fontsize=11pt",
+                "-V", "linestretch=1.12",
+                "-V", "colorlinks=true", "-V", "linkcolor=teal",
+                "-V", "urlcolor=teal", "-V", "toccolor=teal",
+                "--include-in-header", str(tmp_header),
+            ]
+            if serif:
+                cmd += ["-V", f"mainfont={serif}"]
+            if sans:
+                cmd += ["-V", f"sansfont={sans}"]
+            if mono:
+                # smaller so a long claim_id fits the measure; modern coding face
+                cmd += ["-V", f"monofont={mono}", "-V", "monofontoptions=Scale=0.85"]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise RenderError(f"pandoc failed ({proc.returncode}):\n{proc.stderr.strip()}")
     finally:
         tmp_md.unlink(missing_ok=True)
+        if tmp_header is not None:
+            tmp_header.unlink(missing_ok=True)
     return {"output": str(out), "format": to}
 
 
@@ -569,6 +999,10 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
 # --------------------------------------------------------------------------- #
 _CITE_MARK = {"backed": "✅ backed", "weak-backing": "⚠️ weak-backing",
               "missing": "❌ missing", "ambiguous": "❌ ambiguous"}
+_LIT_MARK = {"backed": "✅ backed", "needs-review": "❌ needs-review",
+             "unsupported": "❌ unsupported", "broken": "❌ broken (quote absent)",
+             "wrong-kind": "❌ wrong-kind", "missing": "❌ missing", "ambiguous": "❌ ambiguous",
+             "stale-review": "❌ stale-review (paper text changed)"}
 _EMBED_MARK = {"current": "✅ current", "drifted": "❌ drifted", "missing": "❌ missing",
                "untracked": "❌ untracked", "dangling": "❌ dangling"}
 
@@ -589,6 +1023,28 @@ def render_audit(result: dict[str, Any]) -> str:
     for e in result["embeds"]:
         mark = _EMBED_MARK.get(e["verdict"], e["verdict"])
         lines.append(f"  [embed L{e['line']}] {e.get('rel') or e['target']}: {mark}")
+    for r in result.get("report_cites", []):
+        mark = _CITE_MARK.get(r["verdict"], r["verdict"])
+        tail = f"  → {r.get('report')}" if r["verdict"] == "backed" and r.get("report") else ""
+        lines.append(f"  [report L{r['line']}] {r['id']}: {mark}{tail}")
+    lits = result.get("lit_cites", [])
+    for lc in lits:
+        mark = _LIT_MARK.get(lc["verdict"], lc["verdict"])
+        tail = ""
+        if lc["verdict"] == "backed":
+            nsrc = len(lc.get("sources") or [])
+            tail = f"  ({lc.get('strength')}, {nsrc} source{'s' if nsrc != 1 else ''})"
+            if lc.get("review_unpinned"):
+                tail += f"  [review unpinned — stamp @reviewed(sha=\"{(lc.get('review_sha') or '')[:12]}\")]"
+        lines.append(f"  [lit L{lc['line']}] {lc['id']}: {mark}{tail}")
+    if lits:
+        # A separate literature line so the green badge never launders attribution as
+        # data-grounding: show the tier spread across all [lit:] citations.
+        from collections import Counter
+        tally = Counter(
+            (lc.get("strength") if lc["verdict"] == "backed" else lc["verdict"]) for lc in lits)
+        spread = ", ".join(f"{n} {k}" for k, n in tally.items())
+        lines.append(f"  literature: {len(lits)} cited — {spread}")
     for f in result["findings"]:
         if f.get("detail"):
             loc = f.get("cite") or f.get("embed") or ""

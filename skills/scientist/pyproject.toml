@@ -52,3 +52,7 @@ scientist = "scientist.grounding.plugin"
 # (provenance, labfiles, extraction, store, experiments, grounding).
 where = ["."]
 include = ["scientist*"]
+
+[tool.setuptools.package-data]
+# Ship the pandoc endnotes filter (used by `sci report`'s renderer) inside the wheel.
+"scientist.provenance" = ["*.lua"]

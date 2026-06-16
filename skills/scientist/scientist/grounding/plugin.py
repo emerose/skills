@@ -29,7 +29,8 @@ from .. import grounding
 _MARKERS = {
     "strength": "strength(level): how strongly the evidence supports the claim",
     "caveats": "caveats(text): scope/limits to keep in mind",
-    "kind": "kind(category): result|design|external|interpretive",
+    "kind": "kind(category): result|design|external|interpretive|literature",
+    "reviewed": "reviewed(**verdict): agent support-review of a literature claim",
 }
 
 
@@ -112,6 +113,12 @@ def _marker_val(item, name, default=None):
     return m.args[0] if m.args else default
 
 
+def _marker_kwargs(item, name):
+    """The kwargs dict of a marker (for ``@reviewed(support=..., ...)``), or None if absent."""
+    m = item.get_closest_marker(name)
+    return dict(m.kwargs) if m is not None else None
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     out = yield
@@ -143,6 +150,7 @@ def pytest_runtest_makereport(item, call):
         "kind": _marker_val(item, "kind", "unspecified"),
         "strength": _marker_val(item, "strength", "unspecified"),
         "caveats": _marker_val(item, "caveats"),
+        "reviewed": _marker_kwargs(item, "reviewed"),
         "evidence": evidence,
         "inputs": inputs,
         "bypassed": list(cap.bypassed) if cap else [],

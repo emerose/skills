@@ -17,16 +17,28 @@ worse than a stub.
 
 ## Tier 1 — open repositories (automated)
 
-`bib fetch <citekey>` already tries these, byte-verifying each is a real PDF:
+`bib fetch <citekey>` already tries these, in order, byte-verifying each
+response really begins with `%PDF-` (a publisher landing page or Cloudflare
+"Just a moment…" challenge that answers `200` is rejected, and the next tier is
+tried):
 
 - **arXiv** — when the record has an arXiv id (`https://arxiv.org/pdf/<id>.pdf`).
-- **Europe PMC** — for the PMC open-access subset, when there's a PMCID.
 - **bioRxiv / medRxiv** — for `10.1101/…` DOIs.
-- **Unpaywall** — best OA location for the DOI.
+- **Unpaywall** — *every* advertised PDF location for the DOI, not just the
+  "best" one (which is often a publisher landing page that serves HTML; a
+  repository mirror further down the list frequently downloads cleanly).
+- **Europe PMC** — `/articles/<PMCID>?pdf=render`, the scraper-friendly route for
+  the PMC open-access subset. The **PMCID is derived from the DOI/PMID** via the
+  NCBI ID converter when the record (e.g. a citation-only stub) doesn't carry one,
+  so this fires even for DOI-only stubs.
+- **NCBI PMC OA service** — `oa.fcgi`, a structured fallback that returns a direct
+  PDF href for the OA subset when Europe PMC's render endpoint declines.
 - **Semantic Scholar** — its `openAccessPdf` link.
 
-If a record lacks the identifier a source needs, `enrich` it first (that often
-adds a DOI/arXiv/PMCID), then `fetch`.
+PDF byte downloads use a browser-like User-Agent (the polite-pool UA is kept for
+the metadata APIs, which reward a real mailto). If a record still lacks the
+identifier a source needs, `enrich` it first (that often adds a DOI/arXiv/PMCID),
+then `fetch`.
 
 ### Note: NCBI PMC direct downloads and proof-of-work
 

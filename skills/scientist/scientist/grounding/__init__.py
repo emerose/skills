@@ -41,7 +41,8 @@ from ..labfiles import read_docx_text, read_pdf_text, read_pptx_text
 __all__ = [
     "load", "data", "doc", "evidence", "uses", "cross", "record",
     "derivation", "Derivation", "DocRef", "UnsupportedDocFormat", "Capture",
-    "strength", "caveats", "kind",
+    "strength", "caveats", "kind", "reviewed",
+    "paper", "source", "converge", "PaperRef", "LiteratureError",
     "current_capture", "registry", "TRACKED_SUFFIXES",
     "DerivationAudit", "audit_derivations", "current_audit",
 ]
@@ -180,6 +181,25 @@ def _collapse_ws(s: str) -> str:
     return " ".join(s.split())
 
 
+# Unicode dash/hyphen variants that publishers and PDF extractors use interchangeably with
+# ASCII "-": en/em dashes, the Unicode hyphen, non-breaking hyphen, minus sign, etc. Folding
+# them (plus NFKC, which normalizes ligatures/full-width/compatibility forms) makes a verbatim
+# quote match a paper's stored text without the author having to reproduce the exact glyph —
+# the single most common reason a real, correct quote fails a naive substring check.
+_DASHES = "‐‑‒–—―⁃−﹘﹣－"
+_DASH_MAP = {ord(c): "-" for c in _DASHES}
+
+
+def _fold_match(s: str) -> str:
+    """Normalize text for verbatim-quote matching: NFKC-normalize, fold Unicode dashes to
+    ASCII ``-``, drop Markdown emphasis markers (``*``/``_`` — the library stores parsed
+    Markdown, so a gene name reads ``*Ube3a*``; that's markup, not content), then collapse
+    whitespace. Case is preserved (a quote is still verbatim)."""
+    import unicodedata
+    folded = unicodedata.normalize("NFKC", s).translate(_DASH_MAP).replace("*", "").replace("_", "")
+    return _collapse_ws(folded)
+
+
 # --- per-format text readers (pure-Python; the [reports] extra) ------------- #
 # suffix -> reader. The actual parsers live in `labfiles` (the one document-parsing
 # layer, alongside the table readers). Pure-Python formats only; legacy .doc/.ppt
@@ -277,6 +297,179 @@ def evidence(**kv) -> None:
         cap.evidence.update(kv)
 
 
+# --------------------------------------------------------------------------- #
+# Literature grounding — verify a quote against a paper in the bibliographer library.
+# --------------------------------------------------------------------------- #
+# A *literature* claim grounds a third-party statement on one or more papers held in the
+# bibliographer library (BIBLIOGRAPHER_HOME). The deterministic, re-runnable part is exactly
+# the doc() contract — a verbatim quote must be present in the cited paper's text — except the
+# text is read from the library's LOCAL DuckDB (get_by_citekey -> chunks/abstract), not a repo
+# PDF. That read is keyless and offline: only the library's *semantic query* path embeds (needs
+# a key + network); reading stored chunks/abstract by citekey does not. libkit is imported
+# lazily here, so a data claim that never calls paper() never pulls libkit in — the data-claim
+# audit stays as light and keyless as before.
+class LiteratureError(RuntimeError):
+    """A literature source could not be resolved/verified (paper missing, no text, etc.)."""
+
+
+_PAPER_CACHE: dict[str, "PaperRef"] = {}   # citekey -> PaperRef (per process)
+_BIBLIOSTORE = None                         # cached BiblioStore class (sibling-skill import)
+
+
+def _import_bibliostore():
+    global _BIBLIOSTORE
+    if _BIBLIOSTORE is not None:
+        return _BIBLIOSTORE
+    import sys
+    try:                                    # already importable (scripts/ on path)
+        from _store import BiblioStore      # type: ignore
+        _BIBLIOSTORE = BiblioStore
+        return BiblioStore
+    except Exception:
+        pass
+    here = Path(__file__).resolve()
+    for anc in here.parents:                # walk up to a sibling bibliographer skill
+        cand = anc / "bibliographer" / "scripts" / "_store.py"
+        if cand.is_file():
+            sys.path.insert(0, str(cand.parent))
+            from _store import BiblioStore   # type: ignore
+            _BIBLIOSTORE = BiblioStore
+            return BiblioStore
+    raise LiteratureError(
+        "can't locate the bibliographer skill's scripts/ to read paper text — install the "
+        "bibliographer skill alongside scientist, or put its scripts/ on PYTHONPATH.")
+
+
+def _bib_home() -> Path:
+    h = os.environ.get("BIBLIOGRAPHER_HOME")
+    if not h:
+        raise LiteratureError(
+            "BIBLIOGRAPHER_HOME is not set — literature claims read the bibliographer library "
+            "(source ~/.env, which sets it, before running).")
+    return Path(h).expanduser()
+
+
+@dataclass
+class PaperRef:
+    """A handle to a bibliographer-library paper, resolved by citekey. ``mode`` is
+    ``"fulltext"`` (chunks ingested) or ``"abstract"`` (citation-only stub — only the abstract
+    is available to match against). ``sha256`` pins the exact text the quote was checked against,
+    so a re-ingest that changes the text invalidates a stamped review."""
+
+    citekey: str
+    sha256: str
+    mode: str
+    title: str = ""
+    year: str = ""
+    doi: str = ""
+    text: str = field(default="", repr=False, compare=False)
+
+    def __str__(self) -> str:
+        return f"{self.citekey}@{self.sha256[:12]}({self.mode})"
+
+    def contains(self, phrase: str, *, normalize_ws: bool = True) -> bool:
+        """Verbatim-match ``phrase`` against the paper's stored text. By default normalize both
+        sides (NFKC + Unicode-dash fold + whitespace-collapse) so a correct quote isn't defeated
+        by an en-dash or a ligature in the extracted text; case is preserved."""
+        if normalize_ws:
+            return _fold_match(phrase) in _fold_match(self.text)
+        return phrase in self.text
+
+
+def _load_paper(citekey: str) -> PaperRef:
+    """Resolve a citekey to a :class:`PaperRef`, reading its text from the LOCAL library.
+    Cached per process. Keyless/offline (no embedding)."""
+    if citekey in _PAPER_CACHE:
+        return _PAPER_CACHE[citekey]
+    import asyncio
+
+    BiblioStore = _import_bibliostore()
+    home = _bib_home()
+
+    async def _go():
+        store = BiblioStore.open(home)
+        try:
+            rec = await store.get_by_citekey(citekey)
+            if rec is None:
+                return None
+            doc_id = rec.get("document_id")
+            if doc_id:
+                txt, mode = await store.leading_text(doc_id, chunks=100000), "fulltext"
+            else:
+                txt, mode = (rec.get("abstract") or ""), "abstract"
+            return {"text": txt, "mode": mode, "title": rec.get("title") or "",
+                    "year": str(rec.get("year") or ""), "doi": rec.get("doi") or ""}
+        finally:
+            await store.close()
+
+    res = asyncio.run(_go())
+    if res is None:
+        raise LiteratureError(
+            f"paper({citekey!r}) is not in the bibliographer library — add it "
+            f"(`bib add <DOI|PMID>`) or fix the citekey.")
+    if not res["text"].strip():
+        raise LiteratureError(
+            f"paper({citekey!r}) has no readable text (citation-only stub with no abstract) — "
+            f"`bib fetch {citekey}` to attach an open-access PDF, then re-run.")
+    ref = PaperRef(citekey=citekey, sha256=_sha256(res["text"].encode("utf-8")),
+                   mode=res["mode"], title=res["title"], year=res["year"], doi=res["doi"],
+                   text=res["text"])
+    _PAPER_CACHE[citekey] = ref
+    return ref
+
+
+def paper(citekey: str) -> PaperRef:
+    """Resolve a bibliographer-library paper by citekey and record it as provenance. The
+    returned :class:`PaperRef` is sha-pinned to the exact text read, so the claim is grounded in
+    that content (re-ingest -> new sha -> a stamped review re-validates). Use :func:`source` to
+    assert a quote in one call; use ``paper(...).contains(...)`` for a bare check."""
+    ref = _load_paper(citekey)
+    record("paper", ref.citekey, ref.sha256, via="literature")
+    return ref
+
+
+def source(citekey: str, *, quote: str, test: str = "direct", system: str = "",
+           primary: bool = True, group: str | None = None) -> dict:
+    """One source backing a literature claim: assert ``quote`` is present in paper ``citekey``
+    and record the source's evidential tags for the report.
+
+    - ``test``    — ``"direct"`` (an experiment designed to test this claim) or ``"suggestive"``
+      (a related result that merely implies it).
+    - ``system``  — what was studied (``"human single-gene dup"``, ``"mouse transgenic"``…).
+    - ``primary`` — is this the *primary* source for the result, or a relay citing someone else?
+      (Telephone problem: ground to the primary; ``primary=False`` is weak by construction.)
+    - ``group``   — a label the agent sets so co-lab papers count as ONE independent group.
+
+    Raises ``AssertionError`` if the quote isn't found (the deterministic, every-audit check —
+    pytest pass/fail). The evidential weight (independence/directness/primary) is judged by the
+    agent and stamped via :func:`reviewed`; this call only pins the quote."""
+    ref = paper(citekey)
+    if not ref.contains(quote):
+        where = "full text" if ref.mode == "fulltext" else "abstract (citation-only — no full text)"
+        raise AssertionError(
+            f"literature quote not found in {citekey} ({where}):\n  quote: {quote!r}\n"
+            f"  -> the paper does not contain this verbatim string; fix the quote, or if it is "
+            f"in the body of a citation-only paper, `bib fetch {citekey}` to ingest full text.")
+    rec = {"citekey": citekey, "quote": quote, "test": test, "system": system,
+           "primary": bool(primary), "group": group or citekey, "mode": ref.mode,
+           "title": ref.title, "year": ref.year, "doi": ref.doi}
+    cap = _CURRENT.get()
+    if cap is not None:
+        cap.evidence.setdefault("lit_sources", []).append(rec)
+    return rec
+
+
+def converge(*sources: dict) -> list[dict]:
+    """Group the sources backing one fact into a convergence set. Each ``source(...)`` has
+    already asserted its quote and recorded its tags; ``converge`` just asserts the set is
+    non-empty and returns it, so a multi-source claim reads as
+    ``converge(source(...), source(...), ...)``. Strength rises with independent, direct,
+    primary sources — judged by the agent in :func:`reviewed`, not computed here."""
+    srcs = [s for s in sources if s]
+    assert srcs, "converge() needs at least one source"
+    return srcs
+
+
 def cross(study):
     """Declare an *intentional* cross-experiment dependency. A claim's `experiment`
     fixture covers its home experiment; reading any *other* experiment is flagged by the
@@ -354,8 +547,26 @@ def caveats(text: str):
 
 
 def kind(category: str):
-    """``@kind("result|design|external|interpretive")`` — what sort of assertion this is."""
+    """``@kind("result|design|external|interpretive|literature")`` — what sort of assertion
+    this is. ``literature`` marks a *third-party* claim grounded on a paper in the bibliographer
+    library (see :func:`source`/:func:`converge`), not on Kicho data."""
     return _marker("kind")(category)
+
+
+def reviewed(**verdict):
+    """``@reviewed(date=..., by=..., support=True, primary=True, independent_groups=N, note=...)``
+    — the agent's one-time *support review* of a literature claim, recorded on the spec.
+
+    The tool check (quote present in the cited paper) is deterministic and re-runs every audit.
+    Judging whether the quote actually *supports* the paraphrase, whether the source is the
+    *primary* one (not a relay — the telephone problem), and whether the cited papers are
+    *independent* groups is irreducibly a reading task: an agent does it once, at authoring, and
+    stamps the verdict here. ``support=False`` means the agent judged the paper does **not**
+    support the statement → the claim is treated as broken. Re-run the review only when the
+    quote or the paper text changes (carry a ``sha=`` of what was reviewed to make that
+    checkable). A literature claim with no ``@reviewed`` is *needs-review* and does not back a
+    ``[lit:]`` citation. Has no effect on non-literature claims."""
+    return _marker("reviewed")(**verdict)
 
 
 # --------------------------------------------------------------------------- #

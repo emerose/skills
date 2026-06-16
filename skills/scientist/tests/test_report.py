@@ -250,13 +250,152 @@ def test_render_markdown_assembles(tmp_path):
     md = _report_md(exp, _GOOD_BODY)
 
     out = R.render_markdown(md, home=tmp_path)
-    # the [claim:...] became a footnote reference + a grounding footnote
+    # citations are native pandoc footnotes (endnotes.lua relocates them on render)
     assert "[^claim-1]" in out
-    assert "K1-230101::test_kd.py::test_knockdown" in out
-    assert "passed · strong" in out
+    # the note reads statement-first, then a compact claim-id citation (test-file + the
+    # `test_` prefix dropped); no outcome / strength
+    assert "knockdown is 53% at the top dose" in out
+    assert "`K1-230101::knockdown`" in out
+    assert "passed" not in out and "strong" not in out
     # the csv embed was inlined as a Markdown table (header row present, image gone)
     assert "| metric | value |" in out
     assert "kd.csv)" not in out
+
+
+def test_report_citation_grounds_on_lemma(tmp_path):
+    exp = _exp(tmp_path)
+    _report_json(exp)
+    _report_md(exp, _GOOD_BODY, slug="lemma")                       # itself GROUNDED
+    main = _report_md(exp, "# Main\n\nBuilds on the lemma [report:K1-230101::lemma].\n",
+                      slug="main")
+    res = R.audit(main, home=tmp_path)
+    assert res["status"] == "GROUNDED", res
+    assert res["report_cites"][0]["verdict"] == "backed"
+
+
+def test_report_citation_missing_is_blocking(tmp_path):
+    exp = _exp(tmp_path)
+    _report_json(exp)
+    main = _report_md(exp, "# Main\n\nSee [report:K1-230101::nope].\n", slug="main")
+    res = R.audit(main, home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["report_cites"][0]["verdict"] == "missing"
+
+
+def test_report_citation_to_broken_lemma_is_weak(tmp_path):
+    exp = _exp(tmp_path)
+    _report_json(exp)
+    _report_md(exp, "# L\n\nResult [claim:test_does_not_exist].\n", slug="badlemma")  # BROKEN
+    main = _report_md(exp, "# Main\n\nSee [report:K1-230101::badlemma].\n", slug="main")
+    res = R.audit(main, home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["report_cites"][0]["verdict"] == "weak-backing"
+
+
+# --------------------------------------------------------------------------- #
+# literature citations ([lit:]) — quote-pinned, agent-reviewed, second-class
+# --------------------------------------------------------------------------- #
+def _lit_json(tmp_path: Path, *, node="test_lit", outcome="passed", kind="literature",
+              strength="strong", reviewed=None, sources=None, inputs=None) -> Path:
+    """A program-scope grounding report carrying one literature claim."""
+    prog = tmp_path / "program" / "analysis"
+    prog.mkdir(parents=True, exist_ok=True)
+    claim = {
+        "id": f"claims/test_literature.py::{node}",
+        "statement": "A third-party fact.", "outcome": outcome, "kind": kind,
+        "strength": strength, "caveats": None,
+        "reviewed": reviewed if reviewed is not None else {"date": "2026-06-16", "support": True},
+        "evidence": {"lit_sources": sources or [
+            {"citekey": "noor2015q", "system": "human", "test": "direct", "primary": True,
+             "group": "noor"}]},
+        "inputs": inputs if inputs is not None else [], "reconcile": [],
+    }
+    (prog / "grounding_report.json").write_text(json.dumps({"claims": [claim]}), encoding="utf-8")
+    return prog
+
+
+def _lit_report(tmp_path: Path, node="test_lit", slug="lit") -> Path:
+    d = tmp_path / "program" / "reports" / slug
+    d.mkdir(parents=True, exist_ok=True)
+    md = d / "report.md"
+    md.write_text(f"# Lit\n\nA fact [lit:program::test_literature.py::{node}].\n", encoding="utf-8")
+    return md
+
+
+def test_lit_backed_grounds(tmp_path):
+    _lit_json(tmp_path)
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "GROUNDED", res
+    assert res["lit_cites"][0]["verdict"] == "backed"
+    assert res["lit_cites"][0]["strength"] == "strong"
+
+
+def test_lit_weak_still_backs(tmp_path):
+    # a single, suggestive, but reviewed-and-supported source is legitimately weak — not broken
+    _lit_json(tmp_path, strength="weak")
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "GROUNDED", res
+    assert res["lit_cites"][0]["verdict"] == "backed"
+
+
+def test_lit_unreviewed_blocks(tmp_path):
+    _lit_json(tmp_path, reviewed=False)          # quote present, but no agent support-review
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "needs-review"
+
+
+def test_lit_unsupported_blocks(tmp_path):
+    _lit_json(tmp_path, reviewed={"support": False})
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "unsupported"
+
+
+def test_lit_quote_absent_blocks(tmp_path):
+    _lit_json(tmp_path, outcome="failed")        # the verbatim quote check failed
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "broken"
+
+
+def test_lit_wrong_kind_blocks(tmp_path):
+    # a data claim cited via [lit:] instead of [claim:] is a category error
+    _lit_json(tmp_path, kind="result")
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "wrong-kind"
+
+
+def test_lit_missing_blocks(tmp_path):
+    (tmp_path / "program" / "analysis").mkdir(parents=True, exist_ok=True)
+    res = R.audit(_lit_report(tmp_path, node="test_ghost"), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "missing"
+
+
+def test_lit_review_pinned_to_paper_sha(tmp_path):
+    paper_in = [{"kind": "paper", "path": "noor2015q", "sha256": "a" * 64, "via": "literature"}]
+    _lit_json(tmp_path, inputs=paper_in)            # discover the current combined sha
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    cur = res["lit_cites"][0]["review_sha"]
+    assert cur and res["lit_cites"][0].get("review_unpinned")   # unpinned → advisory, still backed
+    assert res["status"] == "GROUNDED"
+    # stamp the matching sha → backed, no longer advisory
+    _lit_json(tmp_path, inputs=paper_in, reviewed={"support": True, "sha": cur})
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "GROUNDED"
+    assert res["lit_cites"][0]["verdict"] == "backed"
+    assert not res["lit_cites"][0].get("review_unpinned")
+
+
+def test_lit_stale_review_blocks(tmp_path):
+    # review pinned to an old sha; the cited paper's text has since changed
+    paper_in = [{"kind": "paper", "path": "noor2015q", "sha256": "b" * 64, "via": "literature"}]
+    _lit_json(tmp_path, inputs=paper_in, reviewed={"support": True, "sha": "deadbeef" * 8})
+    res = R.audit(_lit_report(tmp_path), home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert res["lit_cites"][0]["verdict"] == "stale-review"
 
 
 def test_render_pdf_if_pandoc(tmp_path):
@@ -269,7 +408,11 @@ def test_render_pdf_if_pandoc(tmp_path):
     # HTML needs no LaTeX engine, so it's the portable render to assert end-to-end
     res = R.render(md, out, home=tmp_path, to="html")
     assert Path(res["output"]).is_file()
-    assert out.read_text(encoding="utf-8").strip()
+    html = out.read_text(encoding="utf-8")
+    assert html.strip()
+    # endnotes.lua relocated the footnote into a "Notes" endnotes section with anchors
+    assert 'id="notes"' in html
+    assert 'id="en-1"' in html and 'href="#en-1"' in html
 
 
 # --------------------------------------------------------------------------- #
