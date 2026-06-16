@@ -192,9 +192,12 @@ _DASH_MAP = {ord(c): "-" for c in _DASHES}
 
 def _fold_match(s: str) -> str:
     """Normalize text for verbatim-quote matching: NFKC-normalize, fold Unicode dashes to
-    ASCII ``-``, then collapse whitespace. Case is preserved (a quote is still verbatim)."""
+    ASCII ``-``, drop Markdown emphasis markers (``*``/``_`` — the library stores parsed
+    Markdown, so a gene name reads ``*Ube3a*``; that's markup, not content), then collapse
+    whitespace. Case is preserved (a quote is still verbatim)."""
     import unicodedata
-    return _collapse_ws(unicodedata.normalize("NFKC", s).translate(_DASH_MAP))
+    folded = unicodedata.normalize("NFKC", s).translate(_DASH_MAP).replace("*", "").replace("_", "")
+    return _collapse_ws(folded)
 
 
 # --- per-format text readers (pure-Python; the [reports] extra) ------------- #
