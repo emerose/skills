@@ -113,14 +113,15 @@ strength, caveats, evidence, inputs+shas, reconcile, drift?}`).
 
 ```bash
 pytest <…>/analysis/claims --check-drift        # flag stale claims (input changed since @strength set)
-SCIENTIST_HOME=… rollup.py [--out DIR] [--no-drift]   # PROGRAM-WIDE rollup
+SCIENTIST_HOME=… rollup.py [--out DIR] [--no-drift] [--no-trace]   # PROGRAM-WIDE rollup
 ```
 
 - **Program rollup** runs *every* `<exp>/analysis/claims` in one session (so cross-experiment
   `cross()`/`uses()` links resolve) and aggregates into `program_evidence.{md,json}`: counts by
   outcome/kind/strength, a per-experiment table, the **cross-experiment claim graph** (every claim whose
-  evidence spans >1 experiment), and the stale-claim list. The substrate for a semantic audit of the
-  program's stated conclusions.
+  evidence spans >1 experiment), the stale-claim list, and a **program-traceability** section (the
+  `sci program-trace` rollup — GROUNDED/BROKEN over every experiment + report; `--no-trace` to skip).
+  The substrate for a semantic audit of the program's stated conclusions.
 - **Drift (`--check-drift`)** — for each claim, finds the commit that last set its `@strength` marker
   (`git blame`) and flags the claim **stale** if any captured input changed since then → re-judge.
 - **Temporal ledger = git.** Editing a `@strength` or a statement across commits is a belief change;
@@ -169,6 +170,22 @@ experiment's grounding report under `--home`), and reuses the per-claim walk to 
 to raw. Fans in across experiments; the report is **GROUNDED** only when every cited claim resolves and
 its chain is unbroken (`{report, terminals:[{cite, claim_id, experiment, path_to_raw, breaks}], breaks,
 status}`). This is the traceability half of the **report phase** — see below.
+
+### Program-wide trace — is the *whole program* grounded?
+
+```bash
+sci program-trace [<home>] [--json]   # default home: $SCIENTIST_HOME or cwd; exit 0 GROUNDED / 1 BROKEN
+```
+
+Rolls the per-experiment `sci trace` verdict **and** the per-report `sci trace` verdict up across the
+entire tree into one status. The program is **GROUNDED** only when *every* tracked experiment (each
+depth-1 dir with an `experiment.yml`, plus `program/`) and *every* report (`*/reports/*/report.md`)
+traces cleanly to raw; otherwise **BROKEN**, and the offenders + their break categories are the
+worklist (`{home, status, n_experiments, n_reports, n_broken_*, experiments:[…], reports:[…]}`). Pure
++ store-free like `sci trace`, so it inherits the same precondition: it reads the on-disk
+`grounding_report.json` reports, so **run the claims first** to materialize them (the program rollup
+below runs them as part of its claim pass). This is ROADMAP §4 — the single "is the program's stated
+evidence fully grounded?" answer.
 
 ## Report phase — `claims → report`
 

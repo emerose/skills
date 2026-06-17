@@ -74,6 +74,7 @@ from scientist import extraction as EXT  # noqa: E402
 from scientist.provenance import trace as TRACE  # noqa: E402
 from scientist.provenance import reproduce as REPRODUCE  # noqa: E402
 from scientist.provenance import report as REPORT  # noqa: E402
+from scientist.provenance import program as PROGRAM  # noqa: E402
 from scientist.store import cli as STORE_CLI  # noqa: E402
 from scientist.store import _meta as STORE_META  # noqa: E402
 
@@ -107,6 +108,13 @@ def main() -> int:
                       "(default <exp>/analysis/grounding_report.json then <exp>/grounding_report.json)")
     p_tr.add_argument("--home", help="data-tree root for a report-rooted trace "
                       "(default: $SCIENTIST_HOME or inferred)")
+
+    # ---- program-trace: roll up every experiment + report trace verdict program-wide ----
+    p_pt = sub.add_parser("program-trace",
+                          help="roll up every experiment + report's trace verdict into ONE "
+                               "program-grounding status — is the program's stated evidence grounded?")
+    p_pt.add_argument("home", nargs="?", help="data-tree root (default: $SCIENTIST_HOME or cwd)")
+    p_pt.add_argument("--json", action="store_true", help="machine-readable output")
 
     # ---- reproduce: re-run analysis/derive.py and check it reproduces the recorded artifacts ----
     p_rp = sub.add_parser("reproduce",
@@ -155,6 +163,8 @@ def main() -> int:
         return EXT.cellcov(args.exp, args.script, args.examples)
     if args.cmd == "trace":
         return _trace(args)
+    if args.cmd == "program-trace":
+        return _program_trace(args)
     if args.cmd == "reproduce":
         return _reproduce(args)
     if args.cmd == "report":
@@ -188,6 +198,24 @@ def _trace(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
     else:
         print(TRACE.render(result))
+    return 0 if result["status"] == "GROUNDED" else 1
+
+
+def _program_trace(args: argparse.Namespace) -> int:
+    """`sci program-trace [home]`: roll up every experiment + report's trace verdict
+    into one program-grounding status. Pure (ledger + grounding reports on disk).
+    Exit 0 if the whole program is GROUNDED, 1 if any experiment or report is broken."""
+    import json
+    import os
+
+    home = Path(args.home).resolve() if getattr(args, "home", None) else (
+        Path(os.environ["SCIENTIST_HOME"]).resolve() if os.environ.get("SCIENTIST_HOME")
+        else Path.cwd())
+    result = PROGRAM.program_trace(home)
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    else:
+        print(PROGRAM.render(result))
     return 0 if result["status"] == "GROUNDED" else 1
 
 

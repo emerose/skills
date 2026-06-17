@@ -22,6 +22,9 @@ grounded claims into a human-facing narrative without loosening the grounding di
   claims (`[claim:<id>]` citations + grounded-derivation figure embeds), mechanically audited
   (citations resolve to live grounded claims, embeds to current sha-pinned artifacts), rendered
   to PDF, and indexed as `kind=report`. See §5.
+- **Program-level traceability** (`sci program-trace`) — every experiment's + report's `sci trace`
+  verdict rolled up into one GROUNDED/BROKEN program status; folded into `rollup.py`'s
+  `program_evidence`. See §4.
 
 ## 1. Analysis reproduction audit — do the analyses actually re-run? *(shipped)*
 
@@ -64,11 +67,17 @@ claim` / `sci trace`; the report phase (`sci report`, §5) runs the identical pr
 citing claims the same way. See [references/review-audit.md](references/review-audit.md) and
 [references/auditing.md](references/auditing.md).
 
-## 4. Program-level traceability
+## 4. Program-level traceability ✅ shipped
 
-`scripts/rollup.py` aggregates claims program-wide (the cross-experiment claim graph, drift). Add
-a program-level **traceability status** — the per-experiment `sci trace` verdict rolled up — so
-"is the program's stated evidence fully grounded?" is a single report.
+**Shipped** as `sci program-trace [home]` (`provenance/program.py`) + a traceability section folded
+into `scripts/rollup.py`'s `program_evidence.{md,json}`. It rolls up the per-experiment `sci trace`
+verdict **and** the per-report `sci trace` verdict across the whole tree into one status: the program
+is **GROUNDED** only when every tracked experiment *and* every report traces cleanly to raw,
+otherwise **BROKEN** with the offenders (and their break categories) as the worklist. Pure +
+store-free, like `trace` — it walks the on-disk `experiment.yml` ledgers and `grounding_report.json`
+reports (so it inherits `sci trace`/`sci report`'s precondition: run the claims first to materialize
+the grounding reports; `rollup.py` runs them as part of the claim pass). Answers "is the program's
+stated evidence fully grounded?" in a single command (exit 0 GROUNDED / 1 BROKEN).
 
 ## 5. Reports — `claims → report` ✅ shipped
 

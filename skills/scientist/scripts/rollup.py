@@ -31,6 +31,12 @@ import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
+# Put skills/scientist (the dir containing the `scientist` package) onto sys.path so
+# the program-traceability rollup (provenance.program) resolves without an install.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scientist.provenance import program as PROGRAM  # noqa: E402
+
 _EXP_RE = re.compile(r"(K1-[0-9A-Za-z]+)")
 
 
@@ -174,6 +180,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=".", help="output dir for program_evidence.{md,json}")
     ap.add_argument("--no-drift", action="store_true", help="skip the git drift check (faster)")
+    ap.add_argument("--no-trace", action="store_true",
+                    help="skip the program-traceability rollup (the per-experiment + per-report "
+                         "`sci trace` verdict rolled up program-wide)")
     args = ap.parse_args()
 
     # SCIENTIST_HOME is the data-tree root.
@@ -191,14 +200,29 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         run = run_claims(dirs, Path(tmp), check_drift=not args.no_drift)
     agg = aggregate(run["claims"])
+
+    # Program-level traceability: roll up every experiment + report's `sci trace` verdict
+    # into one "is the program's stated evidence fully grounded?" status (ROADMAP §4).
+    trace_md = ""
+    if not args.no_trace:
+        print("walking program traceability…", file=sys.stderr)
+        tr = PROGRAM.program_trace(root)
+        agg["traceability"] = tr
+        trace_md = "\n" + PROGRAM.render(tr)
+
     (out / "program_evidence.json").write_text(json.dumps(agg, indent=2, ensure_ascii=False),
                                                 encoding="utf-8")
-    (out / "program_evidence.md").write_text(render_md(agg, drift_checked=not args.no_drift),
+    (out / "program_evidence.md").write_text(render_md(agg, drift_checked=not args.no_drift) + trace_md,
                                              encoding="utf-8")
     print(f"  {run['pytest_summary']}", file=sys.stderr)
     print(f"  {agg['n_claims']} claims · {agg['n_experiments']} experiments · "
           f"{len(agg['cross_experiment'])} cross-experiment · "
           f"{len(agg['drift_stale'])} stale", file=sys.stderr)
+    if not args.no_trace:
+        tr = agg["traceability"]
+        print(f"  traceability: {tr['status']} "
+              f"({tr['n_broken_experiments']}/{tr['n_experiments']} experiments, "
+              f"{tr['n_broken_reports']}/{tr['n_reports']} reports broken)", file=sys.stderr)
     print(out / "program_evidence.md")
 
 
