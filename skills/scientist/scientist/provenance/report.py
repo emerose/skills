@@ -289,16 +289,77 @@ def is_grounded(claim: dict[str, Any]) -> bool:
             and str(claim.get("strength")) in GROUNDED_STRENGTHS)
 
 
+# Locator ladder → max eligible strength for a *machine-judged* literature source (mirrors
+# scientist.grounding.source). A source's tier caps the claim's strength; the audit enforces the
+# ceiling so a paragraph-spanning chunk locator can't be sold as a tier-1 "strong" quote.
+_LIT_TIER_CEILING = {1: "strong", 2: "moderate", 3: "weak"}
+_LIT_STRENGTH_RANK = {"weak": 1, "moderate": 2, "strong": 3}
+
+
+def _machine_lit_sources(claim: dict[str, Any]) -> list[dict[str, Any]]:
+    """The machine-judged sources of a literature claim — lit sources carrying a ``paraphrase``
+    (i.e. authored with ``source(paraphrase=…)``). Empty for a legacy quote-only claim, which
+    keeps the ``@reviewed`` path."""
+    ev = claim.get("evidence") or {}
+    return [s for s in (ev.get("lit_sources") or [])
+            if isinstance(s, dict) and s.get("paraphrase")]
+
+
+def _lit_strength_ceiling(machine_sources: list[dict[str, Any]]) -> str:
+    """The claim's max eligible strength: the ceiling of its *weakest-located* machine source
+    (highest tier number → lowest ceiling)."""
+    worst = max((int(s.get("tier", 3)) for s in machine_sources), default=3)
+    return _LIT_TIER_CEILING.get(worst, "weak")
+
+
 def lit_verdict(claim: dict[str, Any]) -> tuple[str, str | None]:
-    """Verdict for a ``[lit:<id>]`` citation. Literature grounding is two-layer: the tool
-    check is the claim's pass/fail (the verbatim quote was present in the cited paper); the
-    *support* is a one-time agent review stamped via ``@reviewed``. Unlike a data claim, a
-    *weak* (but reviewed-and-supported) literature claim still backs its citation — single,
-    suggestive, or secondary evidence is legitimately weak, not broken. Blocks only on:
-    a failed quote check, a non-literature claim cited via ``[lit:]``, an un-reviewed claim,
-    or an agent verdict of unsupported. Returns ``(verdict, detail|None)``."""
+    """Verdict for a ``[lit:<id>]`` citation. Literature grounding is two-layer: the tool check is
+    the claim's pass/fail (the verbatim quote was present in the cited paper); the *support* is a
+    judgment of whether the quote fairly backs the paraphrase. That support judgment is recorded
+    one of two ways, and this function consumes both with the SAME downstream shape:
+
+    * **machine-judged** (``source(paraphrase=…)``) — a re-runnable, cache-pinned LLM entailment
+      verdict, refreshed by ``sci judge``. ``needs-judgment`` (not yet judged / paraphrase edited)
+      and ``stale-judgment`` (quote / paraphrase / model drifted since judged) are the executable
+      analogue of ``needs-review`` / ``stale-review``; an ``unsupported`` judgment blocks.
+    * **legacy** (``@reviewed(support=…)``) — the hand-stamped human boolean, unchanged.
+
+    Unlike a data claim, a *weak* (but supported) literature claim still backs its citation —
+    single, suggestive, or secondary evidence is legitimately weak, not broken. Blocks only on:
+    a failed quote check, a non-literature claim cited via ``[lit:]``, an un-judged/unsupported/
+    stale source, or a strength that exceeds the locator ceiling. Returns ``(verdict, detail|None)``."""
     if str(claim.get("kind")) != "literature":
         return ("wrong-kind", "cited via [lit:] but is not a literature claim — use [claim:]")
+
+    machine = _machine_lit_sources(claim)
+    if machine:
+        # MACHINE-JUDGED path. A cached `unsupported` verdict fails the claim's assert
+        # (outcome != passed); distinguish that from a failed *quote* tripwire.
+        if str(claim.get("outcome")) not in GROUNDED_OUTCOMES:
+            if any(s.get("supported") is False for s in machine):
+                return ("unsupported", "the support judge found the paraphrase NOT supported by "
+                                       "the cited span — fix the paraphrase or re-source")
+            return ("broken", f"the quote check did not pass (outcome={claim.get('outcome')}) — "
+                              "the verbatim quote is not in the cited paper")
+        if any(s.get("judge_status") == "stale" for s in machine):
+            return ("stale-judgment", "the quote / paraphrase / model drifted since the verdict "
+                                      "was cached — re-run `sci judge` to re-judge")
+        if any(s.get("judge_status") != "fresh" or "supported" not in s for s in machine):
+            return ("needs-judgment", "no cached support verdict yet — run `sci judge` to have "
+                                      "the model judge whether the quote supports the paraphrase")
+        if any(not s.get("supported") for s in machine):
+            return ("unsupported", "the support judge found the paraphrase NOT supported by the "
+                                   "cited span")
+        ceiling = _lit_strength_ceiling(machine)
+        strength = str(claim.get("strength"))
+        if _LIT_STRENGTH_RANK.get(strength, 0) > _LIT_STRENGTH_RANK.get(ceiling, 3):
+            return ("over-strength", f"@strength={strength} exceeds the locator ceiling "
+                                     f"'{ceiling}' (a tier-{max(int(s.get('tier', 3)) for s in machine)} "
+                                     f"locator) — strengthen the locator (quote a sentence) or "
+                                     f"lower @strength")
+        return ("backed", None)
+
+    # LEGACY path (hand-stamped @reviewed). Unchanged.
     if str(claim.get("outcome")) not in GROUNDED_OUTCOMES:
         return ("broken", f"the quote check did not pass (outcome={claim.get('outcome')}) — "
                           "the verbatim quote is not in the cited paper")
@@ -718,9 +779,11 @@ def audit(report_path: Path, home: Path | None = None,
             rec["statement"] = claim.get("statement")
             rec["sources"] = (claim.get("evidence") or {}).get("lit_sources", [])
             rec["reviewed"] = claim.get("reviewed")
-            # re-validation: if the review was pinned (@reviewed(sha=…)) and a cited paper's
-            # text has since changed, the review is stale → re-read and re-stamp (blocking).
-            if verdict == "backed":
+            # re-validation (LEGACY @reviewed path only): if the review was pinned
+            # (@reviewed(sha=…)) and a cited paper's text has since changed, the review is stale →
+            # re-read and re-stamp (blocking). Machine-judged claims pin staleness via the verdict
+            # cache key (judge_status=stale → stale-judgment), so skip this for them.
+            if verdict == "backed" and not _machine_lit_sources(claim):
                 cur = lit_review_sha(claim)
                 stamped = (claim.get("reviewed") or {}).get("sha")
                 rec["review_sha"] = cur
@@ -1171,6 +1234,9 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
 _CITE_MARK = {"backed": "✅ backed", "weak-backing": "⚠️ weak-backing",
               "missing": "❌ missing", "ambiguous": "❌ ambiguous"}
 _LIT_MARK = {"backed": "✅ backed", "needs-review": "❌ needs-review",
+             "needs-judgment": "❌ needs-judgment (run `sci judge`)",
+             "stale-judgment": "❌ stale-judgment (re-run `sci judge`)",
+             "over-strength": "❌ over-strength (exceeds locator ceiling)",
              "unsupported": "❌ unsupported", "broken": "❌ broken (quote absent)",
              "wrong-kind": "❌ wrong-kind", "missing": "❌ missing", "ambiguous": "❌ ambiguous",
              "stale-review": "❌ stale-review (paper text changed)"}

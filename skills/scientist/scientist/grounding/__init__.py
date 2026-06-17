@@ -37,6 +37,10 @@ from typing import Any
 
 from ..provenance import record_provenance as _record_provenance
 from ..labfiles import read_docx_text, read_pdf_text, read_pptx_text
+# Pure, offline cache of literature support verdicts. Safe on the pytest path (stdlib only); the
+# model client (scientist.grounding.judge) is deliberately NOT imported here — see judge.py.
+from .judgments import (JudgmentCache, JUDGMENT_CACHE_NAME, DEFAULT_JUDGE_MODEL,
+                        judge_model_id as _judge_model_id, evidence_sha as _evidence_sha)
 
 __all__ = [
     "load", "data", "doc", "evidence", "uses", "cross", "record",
@@ -45,7 +49,27 @@ __all__ = [
     "paper", "source", "converge", "PaperRef", "LiteratureError",
     "current_capture", "registry", "TRACKED_SUFFIXES",
     "DerivationAudit", "audit_derivations", "current_audit",
+    "JudgmentCache", "JUDGMENT_CACHE_NAME", "DEFAULT_JUDGE_MODEL",
+    "set_judgment_cache", "current_judgment_cache",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# Literature support-verdict cache — read on the pytest path, written by the
+# refresh step (`sci judge`). The plugin loads it once per session and sets it
+# here; `source(paraphrase=…)` consults it. NEVER calls the model (see judge.py).
+# --------------------------------------------------------------------------- #
+_JUDGMENT_CACHE: "JudgmentCache | None" = None
+
+
+def set_judgment_cache(cache: "JudgmentCache | None") -> None:
+    """Install the literature support-verdict cache for the session (called by the plugin)."""
+    global _JUDGMENT_CACHE
+    _JUDGMENT_CACHE = cache
+
+
+def current_judgment_cache() -> "JudgmentCache | None":
+    return _JUDGMENT_CACHE
 
 # Source-file kinds we consider "tracked": reading one of these while a capture is
 # active is provenance the claim/derivation depends on. The bypass guard watches the
@@ -365,6 +389,7 @@ class PaperRef:
     is_retracted: bool = False
     credibility: dict = field(default_factory=dict, repr=False, compare=False)
     text: str = field(default="", repr=False, compare=False)
+    document_id: str = field(default="", repr=False, compare=False)
 
     def __str__(self) -> str:
         return f"{self.citekey}@{self.sha256[:12]}({self.mode})"
@@ -376,6 +401,32 @@ class PaperRef:
         if normalize_ws:
             return _fold_match(phrase) in _fold_match(self.text)
         return phrase in self.text
+
+    def chunk_text(self, chunk) -> str:
+        """The text of one (or several) libkit chunk(s) of this paper — the **tier-2 locator**
+        span for a paragraph-spanning fact with no single quotable sentence. ``chunk`` is a chunk
+        index (or an iterable of indices, joined in order); libkit already chunks documents and
+        ``bib query`` returns chunk ids. Keyless/offline (reads the LOCAL library DuckDB, like
+        :func:`_load_paper`). Returns ``""`` for an out-of-range index."""
+        if not self.document_id:
+            raise LiteratureError(
+                f"chunk locator needs full text but {self.citekey} is {self.mode}-only "
+                f"(no chunked document) — quote it (tier 1) or `bib fetch {self.citekey}`.")
+        idxs = [chunk] if isinstance(chunk, int) else list(chunk)
+        import asyncio
+
+        BiblioStore = _import_bibliostore()
+        home = _bib_home()
+
+        async def _go():
+            store = BiblioStore.open(home)
+            try:
+                parts = [await store.chunk_text(self.document_id, int(i)) for i in idxs]
+            finally:
+                await store.close()
+            return parts
+
+        return " ".join(p for p in asyncio.run(_go()) if p).strip()
 
 
 def _credibility_from_rec(rec: dict) -> dict:
@@ -428,6 +479,7 @@ def _load_paper(citekey: str) -> PaperRef:
                 txt, mode = (rec.get("abstract") or ""), "abstract"
             return {"text": txt, "mode": mode, "title": rec.get("title") or "",
                     "year": str(rec.get("year") or ""), "doi": rec.get("doi") or "",
+                    "document_id": str(doc_id or ""),
                     "credibility": _credibility_from_rec(rec)}
         finally:
             await store.close()
@@ -445,7 +497,7 @@ def _load_paper(citekey: str) -> PaperRef:
     ref = PaperRef(citekey=citekey, sha256=_sha256(res["text"].encode("utf-8")),
                    mode=res["mode"], title=res["title"], year=res["year"], doi=res["doi"],
                    is_retracted=bool(cred.get("is_retracted")), credibility=cred,
-                   text=res["text"])
+                   text=res["text"], document_id=res.get("document_id", ""))
     _PAPER_CACHE[citekey] = ref
     return ref
 
@@ -471,38 +523,120 @@ def paper(citekey: str, *, allow_retracted: bool = False) -> PaperRef:
     return ref
 
 
-def source(citekey: str, *, quote: str, test: str = "direct", system: str = "",
+# Locator ladder → max eligible strength. A source's *tier* is set by HOW precisely it locates the
+# supporting text, and the tier caps the claim's strength (the audit enforces the ceiling):
+#   tier 1  quote=  + paraphrase= → entailment over two short snippets   (eligible up to "strong")
+#   tier 2  chunk=  + paraphrase= → entailment over one libkit chunk span (up to "moderate")
+#   tier 3  paraphrase= only      → judge reads the whole document        ("weak" only; costly)
+# A bare quote= with no paraphrase= is the LEGACY path: deterministic quote tripwire + a hand
+# -stamped @reviewed(support=…), unchanged and not machine-judged (no tier).
+# (The tier→strength-ceiling map + its enforcement live in provenance.report, the audit layer.)
+
+
+def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = None,
+           chunk=None, test: str = "direct", system: str = "",
            primary: bool = True, group: str | None = None, allow_retracted: bool = False) -> dict:
-    """One source backing a literature claim: assert ``quote`` is present in paper ``citekey``
-    and record the source's evidential tags for the report.
+    """One source backing a literature claim. Records the source's evidential tags for the report
+    and runs the deterministic quote tripwire; with ``paraphrase=`` it also pins the **machine
+    support verdict** (see below).
 
-    - ``test``    — ``"direct"`` (an experiment designed to test this claim) or ``"suggestive"``
-      (a related result that merely implies it).
-    - ``system``  — what was studied (``"human single-gene dup"``, ``"mouse transgenic"``…).
-    - ``primary`` — is this the *primary* source for the result, or a relay citing someone else?
-      (Telephone problem: ground to the primary; ``primary=False`` is weak by construction.)
-    - ``group``   — a label the agent sets so co-lab papers count as ONE independent group.
+    - ``quote``      — a *verbatim* phrase present in the paper. The deterministic, every-audit
+      tripwire (string-in-stored-text): ``AssertionError`` if absent. Required for the legacy path
+      and for tier 1.
+    - ``paraphrase`` — the claim's reading of the cited span. Opts the source into the
+      **re-runnable, cache-pinned LLM entailment check** "does the span fairly support P?": the
+      verdict is computed *only* by the refresh step (``sci judge``) and cached; this call merely
+      reads the cached, key-pinned verdict (``(evidence_sha, paraphrase, model_id)``) and asserts
+      *supported* when present. No model is ever called here — the claims suite stays offline and
+      deterministic. A missing/stale verdict is **non-blocking** (the audit reports
+      ``needs-judgment`` / ``stale-judgment``; run ``sci judge``).
+    - ``chunk``      — a libkit chunk index (or iterable of indices): the **tier-2** locator for a
+      paragraph-spanning fact with no single quotable sentence. Used with ``paraphrase=`` (no
+      ``quote=``); the judged span is the chunk text.
+    - ``test`` / ``system`` / ``primary`` / ``group`` — evidential tags (unchanged); see
+      :func:`reviewed` for how directness / primary / independence feed strength.
 
-    Raises ``AssertionError`` if the quote isn't found (the deterministic, every-audit check —
-    pytest pass/fail). The evidential weight (independence/directness/primary) is judged by the
-    agent and stamped via :func:`reviewed`; this call only pins the quote."""
+    The verbatim-quote tripwire and the paper-text sha are deterministic and re-run every audit;
+    the *support* judgment is now executable too — a cached ``unsupported`` verdict fails the
+    claim on every subsequent run (quote-mining no longer survives)."""
     ref = paper(citekey, allow_retracted=allow_retracted)
-    if not ref.contains(quote):
+
+    # Deterministic tripwire (tier 1 + legacy): the verbatim quote must be in the stored text.
+    if quote is not None and not ref.contains(quote):
         where = "full text" if ref.mode == "fulltext" else "abstract (citation-only — no full text)"
         raise AssertionError(
             f"literature quote not found in {citekey} ({where}):\n  quote: {quote!r}\n"
             f"  -> the paper does not contain this verbatim string; fix the quote, or if it is "
             f"in the body of a citation-only paper, `bib fetch {citekey}` to ingest full text.")
-    rec = {"citekey": citekey, "quote": quote, "test": test, "system": system,
+
+    rec = {"citekey": citekey, "test": test, "system": system,
            "primary": bool(primary), "group": group or citekey, "mode": ref.mode,
            "title": ref.title, "year": ref.year, "doi": ref.doi,
            # Display-only credibility markers (venue legitimacy + citation impact); these
            # surface on the claim/report but never feed strength/outcome — see _credibility_from_rec.
            "credibility": ref.credibility}
+    if quote is not None:
+        rec["quote"] = quote
+
+    if paraphrase is None:
+        # LEGACY path: deterministic quote + hand-stamped @reviewed(support=…). Unchanged.
+        if quote is None:
+            raise LiteratureError(
+                "source() needs quote= (legacy / tier 1) or paraphrase= (machine-judged) — "
+                "got neither.")
+        _record_source(rec)
+        return rec
+
+    # MACHINE-JUDGED path: resolve the span the judge reads + the locator tier.
+    rec["paraphrase"] = paraphrase
+    if quote is not None:
+        span, tier = quote, 1
+    elif chunk is not None:
+        span = ref.chunk_text(chunk)
+        tier = 2
+        if not span:
+            raise AssertionError(
+                f"chunk locator {chunk!r} resolved to empty text in {citekey} — fix the chunk id "
+                f"(`bib query` returns chunk ids) or quote a sentence (tier 1).")
+        rec["chunk"] = chunk
+    else:
+        span, tier = ref.text, 3        # tier 3: whole-document; costly, weak only
+    rec["tier"] = tier
+    rec["span"] = span if tier <= 2 else ""    # tier 1/2 spans are small → carried for the refresh
+    esha = _evidence_sha(span)
+    rec["evidence_sha"] = esha
+    model_id = _judge_model_id()
+    rec["judge_model_id"] = model_id
+
+    status, entry = "miss", None
+    cache = _JUDGMENT_CACHE
+    if cache is not None:
+        status, entry = cache.lookup(citekey, esha, paraphrase, model_id)
+    rec["judge_status"] = status        # fresh | stale | miss (read by the audit)
+    if status == "fresh" and entry is not None:
+        rec["supported"] = bool(entry.get("supported"))
+        rec["judge_rationale"] = entry.get("rationale")
+        rec["judged_at"] = entry.get("timestamp")
+        rec["judged_model_id"] = entry.get("model_id")
+
+    _record_source(rec)
+
+    # Assert on the CACHED, key-pinned verdict (decision: the support judgment is executable).
+    # Graceful when absent/stale: a brand-new or re-judged claim stays needs-/stale-judgment
+    # (non-blocking) until `sci judge` runs — never a hard failure on a cache miss.
+    if status == "fresh":
+        assert rec.get("supported"), (
+            f"literature paraphrase NOT supported by the cited span in {citekey} "
+            f"(judged by {rec.get('judged_model_id')}): {rec.get('judge_rationale')!r}\n"
+            f"  paraphrase: {paraphrase!r}\n"
+            f"  -> fix the paraphrase to match the span, or re-source the fact.")
+    return rec
+
+
+def _record_source(rec: dict) -> None:
     cap = _CURRENT.get()
     if cap is not None:
         cap.evidence.setdefault("lit_sources", []).append(rec)
-    return rec
 
 
 def converge(*sources: dict) -> list[dict]:
