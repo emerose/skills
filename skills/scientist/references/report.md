@@ -361,16 +361,17 @@ Two more citation forms, same audit:
   to walk what it rests on.
 - **`[lit:<id>]`** — ground a *third-party* fact on a paper in the bibliographer library. A
   literature claim is a pytest spec in `program/claims/test_literature.py` (`@kind("literature")`)
-  that calls `source(citekey, quote=…, test=…, system=…, primary=…, group=…)` — and
+  that calls `source(citekey, quote=…, paraphrase=…, test=…, system=…, primary=…, group=…)` — and
   `converge(...)` for a multi-source fact. The spec **fails if the verbatim quote is not in the
   cited paper's stored text** (read from the LOCAL library DuckDB — keyless, offline; only the
   library's semantic *query* embeds), and **fails outright if the cited paper is marked
   retracted** (OpenAlex / Retraction Watch, as of the last `bib add`/enrich — a claim must not
   rest on retracted work; pass `allow_retracted=True` only to discuss the retraction itself).
   `[lit:program::test_literature.py::<node>]` is `backed`
-  only if that quote check passed **and** the claim carries an agent support-review
-  (`@reviewed`); a *weak* but reviewed-and-supported claim still backs (single/suggestive
-  evidence is legitimately weak). It is **second-class to `[claim:]`** — rendered as a distinct
+  only if that quote check passed **and** the claim's *support* is confirmed — either by a
+  re-runnable machine verdict (`source(paraphrase=…)`, refreshed by `sci judge`) or a hand-stamped
+  `@reviewed` (see *The machine support judge* below); a *weak* but supported claim still backs
+  (single/suggestive evidence is legitimately weak). It is **second-class to `[claim:]`** — rendered as a distinct
   "Literature" endnote and reported on its own audit line — and must never read as data-grounded.
 - **Bare references** (no `[lit:]`) remain fine for *background*: cite the paper in a
   **References** section by DOI as a clickable link, e.g.
@@ -388,11 +389,20 @@ you cite what the field reports. Two layers:
    use `bib show`/`bib query`/`sci`-side reads to copy a real phrase. A short, specific sentence
    beats a long one (less to break). One paper can back several quotes; it appears once per
    endnote.
-2. **Support review (agent, once).** Stamp `@reviewed(date=…, by=…, support=…, primary=…,
-   independent_groups=…, note=…)` after actually reading the cited span. Judge:
-   - **support** — does the quote support the *paraphrase*, read in context? Watch for
-     quote-mining (a supportive sentence in a paper whose surrounding text qualifies it).
-     `support=False` ⇒ the claim is broken.
+2. **Support.** Whether the quote actually *supports the paraphrase* — read in context, no
+   quote-mining — is the load-bearing judgment. Record it ONE of two ways:
+   - **Machine-judged (preferred, executable).** Add `paraphrase="…"` to `source()` (alongside
+     `quote=`). The support judgment becomes a *re-runnable, cache-pinned* LLM entailment check —
+     "does quote Q fairly support paraphrase P?" — over two short strings (NOT "read the whole
+     paper and decide if it supports X"). See **The machine support judge** below. A cached
+     `unsupported` verdict *fails the claim* on every subsequent run, so quote-mining no longer
+     survives a re-audit.
+   - **Hand-stamped (legacy).** Stamp `@reviewed(date=…, by=…, support=…, …)` after reading the
+     cited span; `support=False` ⇒ the claim is broken. The original path, unchanged — the right
+     choice when no judge is configured. Watch for quote-mining (a supportive sentence whose
+     surrounding text qualifies it).
+
+   Either way, also judge — and record via `@reviewed`, which co-exists with `paraphrase=`:
    - **primary** — is this the *primary* source, or a relay? (The telephone problem: if A says
      "B showed X", cite **B**; verify A isn't just repeating B.) This is not optional bookkeeping:
      a `primary=False` source is a signal to go *get* B — track down B's paper, add it to the
@@ -420,8 +430,9 @@ high-profile *review* over the lower-cited *primary* paper — the opposite of t
 for a `[lit:]` claim is *descriptive*, not a gate: unlike a data `[claim:]` (which must be
 moderate-or-strong to back), a `weak` literature claim that is reviewed, supported, and
 quote-pinned **backs its citation** and renders as an appropriately weak endnote (`lit_verdict`
-blocks only on a failed quote, a non-literature claim, an un-reviewed claim, or an
-agent-judged-unsupported one — never on `weak`). So single/suggestive/secondary evidence is
+blocks only on a failed quote, a non-literature claim, an un-reviewed/un-judged claim, a stale
+verdict, an unsupported one, or a strength that exceeds the locator ceiling — never on `weak`
+itself). So single/suggestive/secondary evidence is
 *citable*, not unusable. This matters most for **disconfirming** evidence, which is often
 legitimately weak (one contrary case, an inferential tolerance argument): write it as a `weak`
 `[lit:]` claim and cite it, rather than demoting it to a bare reference or omitting it. Dropping a
@@ -442,6 +453,72 @@ ground a load-bearing claim on a title gloss, and don't silently drop it either;
 *corroborating* abstract-only sources, grounding on the abstract as `suggestive` is fine — just
 say so in the `@reviewed` note. Record which cited papers are abstract-/title-only so the gap is
 visible, not buried.
+
+#### The machine support judge — an executable, re-runnable support verdict
+
+The legacy `@reviewed(support=True)` is a trusted, hand-stamped boolean the audit *never
+re-checks*: it re-verifies the verbatim quote and the paper-text sha every run, but it never
+re-examines whether the paraphrase is a fair reading of the quote. That is the weak link
+(quote-mining survives a green audit). `source(paraphrase=…)` closes it by making the support
+judgment **executable**: an LLM judges the narrow, local question "does quote Q entail paraphrase
+P?" — and the claims suite asserts on the *cached* verdict, never the live model.
+
+**The determinism discipline (non-negotiable).** The claims suite is a re-runnable, offline,
+deterministic pytest suite — that is the whole system's value. So **the model is never called
+inside a claim**. The model runs in exactly ONE place: the refresh step (`sci judge`), which
+writes a sidecar verdict cache. `source()` (the pytest path) and the report audit only ever
+*read* that cache — a plain JSON file, a pure function of bytes, no key, no network. A `sci report`
+audit and a normal grounding run stay free and deterministic.
+
+**The cache + its key.** Each verdict answers one entailment question, keyed by the triple
+`(evidence_sha, paraphrase, model_id)` and stored in `lit_judgments.json` next to the grounding
+report (a machine-owned artifact, like `grounding_report.json` — never hand-edited):
+`{supported, model_id, timestamp, rationale, …}`. The verdict is **inspectable** — a green claim
+is "this model, on this date, judged Q⊢P with this rationale", not an opaque "the LLM said yes".
+
+**The locator ladder → strength.** *How precisely* a source locates its supporting text caps the
+claim's strength (the audit enforces the ceiling), so a paragraph-spanning gloss can't be sold as
+a pinpoint quote:
+
+| tier | `source(...)` | the judge reads | max `@strength` |
+|---|---|---|---|
+| 1 | `quote=` + `paraphrase=` | the verbatim quote (two short snippets) | `strong` |
+| 2 | `chunk=` + `paraphrase=` | one libkit chunk span (`bib query` returns chunk ids) | `moderate` |
+| 3 | `paraphrase=` only | the whole document (costly, high-variance, least auditable) | `weak` |
+
+Tier 1 is the default; reach for tier 2 only for a fact that genuinely spans a paragraph with no
+single quotable sentence. A claim's ceiling is that of its **weakest-located** source; exceeding
+it is a blocking `over-strength` finding (strengthen the locator, or lower `@strength`).
+
+**Staleness — pin `model_id`, re-judge on drift.** The verdict is invalidated the moment any of
+`(quote_sha | paraphrase | model_id)` drifts: a quote edit or a model upgrade flips the citation
+to `stale-judgment` (blocking) — re-run `sci judge` and re-run the suite. Pinning `model_id` into
+the key means a model upgrade is an explicit, auditable **mass re-judge**, never a silent shift in
+which claims are "supported". A paraphrase edit surfaces as `needs-judgment` (a new question);
+both resolve the same way — `sci judge`. This is the literature analogue of `stale-review`, but
+recomputed every run instead of trusted once.
+
+**Graceful with no key.** If no judge is configured (no `ANTHROPIC_API_KEY`), `sci judge` skips
+judging — it never crashes — and the un-judged source stays `needs-judgment` (the citation does
+not back until judged). So the feature is fully **opt-in and additive**: existing `quote=` +
+`@reviewed(support=…)` claims keep working unchanged; only sources that add `paraphrase=` are
+machine-judged.
+
+**The judge model is configurable** via `$SCIENTIST_JUDGE_MODEL` (default: a small/fast model —
+the entailment task is narrow and does not need a frontier model). The cache the pytest path reads
+defaults to `<grounding-out>/lit_judgments.json`; override with `--judge-cache` /
+`$SCIENTIST_JUDGE_CACHE`.
+
+**The refresh command (the only place the model runs).**
+
+```
+# 1. run the claims suite to (re)emit the grounding report (records paraphrase + quote_sha)
+uv run --with-editable <scientist> --with libkit pytest program/claims/ --grounding-out program/analysis
+# 2. judge the cache misses / stale keys — the ONE model invocation
+ANTHROPIC_API_KEY=… sci judge --home <data> --model claude-haiku-4-5
+# 3. re-run the suite: source() now asserts on the cached verdicts (unsupported → red)
+uv run --with-editable <scientist> --with libkit pytest program/claims/ --grounding-out program/analysis
+```
 
 **Running.** Generating the literature grounding report needs libkit + `BIBLIOGRAPHER_HOME`
 (source `~/.env`): `uv run --with-editable <scientist> --with libkit pytest program/claims/
