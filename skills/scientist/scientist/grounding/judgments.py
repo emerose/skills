@@ -1,46 +1,48 @@
 """scientist.grounding.judgments — the literature support-verdict cache (pure, offline).
 
 A *literature* claim's deterministic tripwire is the verbatim quote (``source(quote=…)``):
-present in the cited paper's text or not, every audit, no model. The new, separable part is
-the **support judgment** — "is paraphrase *P* a fair reading of quote *Q*?" — which used to be a
+present in the cited paper's text or not, every audit, no model. The separable part is the
+**support judgment** — "is paraphrase *P* a fair reading of quote *Q*?" — which used to be a
 hand-stamped human boolean (``@reviewed(support=…)``) the audit never re-checked. This module
-holds the machine-judged answer as a **cache** so the claims suite can stay what it is: a
-re-runnable, deterministic, *offline* pytest suite.
+holds the answer as a **cache** so the claims suite can stay what it is: a re-runnable,
+deterministic, *offline* pytest suite.
 
-The discipline is strict and load-bearing:
+The discipline is strict and load-bearing — and note WHO judges: **no model lives in this tool.**
+The orchestrating agent (an LLM that already read the paper, ideally via a fresh-context judge
+subagent for independence) produces the verdict; ``sci judge`` only lists the work and records the
+verdict it is handed.
 
-  * The model is invoked **only** in the refresh step (``scientist.grounding.refresh`` /
-    ``sci judge``), which WRITES this cache.
+  * The verdict is WRITTEN by the record step (``scientist.grounding.refresh.record_verdicts`` /
+    ``sci judge --record``), which ingests caller-supplied verdicts and pins each one with an
+    ``evidence_sha`` the tool recomputes itself.
   * The pytest path (``source()``) and the audit (``provenance.report.lit_verdict``) only ever
     READ this cache — a plain JSON file, a pure function of bytes. No network, no key, no model.
 
-This module is therefore pure stdlib and safe to import on the pytest path; the actual model
-client (:mod:`scientist.grounding.judge`) is *not* — see its module docstring.
+This module is pure stdlib and safe to import on the pytest path.
 
 ## Cache shape
 
-Each verdict answers one entailment question, keyed by the triple
-``(evidence_sha, paraphrase, model_id)`` (decision: a model upgrade or a quote/paraphrase edit
-must invalidate the verdict, never silently carry it forward):
+Each verdict answers one entailment question, keyed by the pair ``(evidence_sha, paraphrase)``
+(decision: a quote/paraphrase edit must invalidate the verdict, never silently carry it forward;
+*who* judged is metadata, not part of the key — a verdict by a different judge is still valid):
 
   * ``evidence_sha`` — sha256 of the exact text span the judge read (the verbatim quote for a
     tier-1 source, a chunk's text for tier-2, the whole-document text for tier-3).
   * ``paraphrase``  — the claim's paraphrase of that span (the human-authored anchor).
-  * ``model_id``    — the judge model the verdict was produced by.
 
-The stored entry is machine-written/-rewritten and inspectable, so a green claim is never an
-opaque "the LLM said yes":
+The stored entry is machine-pinned and inspectable, so a green claim is never an opaque "the LLM
+said yes" — it records who judged it and when:
 
-    {evidence_sha, paraphrase, model_id, citekey, tier, supported, rationale, timestamp}
+    {evidence_sha, paraphrase, judge_id, citekey, tier, supported, rationale, timestamp}
 
 ## Lookup → fresh / stale / miss
 
 :meth:`JudgmentCache.lookup` resolves a source against the cache into one of three states,
 mirroring the existing ``stale-review`` design (which fires when a cited paper's text drifts):
 
-  * ``fresh`` — an entry exists for this exact ``(evidence_sha, paraphrase, model_id)``; use it.
+  * ``fresh`` — an entry exists for this exact ``(evidence_sha, paraphrase)``; use it.
   * ``stale`` — an entry exists for this ``(citekey, paraphrase)`` but under a different
-    ``evidence_sha`` or ``model_id`` (the quote changed, or the model was upgraded) → re-judge.
+    ``evidence_sha`` (the quote/span changed since judged) → re-judge.
   * ``miss``  — no entry for this ``(citekey, paraphrase)`` at all (never judged, or the
     paraphrase was edited into a new question) → judge.
 
@@ -55,27 +57,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# The sidecar the refresh step writes and the pytest/audit paths read. Lives next to the
+# The sidecar the record step writes and the pytest/audit paths read. Lives next to the
 # grounding report it serves (e.g. ``program/analysis/lit_judgments.json``) — a machine-owned
 # artifact, like ``grounding_report.json``, NOT a hand-edited decorator value.
 JUDGMENT_CACHE_NAME = "lit_judgments.json"
 
-# A small, fast model is the right default for the narrow entailment task — it is two short
-# strings, not "read the whole paper". Override per-run via ``$SCIENTIST_JUDGE_MODEL`` (or the
-# ``sci judge --model`` flag). Pinned into every cache key so an upgrade forces an explicit,
-# auditable mass re-judge rather than a silent shift in verdicts.
-DEFAULT_JUDGE_MODEL = "claude-haiku-4-5"
-
-
-def judge_model_id(env: dict[str, str] | None = None) -> str:
-    """The configured judge model id: ``$SCIENTIST_JUDGE_MODEL`` or :data:`DEFAULT_JUDGE_MODEL`.
-
-    Both the pytest path (key matching in ``source()``) and the refresh step read it through
-    here so the keys they compute always agree."""
-    import os
-
-    e = env if env is not None else os.environ
-    return e.get("SCIENTIST_JUDGE_MODEL") or DEFAULT_JUDGE_MODEL
+# Stamped on a recorded verdict when the caller does not name itself. The judge is the
+# orchestrating agent (ideally a fresh-context subagent); ``judge_id`` is purely descriptive
+# metadata — it is NOT part of the staleness key.
+DEFAULT_JUDGE_ID = "agent"
 
 
 def evidence_sha(span: str) -> str:
@@ -84,13 +74,11 @@ def evidence_sha(span: str) -> str:
     return hashlib.sha256(span.encode("utf-8")).hexdigest()
 
 
-def _key(evidence_sha_: str, paraphrase: str, model_id: str) -> str:
+def _key(evidence_sha_: str, paraphrase: str) -> str:
     h = hashlib.sha256()
     h.update(evidence_sha_.encode("utf-8"))
     h.update(b"\x00")
     h.update(paraphrase.encode("utf-8"))
-    h.update(b"\x00")
-    h.update(model_id.encode("utf-8"))
     return h.hexdigest()
 
 
@@ -130,31 +118,31 @@ class JudgmentCache:
         return p
 
     # ---- query / mutate ---------------------------------------------------- #
-    def lookup(self, citekey: str, evidence_sha_: str, paraphrase: str,
-               model_id: str) -> tuple[str, dict[str, Any] | None]:
+    def lookup(self, citekey: str, evidence_sha_: str,
+               paraphrase: str) -> tuple[str, dict[str, Any] | None]:
         """Resolve one source to ``("fresh"|"stale"|"miss", entry|None)`` — see module docs."""
-        exact = self.entries.get(_key(evidence_sha_, paraphrase, model_id))
+        exact = self.entries.get(_key(evidence_sha_, paraphrase))
         if exact is not None:
             return ("fresh", exact)
         for e in self.entries.values():
             if e.get("citekey") == citekey and e.get("paraphrase") == paraphrase:
-                return ("stale", e)        # quote/model drifted since judged
+                return ("stale", e)        # quote/span drifted since judged
         return ("miss", None)
 
-    def put(self, *, citekey: str, evidence_sha_: str, paraphrase: str, model_id: str,
+    def put(self, *, citekey: str, evidence_sha_: str, paraphrase: str, judge_id: str,
             supported: bool, rationale: str, timestamp: str, tier: int) -> dict[str, Any]:
-        """Store a verdict (refresh step only). Returns the stored entry.
+        """Store a caller-supplied verdict (record step only). Returns the stored entry.
 
-        A re-judge for the same ``(citekey, paraphrase)`` under a *new* ``evidence_sha`` /
-        ``model_id`` writes a new key; the orphaned old entry is pruned so the cache reflects
-        only live questions."""
+        A re-judge for the same ``(citekey, paraphrase)`` under a *new* ``evidence_sha`` writes a
+        new key; the orphaned old entry is pruned so the cache reflects only live questions.
+        ``judge_id`` is stamped as metadata (who judged) and never enters the key."""
         for k in [k for k, e in self.entries.items()
                   if e.get("citekey") == citekey and e.get("paraphrase") == paraphrase]:
             del self.entries[k]
         entry = {
             "citekey": citekey, "evidence_sha": evidence_sha_, "paraphrase": paraphrase,
-            "model_id": model_id, "supported": bool(supported), "rationale": rationale,
+            "judge_id": judge_id, "supported": bool(supported), "rationale": rationale,
             "timestamp": timestamp, "tier": int(tier),
         }
-        self.entries[_key(evidence_sha_, paraphrase, model_id)] = entry
+        self.entries[_key(evidence_sha_, paraphrase)] = entry
         return entry

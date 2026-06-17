@@ -1,19 +1,22 @@
-"""scientist.grounding.refresh — the literature-verdict refresh step (``sci judge``).
+"""scientist.grounding.refresh — the literature-verdict worklist + record step (``sci judge``).
 
-This is the **one and only** place the support judge (the LLM) is invoked. It reads an existing
-``grounding_report.json``, finds the machine-judged literature sources (those a claim authored
-with ``source(paraphrase=…)``), and for each one whose verdict is missing or stale it calls the
-judge and writes the result to the verdict cache (:mod:`scientist.grounding.judgments`). A normal
-grounding run / ``sci report`` then reads the populated cache and stays free + deterministic.
+**No model lives here — or anywhere in ``sci``.** The orchestrating agent is already an LLM that
+read the paper; the entailment verdict is produced by that agent (ideally a *fresh-context judge
+subagent* it spawns, so the authoring context never grades its own paraphrase). This module does
+only the two deterministic halves of the loop:
 
-Determinism discipline: the model client (:mod:`scientist.grounding.judge`) is imported lazily
-here, never at module import, and never by the pytest path. The default judge is injectable
-(``judge=`` / ``library_resolver=``) so the refresh logic is unit-testable with a stub — no real
-API, no real bibliographer library.
+  * :func:`worklist` — surface the literature sources whose support verdict is **missing or stale**,
+    each with the ``span_text`` the judge must read and the ``paraphrase`` it must weigh.
+    (``sci judge --list``.) This is what the judge subagent reads.
+  * :func:`record_verdicts` — ingest the caller-supplied verdicts ``{citekey, paraphrase,
+    supported, rationale}`` and write them into the verdict cache
+    (:mod:`scientist.grounding.judgments`), pinning each with an ``evidence_sha`` the tool
+    **recomputes itself** from the report's stored span — so a caller cannot record a verdict
+    against a stale or wrong span. (``sci judge --record``.)
 
-Graceful degradation: if the judge is unavailable (no API key / no SDK), each source is left
-unset and counted under ``skipped`` — the claim stays ``needs-judgment`` (non-blocking), never a
-crash.
+Determinism discipline (unchanged): the verdict cache is pure stdlib; the pytest path
+(``source()``) and the audit (``provenance.report.lit_verdict``) only READ it. This module only
+WRITES it. There is no model client to import.
 """
 from __future__ import annotations
 
@@ -22,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .judgments import JudgmentCache, JUDGMENT_CACHE_NAME, evidence_sha, judge_model_id
+from .judgments import (JudgmentCache, JUDGMENT_CACHE_NAME, DEFAULT_JUDGE_ID, evidence_sha)
 
 
 def _now_iso() -> str:
@@ -39,9 +42,9 @@ def _machine_sources(claim: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _span_for(src: dict[str, Any], *, library_resolver: Callable[[dict], str] | None) -> str | None:
-    """The text span the judge must read for one source. Tier 1 (quote) and tier 2 (chunk) store
-    the span in the report, so judging needs only the model. Tier 3 (whole-doc) does not — it is
-    re-resolved from the library via ``library_resolver`` (costly), or skipped if none is given."""
+    """The text span the judge must read for one source. Tier 1 (quote) and tier 2 (chunk) carry
+    the span in the report, so the worklist surfaces it directly. Tier 3 (whole-doc) does not —
+    it is re-resolved from the library via ``library_resolver`` (costly), or left unavailable."""
     span = src.get("span")
     if span:
         return span
@@ -50,93 +53,185 @@ def _span_for(src: dict[str, Any], *, library_resolver: Callable[[dict], str] | 
     return None
 
 
-def refresh(report_path: Path | str, cache_path: Path | str | None = None, *,
-            model_id: str | None = None,
-            judge: Callable[..., dict] | None = None,
-            library_resolver: Callable[[dict], str] | None = None,
-            force: bool = False) -> dict[str, Any]:
-    """Refresh the support verdicts for one grounding report.
-
-    For each machine-judged literature source whose cache entry is missing or stale (or when
-    ``force``), call ``judge(span, paraphrase, model_id=…)`` and store ``{supported, rationale}``
-    in the verdict cache. Returns a summary
-    ``{report, cache, model_id, judged, fresh, skipped, errors, details}``.
-
-    ``judge`` defaults to :func:`scientist.grounding.judge.judge_entailment` (the real model
-    client, imported lazily). Pass a stub in tests."""
+def _iter_machine_sources(report_path: Path | str):
+    """Yield ``(claim, src)`` for every machine-judged literature source in a grounding report.
+    Returns ``(error_dict, None)`` as a single yield if the report is unreadable."""
     rp = Path(report_path)
-    cp = Path(cache_path) if cache_path is not None else rp.parent / JUDGMENT_CACHE_NAME
-    mid = model_id or judge_model_id()
-
-    judge_fn = judge
-    if judge_fn is None:                     # lazily import the model client — never at module load
-        from .judge import judge_entailment as judge_fn
-
     try:
         data = json.loads(rp.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        return {"report": str(rp), "error": f"unreadable grounding report: {exc}",
-                "judged": 0, "fresh": 0, "skipped": 0, "errors": 0, "details": []}
+        yield ({"_error": f"unreadable grounding report: {exc}"}, None)
+        return
     claims = data.get("claims") if isinstance(data, dict) else data
-    claims = claims if isinstance(claims, list) else []
-
-    cache = JudgmentCache.load(cp)
-    judged = fresh = skipped = errors = 0
-    details: list[dict[str, Any]] = []
-
-    for claim in claims:
+    for claim in (claims if isinstance(claims, list) else []):
         if not isinstance(claim, dict):
             continue
         for src in _machine_sources(claim):
-            citekey = str(src.get("citekey") or "")
-            paraphrase = str(src.get("paraphrase") or "")
-            span = _span_for(src, library_resolver=library_resolver)
-            esha = src.get("evidence_sha") or (evidence_sha(span) if span else None)
-            if not esha:
-                continue
-            status, _ = cache.lookup(citekey, esha, paraphrase, mid)
-            if status == "fresh" and not force:
-                fresh += 1
-                continue
-            if span is None:                # tier-3 with no resolver: cannot judge here
-                skipped += 1
-                details.append({"citekey": citekey, "status": "skipped",
-                                "reason": "tier-3 span unavailable (no library resolver)"})
-                continue
-            try:
-                verdict = judge_fn(span, paraphrase, model_id=mid)
-            except Exception as exc:        # JudgeUnavailable or a transport error → degrade
-                skipped += 1
-                details.append({"citekey": citekey, "status": "skipped", "reason": str(exc)})
-                continue
-            cache.put(citekey=citekey, evidence_sha_=esha, paraphrase=paraphrase, model_id=mid,
-                      supported=bool(verdict.get("supported")),
-                      rationale=str(verdict.get("rationale") or ""), timestamp=_now_iso(),
-                      tier=int(src.get("tier", 3)))
-            judged += 1
-            details.append({"citekey": citekey, "status": "judged",
-                            "supported": bool(verdict.get("supported"))})
+            yield (claim, src)
 
-    if judged:
+
+def _cache_path_for(report_path: Path | str, cache_path: Path | str | None) -> Path:
+    rp = Path(report_path)
+    return Path(cache_path) if cache_path is not None else rp.parent / JUDGMENT_CACHE_NAME
+
+
+def worklist(report_path: Path | str, cache_path: Path | str | None = None, *,
+             library_resolver: Callable[[dict], str] | None = None,
+             force: bool = False) -> dict[str, Any]:
+    """Surface the literature sources whose support verdict is missing or stale (``sci judge
+    --list``).
+
+    For each machine-judged source whose cache entry is *miss* or *stale* (or every one, when
+    ``force``), emit ``{claim_id, citekey, tier, span_text, paraphrase, evidence_sha, status}``.
+    ``span_text`` is the verbatim quote (tier 1) or the resolved chunk text (tier 2); tier-3
+    whole-doc spans are not carried in the report and come back empty unless a ``library_resolver``
+    is supplied. Returns ``{report, cache, items, missing, stale, fresh}`` (``items`` is the
+    worklist a judge subagent reads to decide *does span_text fairly support paraphrase?*)."""
+    cp = _cache_path_for(report_path, cache_path)
+    cache = JudgmentCache.load(cp)
+    items: list[dict[str, Any]] = []
+    missing = stale = fresh = 0
+
+    for claim, src in _iter_machine_sources(report_path):
+        if src is None:                      # unreadable report
+            return {"report": str(Path(report_path)), "error": claim["_error"], "items": []}
+        citekey = str(src.get("citekey") or "")
+        paraphrase = str(src.get("paraphrase") or "")
+        span = _span_for(src, library_resolver=library_resolver)
+        esha = (evidence_sha(span) if span else src.get("evidence_sha"))
+        if not esha:
+            continue
+        status, _ = cache.lookup(citekey, esha, paraphrase)
+        if status == "fresh" and not force:
+            fresh += 1
+            continue
+        if status == "stale":
+            stale += 1
+        else:
+            missing += 1
+        items.append({
+            "claim_id": str(claim.get("id") or ""),
+            "citekey": citekey, "tier": int(src.get("tier", 3)),
+            "span_text": span or "", "paraphrase": paraphrase,
+            "evidence_sha": esha, "status": status,
+            **({"note": "tier-3 whole-doc span not carried in the report — resolve it from the "
+                        "library before judging"} if not span else {}),
+        })
+
+    return {"report": str(Path(report_path)), "cache": str(cp), "items": items,
+            "missing": missing, "stale": stale, "fresh": fresh}
+
+
+def record_verdicts(report_path: Path | str, records: list[dict[str, Any]],
+                    cache_path: Path | str | None = None, *,
+                    judge_id: str | None = None,
+                    library_resolver: Callable[[dict], str] | None = None) -> dict[str, Any]:
+    """Ingest caller-supplied verdicts and write them into the verdict cache (``sci judge
+    --record``).
+
+    Each record is ``{citekey, paraphrase, supported, rationale}`` (plus an optional
+    ``evidence_sha`` echoed back from the worklist). It is matched to a machine source in the
+    report by ``(citekey, paraphrase)``; the pin (``evidence_sha``) is **recomputed by the tool**
+    from that source's current stored span — never taken from the caller — so a verdict can only
+    ever attach to the exact span the report carries now. A record is rejected when its
+    ``(citekey, paraphrase)`` no longer resolves to a source, or when it echoes an ``evidence_sha``
+    that no longer matches the current span (the worklist span the caller judged went stale).
+    ``judge_id`` (default :data:`scientist.grounding.judgments.DEFAULT_JUDGE_ID`) is stamped as
+    metadata.
+
+    Returns ``{report, cache, recorded, rejected, details}``."""
+    cp = _cache_path_for(report_path, cache_path)
+    jid = judge_id or DEFAULT_JUDGE_ID
+
+    # Index the report's machine sources by (citekey, paraphrase) → recomputed pin + tier.
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for claim, src in _iter_machine_sources(report_path):
+        if src is None:
+            return {"report": str(Path(report_path)), "error": claim["_error"],
+                    "recorded": 0, "rejected": len(records), "details": []}
+        citekey = str(src.get("citekey") or "")
+        paraphrase = str(src.get("paraphrase") or "")
+        span = _span_for(src, library_resolver=library_resolver)
+        esha = (evidence_sha(span) if span else src.get("evidence_sha"))
+        if not esha:
+            continue
+        index[(citekey, paraphrase)] = {"evidence_sha": esha, "tier": int(src.get("tier", 3))}
+
+    cache = JudgmentCache.load(cp)
+    recorded = rejected = 0
+    details: list[dict[str, Any]] = []
+    ts = _now_iso()
+
+    for rec in records:
+        if not isinstance(rec, dict):
+            rejected += 1
+            details.append({"status": "rejected", "reason": f"not an object: {rec!r}"})
+            continue
+        citekey = str(rec.get("citekey") or "")
+        paraphrase = str(rec.get("paraphrase") or "")
+        if "supported" not in rec:
+            rejected += 1
+            details.append({"citekey": citekey, "status": "rejected",
+                            "reason": "record has no `supported` boolean"})
+            continue
+        match = index.get((citekey, paraphrase))
+        if match is None:
+            rejected += 1
+            details.append({"citekey": citekey, "status": "rejected",
+                            "reason": "no machine source in the report for this "
+                                      "(citekey, paraphrase) — span/paraphrase changed or "
+                                      "the claim is gone; re-list and re-judge"})
+            continue
+        echoed = rec.get("evidence_sha")
+        if echoed and str(echoed) != match["evidence_sha"]:
+            rejected += 1
+            details.append({"citekey": citekey, "status": "rejected",
+                            "reason": "evidence_sha echoed from the worklist no longer matches the "
+                                      "report's current span — the span went stale; re-list and "
+                                      "re-judge"})
+            continue
+        cache.put(citekey=citekey, evidence_sha_=match["evidence_sha"], paraphrase=paraphrase,
+                  judge_id=jid, supported=bool(rec.get("supported")),
+                  rationale=str(rec.get("rationale") or ""), timestamp=ts,
+                  tier=match["tier"])
+        recorded += 1
+        details.append({"citekey": citekey, "status": "recorded",
+                        "supported": bool(rec.get("supported"))})
+
+    if recorded:
         cache.save(cp)
-    return {"report": str(rp), "cache": str(cp), "model_id": mid, "judged": judged,
-            "fresh": fresh, "skipped": skipped, "errors": errors, "details": details}
+    return {"report": str(Path(report_path)), "cache": str(cp), "judge_id": jid,
+            "recorded": recorded, "rejected": rejected, "details": details}
 
 
-def render_summary(result: dict[str, Any]) -> str:
-    """Human-readable one-block summary of a :func:`refresh` run."""
+def render_worklist(result: dict[str, Any]) -> str:
+    """Human-readable one-block summary of a :func:`worklist` run."""
     if result.get("error"):
         return f"{result['report']}: {result['error']}"
-    lines = [f"{result['report']} (model: {result['model_id']})",
-             f"  judged {result['judged']}  ·  already-fresh {result['fresh']}  ·  "
-             f"skipped {result['skipped']}  →  cache: {result['cache']}"]
+    items = result.get("items", [])
+    lines = [f"{result['report']}",
+             f"  to judge: {len(items)}  ·  missing {result.get('missing', 0)}  ·  "
+             f"stale {result.get('stale', 0)}  ·  already-fresh {result.get('fresh', 0)}"]
+    for it in items:
+        lines.append(f"    [{it['status']}] {it['citekey']} (tier {it['tier']}): "
+                     f"{it['paraphrase']!r}")
+    if items:
+        lines.append("  → a fresh-context judge subagent decides supported/unsupported for each, "
+                     "then `sci judge --record`")
+    return "\n".join(lines)
+
+
+def render_record(result: dict[str, Any]) -> str:
+    """Human-readable one-block summary of a :func:`record_verdicts` run."""
+    if result.get("error"):
+        return f"{result['report']}: {result['error']}"
+    lines = [f"{result['report']} (judge: {result['judge_id']})",
+             f"  recorded {result['recorded']}  ·  rejected {result['rejected']}  →  "
+             f"cache: {result['cache']}"]
     for d in result.get("details", []):
-        if d["status"] == "judged":
+        if d["status"] == "recorded":
             mark = "supported" if d.get("supported") else "UNSUPPORTED"
-            lines.append(f"    judged {d['citekey']}: {mark}")
-        elif d["status"] == "skipped":
-            lines.append(f"    skipped {d['citekey']}: {d.get('reason', '')}")
-    if result.get("skipped"):
-        lines.append("  (skipped sources stay needs-judgment — non-blocking; set "
-                     "ANTHROPIC_API_KEY and re-run `sci judge`)")
+            lines.append(f"    recorded {d['citekey']}: {mark}")
+        else:
+            lines.append(f"    rejected {d.get('citekey', '?')}: {d.get('reason', '')}")
     return "\n".join(lines)

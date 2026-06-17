@@ -41,7 +41,7 @@ def pytest_configure(config):
     config._grounding_records = []
     # Load the literature support-verdict cache (read-only on this path) so a
     # source(paraphrase=…) can pin its cached, key-matched verdict. The cache is WRITTEN only by
-    # the refresh step (`sci judge`); the model is never invoked here. An absent file → an empty
+    # the record step (`sci judge --record`); no model is ever invoked. An absent file → an empty
     # cache → every machine source reports needs-judgment (non-blocking).
     grounding.set_judgment_cache(grounding.JudgmentCache.load(_judge_cache_path(config)))
 
