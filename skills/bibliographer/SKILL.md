@@ -151,6 +151,12 @@ Notes that matter when adding:
   instead) and tries to recover an identifier from the PDF; if nothing resolves
   it falls back to the PDF's embedded metadata and marks the record unverified —
   tell the user, and consider supplying the DOI/arXiv id to enrich it.
+- When a record has a DOI/PMID, `add`/`import`/`discover --add` also stamp a
+  **`metrics`** sub-dict from OpenAlex (best-effort): field-weighted citation
+  impact + percentile, a Retraction-Watch `is_retracted` flag, OA status, and
+  journal-trust signals (DOAJ membership, Scopus indexing, impact, h-index).
+  `bib show` surfaces them; `--no-network` skips them. See
+  [references/schema.md](references/schema.md).
 
 **Discovering papers on a topic.** `add` needs an identifier you already have;
 `discover` is the other direction — give it a research question and it finds

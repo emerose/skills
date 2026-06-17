@@ -221,11 +221,13 @@ async def ingest_record(
     force: bool,
     on_duplicate: str,        # "report" (add) | "merge" (import)
     client: Any = None,
+    enrich_meta: bool = True,
 ) -> dict[str, Any]:
-    """Shared add/import core: dedup -> citekey -> fetch-then-ingest -> organize -> store.
+    """Shared add/import core: dedup -> citekey -> enrich -> fetch-then-ingest -> organize -> store.
 
     Returns a result dict with ``status`` one of added | merged | merged-dup |
-    duplicate, plus the stored ``record``.
+    duplicate, plus the stored ``record``. With ``enrich_meta`` (and a DOI/PMID),
+    stamps OpenAlex work + venue metadata onto the record before storing.
     """
     import _resolvers
 
@@ -239,25 +241,36 @@ async def ingest_record(
 
     rec["citekey"] = await store.unique_citekey(_meta.make_citekey(rec))
 
-    tmp: Path | None = None
-    if src is None and fetch:
-        tmp = Path(tempfile.mkstemp(suffix=".pdf")[1])
-        own = client is None
+    want_enrich = enrich_meta and (rec.get("doi") or rec.get("pmid"))
+    want_fetch = src is None and fetch
+    own = client is None
+    if own and (want_enrich or want_fetch):
         import httpx
 
-        client = client or httpx.AsyncClient(
+        client = httpx.AsyncClient(
             timeout=60, headers={"User-Agent": _resolvers._user_agent()}, follow_redirects=True
         )
-        try:
+
+    tmp: Path | None = None
+    try:
+        # Stamp work + venue metadata (impact, retraction, journal trust) — best
+        # effort, never blocks an add.
+        if want_enrich:
+            try:
+                await _resolvers.enrich_openalex(rec, client)
+            except Exception:  # noqa: BLE001 — metadata enrichment is best-effort
+                pass
+        if want_fetch:
+            tmp = Path(tempfile.mkstemp(suffix=".pdf")[1])
             pdf_source = await _resolvers.acquire_oa_pdf(rec, tmp, client)
             if pdf_source:
                 src, rec["pdf_source"] = tmp, pdf_source
             else:
                 tmp.unlink(missing_ok=True)
                 tmp = None
-        finally:
-            if own:
-                await client.aclose()
+    finally:
+        if own and client is not None:
+            await client.aclose()
 
     file_path: Path | None = None
     if src is not None:
@@ -293,7 +306,7 @@ async def cmd_add(args: argparse.Namespace, store: BiblioStore) -> None:
 
     result = await ingest_record(
         store, rec, src=src, move=args.move, fetch=not args.no_fetch,
-        force=args.force, on_duplicate="report",
+        force=args.force, on_duplicate="report", enrich_meta=not args.no_network,
     )
     await write_index(store)
     rec_out = result["record"]
@@ -390,6 +403,7 @@ async def cmd_import(args: argparse.Namespace, store: BiblioStore) -> None:
                     result = await ingest_record(
                         store, rec, src=f, move=not args.copy, fetch=False,
                         force=False, on_duplicate="merge", client=client,
+                        enrich_meta=not args.no_network,
                     )
                     row["status"] = result["status"]
                     row["citekey"] = result["record"].get("citekey")
@@ -681,6 +695,35 @@ async def cmd_show(args: argparse.Namespace, store: BiblioStore) -> None:
     for f in (*_meta.IDENTIFIER_KEYS, "source_url", "source", "content_state"):
         if rec.get(f):
             print(f"{f:<13}: {rec[f]}")
+    if rec.get("cited_by_count") is not None:
+        print(f"cited-by     : {rec['cited_by_count']}")
+    m = rec.get("metrics") or {}
+    if m:
+        bits = []
+        if m.get("is_retracted"):
+            bits.append("⚠ RETRACTED")
+        if m.get("fwci") is not None:
+            bits.append(f"FWCI {m['fwci']:.2f}")
+        if m.get("citation_percentile") is not None:
+            bits.append(f"pctile {round(m['citation_percentile'] * 100)}%")
+        if m.get("open_access"):
+            bits.append(f"OA {m['open_access']}")
+        if bits:
+            print(f"impact       : {' · '.join(bits)}")
+        v = m.get("venue") or {}
+        vbits = []
+        if v.get("type"):
+            vbits.append(v["type"])
+        if v.get("in_doaj"):
+            vbits.append("DOAJ")
+        if v.get("indexed_in_scopus"):
+            vbits.append("Scopus")
+        if v.get("impact_2yr") is not None:
+            vbits.append(f"IF~{v['impact_2yr']:.1f}")
+        if v.get("h_index") is not None:
+            vbits.append(f"h-index {v['h_index']}")
+        if vbits:
+            print(f"journal      : {' · '.join(vbits)}")
     if rec.get("tags"):
         print(f"tags    : {', '.join(rec['tags'])}")
     print(f"file    : {rec.get('file_path') or '(none — citation-only)'}")
