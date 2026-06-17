@@ -242,13 +242,37 @@ elsewhere. A brief that re-pastes the literature-sweep method, the `[lit:]` grou
 voice/structure rules, or the program's background facts into every `prompt.md` drifts out of
 sync and buries the one thing the brief is *for*. Open with two pointers — "follow the report
 discipline (`references/report.md`); assume the program context in `<program brief>`" — then
-spend the brief only on what is **specific to this report**:
+spend the brief only on what is **specific to this report**. The thin shape, to copy and fill —
+every section conclusion-free, and omit any that don't apply:
 
-- the **question**, and the frame for answering it (the decomposition, the bar, the verdict shape);
-- the **scope** — the sub-topics to sweep, each phrased as an open question;
-- what **not to presuppose** for *this* question (including the specific disconfirming evidence to hunt for);
-- the suggested **spine** for the write-up;
-- the report-specific clause of *done-when*.
+```markdown
+# Generation prompt — "<report title>"
+
+Standing brief for `<report-dir>/report.md` — the conclusion-free spec of *this* report's
+question, scope, and framing. Follow the scientist skill's report discipline
+(`references/report.md`) and any program context (`<program brief>`); re-derive every conclusion
+from the literature each run, so a materially different regeneration is a signal to investigate,
+not a baseline to carry over. Ground this report's literature claims in
+`<claims module, e.g. program/claims/test_literature_<slug>.py>`.
+
+## Your task
+The question, and the frame for answering it — the decomposition, the bar, the verdict shape.
+
+## What you must NOT presuppose
+The values or conclusions not to bake in for *this* question, and the specific disconfirming
+evidence to hunt for (named, not generic).
+
+## Sub-topics to sweep (scope — each an open question)
+One bullet per sub-topic spanning the whole subject area, not just the headline question; close
+with an explicit "required disconfirming evidence" line.
+
+## Suggested spine
+The logical order for the write-up. Omit if it is obvious from the task.
+
+## Done when
+The standard audit bar in `references/report.md` is met **and** <the report-specific clause: the
+shape of the conclusion this report owes>.
+```
 
 The steer-detection signal lives entirely in that report-specific content, so referencing the
 generic discipline rather than inlining it costs nothing — there is nowhere for steering to hide
