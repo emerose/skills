@@ -147,11 +147,15 @@ smarter*, not just answer one question:
   target, that means *separate* sweeps for the dosage/overexpression biology, the disease-model
   restoration dose-response, the ASO CNS biodistribution gradient, the delivery routes, the
   clinical ASO programs, the BBB-crossing delivery methods, the target's molecular biology…).
-  Each subagent searches (PubMed / Consensus / bioRxiv / web), reads, and returns a structured
-  digest: papers with **DOI + PMID**, the quantitative findings attributed to each, and an
-  evidence-strength/gaps assessment. Eight focused sub-topic agents will surface ~100+ relevant
-  papers; a thin single-pass search surfaces a dozen. If your sweep returns only the handful you
-  end up citing, it was too shallow — go wider.
+  Each subagent runs **`bib discover`** to sweep its sub-topic across all six sources and bank
+  what it finds (`--add`), reaches for other sources where that backbone misses (Consensus for
+  claim-level synthesis, ClinicalTrials.gov, web), reads the load-bearing hits in full, and
+  returns a structured digest: papers with **DOI + PMID**, the quantitative findings attributed
+  to each, and an evidence-strength/gaps assessment. Run each sweep to the standard pattern in
+  the bibliographer skill's
+  [literature-search.md](../../bibliographer/references/literature-search.md). Eight focused
+  sub-topic agents will surface ~100+ relevant papers; a thin single-pass search surfaces a
+  dozen. If your sweep returns only the handful you end up citing, it was too shallow — go wider.
 - **Require disconfirming evidence in the sweep.** A sweep that only confirms is a steered
   sweep. Each research subagent must surface what *cuts against* the report's likely conclusion
   — contradicting studies, tolerated exceptions, fixed-dose phenotypic variability, regimes
@@ -161,7 +165,8 @@ smarter*, not just answer one question:
   git"); without that demand a literature review quietly becomes a confirmation exercise.
 - **Bank every relevant paper, not just the ones you cite.** The point of the research phase is
   to grow the program's durable knowledge: the bibliographer library is the asset that outlives
-  any single report. Add **everything on-topic** the sweep surfaces (`bib add <DOI|PMID>`), even
+  any single report. Add **everything on-topic** the sweep surfaces (`bib discover --add` banks a
+  whole sweep in one step; `bib add <DOI|PMID>` for a one-off paper), even
   papers this report won't cite — the next report reuses them and can search inside their full
   text. Citations are a small subset of what you bank. A library that only contains this
   report's footnotes is a symptom of citation-driven research, not a literature review.
