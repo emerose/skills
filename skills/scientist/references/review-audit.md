@@ -130,6 +130,26 @@ The `data/` edges have their own re-extraction audit (determinism, grounding, re
 reconciliation, naming) plus the full cell-coverage check — see [extract.md](extract.md) (`audit.py`,
 `cellcov.py`). Because the data edges live in the same `provenance` list, stock `sci audit` checks them too.
 
+## Claims coverage — is the grounding keeping up with the library?
+
+```bash
+sci coverage [--since 2026-06-16] [--home H] [--json]   # library papers cited by NO grounded claim
+```
+The completeness counterpart to `sci report`: the audit checks that the citations a report *wrote*
+resolve; `coverage` checks the opposite gap — papers banked into the bibliographer library that **no
+grounded literature claim cites**. A literature sweep that grows the library by dozens of papers while
+the claim set stays put is the silent failure (the library looks like diligence, the audit stays green,
+the grounding quietly stagnates). It diffs the library citekeys (`bib list --json`) against the
+citekeys any claim cites (`evidence.lit_sources`), and prints coverage plus the uncited papers
+newest-first — flagged by `--since` (everything banked on/after a date) or the most recent N.
+
+It is a **worklist generator, not a gate** (always exit 0): the set-difference is mechanical, but
+judging which uncited papers are load-bearing enough to deserve a claim is an agent's job — ideally a
+fresh-context **completeness critic** that reads the flagged papers and proposes claims (or strength
+upgrades where a paper adds an independent group). Run it after a sweep; treat a pile of recently-banked
+uncited papers as the prompt to write the claims the sweep earned. The bibliographer CLI is found via
+`--bib`, `$SCIENTIST_BIB_CMD`, the sibling `bib.py`, or `bib` on PATH (it needs `$BIBLIOGRAPHER_HOME`).
+
 ## Claims: grounding report, rollup, drift
 
 Running the pytest claims emits `grounding_report.{md,json}` (per claim: `{id, statement, outcome, kind,
