@@ -309,6 +309,11 @@ Two more citation forms, same audit:
   `sci report` resolves it and requires the cited report to be itself `GROUNDED` (checked
   recursively) — so it is `backed` only if that report holds, `missing` if it doesn't exist,
   `weak-backing` if it is `BROKEN`. Use it to build a report on a supporting report.
+  **These citations *are* the report dependency graph** — the live, audited edges. Don't keep a
+  separate prose map of which report depends on which (in a README, a program brief, anywhere):
+  a hand-maintained copy drifts from the citations and the audit can't catch the drift. To see
+  the graph, read a report's abstract for what it establishes and run `sci trace <report.md>`
+  to walk what it rests on.
 - **`[lit:<id>]`** — ground a *third-party* fact on a paper in the bibliographer library. A
   literature claim is a pytest spec in `program/claims/test_literature.py` (`@kind("literature")`)
   that calls `source(citekey, quote=…, test=…, system=…, primary=…, group=…)` — and
