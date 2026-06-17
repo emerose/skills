@@ -98,6 +98,26 @@ write the claim first).
 - **Traceability.** `sci trace <report.md>` puts a report node atop the DAG, walkable down through each
   cited claim to the original measurements.
 
+### Executable literature support (`source(paraphrase=…)` + `sci judge`)
+
+**Shipped.** The `[lit:]` support judgment is no longer a trusted, hand-stamped human boolean the
+audit never re-checks. `source(citekey, quote=…, paraphrase=…)` upgrades it to a **re-runnable,
+cache-pinned LLM entailment check** — "does quote Q fairly support paraphrase P?" — bundled into
+the existing claims infrastructure (same `[lit:]` shape, audit, render). The discipline:
+
+- **The model runs in ONE place** — the refresh step `sci judge` (`grounding/refresh.py` +
+  `grounding/judge.py`), which writes a sidecar verdict cache (`lit_judgments.json`). The pytest
+  path and the audit only *read* the cache, so the claims suite stays offline + deterministic.
+- **Cache key** `(quote_sha, paraphrase, model_id)`; a quote/paraphrase edit or a model upgrade →
+  `needs-judgment` / `stale-judgment` (re-run `sci judge`). `model_id` is pinned so an upgrade is
+  an explicit mass re-judge, never a silent shift.
+- **Locator ladder → strength.** tier 1 verbatim quote (`strong`), tier 2 libkit chunk span
+  (`moderate`), tier 3 whole-doc (`weak`); the audit enforces the ceiling.
+- **Additive / backward-compatible.** Legacy `quote=` + `@reviewed(support=…)` claims are
+  unchanged; the judge is opt-in per source via `paraphrase=`, and degrades gracefully with no
+  API key. Docs in [references/report.md](references/report.md) +
+  [references/derive-claims.md](references/derive-claims.md).
+
 ## Resolved
 
 - *One skill or several?* → one (`scientist`); the stages are internal capabilities sharing one

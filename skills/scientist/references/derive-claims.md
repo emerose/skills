@@ -129,6 +129,42 @@ def test_report_no_mortality(experiment):
   phrases (`ref.is_presentation` flags the deck for reviewers). Legacy `.doc`/`.ppt` aren't supported —
   re-save as `.docx`/`.pptx`/PDF.
 
+### Literature claims — grounding a third-party fact on a paper
+
+`@kind("literature")` + `source(citekey, quote=…, paraphrase=…)` grounds a fact on a paper in the
+bibliographer library. Two layers, both re-runnable: the **quote** is the deterministic tripwire
+(verbatim string in the paper's stored text — fails the pytest assert if absent), and the
+**paraphrase** opts the source into a *cache-pinned LLM entailment check* — "does the quote fairly
+support the paraphrase?" — judged ONCE by the refresh step (`sci judge`) and asserted from cache
+on every run. The model is **never** called inside the assert; the suite stays offline and
+deterministic.
+
+```python
+@kind("literature")
+@strength("strong")                                    # ≥2 independent groups, direct, primary
+def test_target_knockdown_in_humans(experiment):
+    "Antisense knockdown of the target is well tolerated in humans."
+    converge(
+        source("noor2015q", quote="53% knockdown at the top dose",
+               paraphrase="the antisense oligo roughly halves target expression"),
+        source("smith2019",  chunk=14,                 # tier 2: a paragraph-spanning fact
+               paraphrase="no dose-limiting toxicity was reported"),
+    )
+```
+
+- **Locator ladder caps strength.** tier 1 `quote=`+`paraphrase=` → up to `strong`; tier 2
+  `chunk=`+`paraphrase=` (a libkit chunk id from `bib query`) → up to `moderate`; tier 3
+  `paraphrase=` only (judge reads the whole doc) → `weak`. Exceeding the ceiling is a blocking
+  `over-strength` finding. Default to tier 1.
+- **The verdict is cached + key-pinned** by `(quote_sha, paraphrase, model_id)` in
+  `lit_judgments.json` (next to the grounding report). A quote/paraphrase edit or a model upgrade
+  → `stale-judgment`/`needs-judgment` (re-run `sci judge`). With no API key, judging is skipped
+  (claim stays `needs-judgment`, non-blocking) — never a crash.
+- **Backward compatible.** A bare `source(citekey, quote=…)` with a hand-stamped
+  `@reviewed(support=…)` is the unchanged legacy path; add `paraphrase=` to upgrade the support
+  judgment from a trusted boolean to an executable check. Full authoring rubric (primary /
+  independence / abstract-only / disconfirmers) + the refresh command: [report.md](report.md).
+
 ## Run it
 
 Claims auto-load the plugin via the `pytest11` entry point; run them zero-install with

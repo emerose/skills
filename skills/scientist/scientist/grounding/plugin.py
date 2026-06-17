@@ -39,6 +39,23 @@ def pytest_configure(config):
         config.addinivalue_line("markers", help_)
     grounding.install_guard()
     config._grounding_records = []
+    # Load the literature support-verdict cache (read-only on this path) so a
+    # source(paraphrase=…) can pin its cached, key-matched verdict. The cache is WRITTEN only by
+    # the refresh step (`sci judge`); the model is never invoked here. An absent file → an empty
+    # cache → every machine source reports needs-judgment (non-blocking).
+    grounding.set_judgment_cache(grounding.JudgmentCache.load(_judge_cache_path(config)))
+
+
+def _judge_cache_path(config):
+    """Where the literature verdict cache lives: ``--judge-cache``, else ``$SCIENTIST_JUDGE_CACHE``,
+    else ``<--grounding-out or rootdir>/lit_judgments.json`` (next to the grounding report)."""
+    import os
+
+    explicit = config.getoption("--judge-cache", default=None) or os.environ.get("SCIENTIST_JUDGE_CACHE")
+    if explicit:
+        return Path(explicit)
+    out = config.getoption("--grounding-out", default=None) or config.rootpath
+    return Path(out) / grounding.JUDGMENT_CACHE_NAME
 
 
 def pytest_addoption(parser):
@@ -49,6 +66,10 @@ def pytest_addoption(parser):
                 help="flag claims whose captured inputs changed since the commit that "
                      "last set their @strength marker (git-based; needs SCIENTIST_HOME "
                      "to be the data repo). Off by default to keep runs fast + git-free.")
+    g.addoption("--judge-cache", action="store", default=None,
+                help="literature support-verdict cache (default: <grounding-out>/"
+                     "lit_judgments.json). READ here; written only by `sci judge`. The model "
+                     "is never invoked on this path.")
 
 
 # --------------------------------------------------------------------------- #

@@ -258,6 +258,17 @@ class BiblioStore:
                 break
         return " ".join(parts)
 
+    async def chunk_text(self, document_id: str, index: int) -> str:
+        """The text of one chunk by index (a locator span for match verification), or ``""`` if
+        the index is out of range. Complements :meth:`leading_text` for callers that already know
+        which chunk holds the supporting passage (e.g. from a ``query`` hit)."""
+        from libkit.errors import ChunkNotFound
+
+        try:
+            return (await self.lib.get_chunk(document_id, index)).text
+        except ChunkNotFound:
+            return ""
+
     async def reenrich(self, citekey: str, new_rec: dict[str, Any], *, refile: bool) -> dict[str, Any]:
         """Replace an unverified record's metadata with resolved metadata.
 
