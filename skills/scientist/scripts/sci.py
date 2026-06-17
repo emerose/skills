@@ -137,6 +137,22 @@ def main() -> int:
     p_rep.add_argument("--index", action="store_true",
                        help="index the report into the store as kind=report (needs the store)")
 
+    # ---- judge: the literature support-verdict refresh step (the ONLY place the LLM runs) ----
+    p_jd = sub.add_parser("judge",
+                          help="refresh literature support verdicts: an LLM judges whether each "
+                               "[lit:] source's quote entails its paraphrase, cached + key-pinned. "
+                               "The ONLY place a model is invoked (the claims suite stays offline).")
+    p_jd.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
+    p_jd.add_argument("--report", help="a single grounding_report.json to refresh "
+                      "(default: every one under home)")
+    p_jd.add_argument("--cache", help="verdict cache sidecar to write "
+                      "(default: <report dir>/lit_judgments.json, next to each report)")
+    p_jd.add_argument("--model", help="judge model id (default: $SCIENTIST_JUDGE_MODEL or the "
+                      "built-in small/fast default)")
+    p_jd.add_argument("--force", action="store_true",
+                      help="re-judge even sources whose cached verdict is still fresh")
+    p_jd.add_argument("--json", action="store_true", help="machine-readable output")
+
     # ---- coverage: is the grounding keeping up with the library? ----
     p_cov = sub.add_parser("coverage",
                            help="library papers cited by NO grounded claim — the completeness "
@@ -171,6 +187,8 @@ def main() -> int:
         return _reproduce(args)
     if args.cmd == "report":
         return _report(args)
+    if args.cmd == "judge":
+        return _judge(args)
     if args.cmd == "coverage":
         return _coverage(args)
     if args.cmd == "audit":
@@ -260,6 +278,47 @@ def _report(args: argparse.Namespace) -> int:
         STORE_CLI.index_report(args, card)
 
     return rc
+
+
+def _judge(args: argparse.Namespace) -> int:
+    """`sci judge`: the literature support-verdict refresh step — the ONE place the LLM runs.
+
+    For each machine-judged ``[lit:]`` source (``source(paraphrase=…)``) in the grounding
+    report(s), an LLM judges whether the quote/span entails the paraphrase and the verdict is
+    cached, key-pinned by ``(evidence_sha, paraphrase, model_id)``. Re-run the claims suite
+    afterwards so the cached verdicts back the citations. Degrades gracefully with no API key
+    (skips judging — claims stay needs-judgment). Exit 0 always (a worklist refresh, not a gate).
+    """
+    import json
+    import os
+
+    from scientist.grounding import refresh as REFRESH  # lazy: pulls the model client only here
+
+    home = Path(args.home).resolve() if getattr(args, "home", None) else (
+        Path(os.environ["SCIENTIST_HOME"]).resolve() if os.environ.get("SCIENTIST_HOME") else None)
+
+    if args.report:
+        reports = [Path(args.report)]
+    elif home is not None:
+        reports = [p for _, p in REPORT._grounding_reports(home)]
+    else:
+        print("no grounding report: pass --report, or --home / $SCIENTIST_HOME", file=sys.stderr)
+        return 1
+    if not reports:
+        print("no grounding_report.json found — run the claims suite first "
+              "(pytest … --grounding-out <dir>)", file=sys.stderr)
+        return 1
+
+    results = []
+    for rp in reports:
+        cache = Path(args.cache) if args.cache else None
+        res = REFRESH.refresh(rp, cache, model_id=args.model, force=args.force)
+        results.append(res)
+        if not args.json:
+            print(REFRESH.render_summary(res))
+    if args.json:
+        print(json.dumps({"results": results}, indent=2, ensure_ascii=False, default=str))
+    return 0
 
 
 def _coverage(args: argparse.Namespace) -> int:
