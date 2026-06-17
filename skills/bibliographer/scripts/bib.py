@@ -747,6 +747,124 @@ async def cmd_query(args: argparse.Namespace, store: BiblioStore) -> None:
         print(f"        {snippet}…")
 
 
+def _disc_authors(rec: dict[str, Any]) -> str:
+    """Compact ``First et al.`` from a discovery record's structured authors."""
+    fams = [a.get("family") for a in (rec.get("authors") or []) if a.get("family")]
+    if not fams:
+        return "?"
+    if len(fams) == 1:
+        return fams[0]
+    if len(fams) == 2:
+        return f"{fams[0]} & {fams[1]}"
+    return f"{fams[0]} et al."
+
+
+def print_discoveries(results: list[dict[str, Any]]) -> None:
+    if not results:
+        print("(no candidates)")
+        return
+    for i, r in enumerate(results, 1):
+        year = r.get("year") or "????"
+        title = r.get("title") or "(untitled)"
+        mark = " ✓in-library" if r.get("in_library") else ""
+        print(f"  {i:>3}. {_disc_authors(r)} ({year}) — {title}{mark}")
+        bits = [f"sources: {', '.join(r.get('found_in') or [])}"]
+        if r.get("cited_by_count") is not None:
+            bits.append(f"cited-by: {r['cited_by_count']}")
+        if r.get("doi"):
+            bits.append(f"doi: {r['doi']}")
+        elif r.get("arxiv_id"):
+            bits.append(f"arXiv: {r['arxiv_id']}")
+        elif r.get("pmid"):
+            bits.append(f"PMID: {r['pmid']}")
+        print(f"       {' · '.join(bits)}")
+
+
+async def cmd_discover(args: argparse.Namespace, store: BiblioStore) -> None:
+    """Find candidate papers across scholarly search APIs (not yet in the library).
+
+    Fans out the query over the selected providers, merges/de-dupes the results,
+    flags which are already in the library, and (with --add) banks the net-new
+    ones — the "bank everything on-topic" discipline a literature sweep needs.
+    """
+    import httpx
+
+    import _discovery
+    import _resolvers
+
+    filters = _discovery.Filters(
+        year_min=args.year_min, year_max=args.year_max, open_access=args.open_access
+    )
+    sources = [s.strip() for s in args.sources.split(",") if s.strip()] if args.sources else None
+
+    client = httpx.AsyncClient(
+        timeout=30, headers={"User-Agent": _resolvers._user_agent()}, follow_redirects=True
+    )
+    try:
+        try:
+            out = await _discovery.discover(
+                args.query, sources=sources, limit=args.limit, filters=filters, client=client
+            )
+        except ValueError as e:
+            die(str(e))
+        results = out["results"]
+
+        # Flag candidates already in the library (so a sweep shows net-new).
+        for r in results:
+            dup = await store.find_duplicate(r)
+            r["in_library"] = dup is not None
+            if dup is not None:
+                r["library_citekey"] = dup.get("citekey")
+
+        added = merged = dup_count = failed = 0
+        if args.add:
+            for r in results:
+                if r.get("in_library"):
+                    dup_count += 1
+                    continue
+                try:
+                    res = await ingest_record(
+                        store, r, src=None, move=False, fetch=args.fetch_pdfs,
+                        force=False, on_duplicate="report", client=client,
+                    )
+                except Exception as e:  # noqa: BLE001 — one bad record must not abort the bank
+                    failed += 1
+                    if not args.json:
+                        print(f"  ! failed to add {r.get('title') or r.get('doi')}: {e}", file=sys.stderr)
+                    continue
+                status = res["status"]
+                r["added_as"] = res["record"].get("citekey")
+                if status == "added":
+                    added += 1
+                elif status.startswith("merged"):
+                    merged += 1
+                else:
+                    dup_count += 1
+            await write_index(store)
+    finally:
+        await client.aclose()
+
+    out["added"] = {"added": added, "merged": merged, "duplicate": dup_count, "failed": failed} if args.add else None
+
+    if args.json:
+        emit_json(out)
+        return
+
+    rep = ", ".join(f"{k}: {v}" for k, v in out["sources"].items())
+    print(f"Sources — {rep}")
+    print(f"{len(results)} merged candidate(s):\n")
+    print_discoveries(results)
+    if args.add:
+        print(
+            f"\nBanked: {added} added, {merged} merged, {dup_count} already present"
+            + (f", {failed} failed" if failed else "")
+            + (" (citation-only stubs; --fetch-pdfs to also pull OA PDFs)" if not args.fetch_pdfs else "")
+        )
+    else:
+        net_new = sum(1 for r in results if not r.get("in_library"))
+        print(f"\n{net_new} not yet in the library. Re-run with --add to bank them.")
+
+
 async def cmd_dedupe(args: argparse.Namespace, store: BiblioStore) -> None:
     recs = await store.all_records()
     clusters: dict[str, list[str]] = {}
@@ -935,6 +1053,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--threshold", type=float, default=0.5, help="min content-match score to auto-apply (default 0.5)")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_enrich)
+
+    sp = sub.add_parser("discover", help="find candidate papers across scholarly search APIs (OpenAlex, S2, Europe PMC, PubMed, Crossref, arXiv)")
+    sp.add_argument("query", help="free-text research question / topic")
+    sp.add_argument("--sources", help="comma-separated subset (default: all). Available: openalex, semantic_scholar, europepmc, pubmed, crossref, arxiv")
+    sp.add_argument("--limit", type=int, default=25, help="max results per source (default 25)")
+    sp.add_argument("--year-min", type=int, help="earliest publication year")
+    sp.add_argument("--year-max", type=int, help="latest publication year")
+    sp.add_argument("--open-access", action="store_true", help="restrict to open-access papers (where the source supports it)")
+    sp.add_argument("--add", action="store_true", help="bank every net-new candidate into the library (citation-only stubs)")
+    sp.add_argument("--fetch-pdfs", action="store_true", help="with --add, also try to download an OA PDF for each")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_discover)
 
     sp = sub.add_parser("search", help="search catalog metadata (title/authors/venue/abstract/tags)")
     sp.add_argument("query", nargs="?")

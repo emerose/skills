@@ -6,13 +6,17 @@ description: >-
   from Crossref/arXiv/PubMed/Semantic Scholar), keep PDFs organized on disk in a
   human-readable author tree, search and browse the library, run semantic search
   inside the papers, generate BibTeX, bulk-import a folder of PDFs, and run
-  dedupe/integrity checks. Use this skill whenever the user wants to save, file,
-  organize, look up, or tidy research papers, build or maintain a bibliography or
-  reading list, import a folder of PDFs into their paper collection, find
+  dedupe/integrity checks. It also **discovers new papers** on a topic across many
+  scholarly search APIs (OpenAlex, Semantic Scholar, Europe PMC, PubMed, Crossref,
+  arXiv) and banks them into the library. Use this skill whenever the user wants to
+  save, file, organize, look up, or tidy research papers, build or maintain a
+  bibliography or reading list, run a literature search / find papers on a topic,
+  import a folder of PDFs into their paper collection, find
   duplicate papers, recover or fix metadata for scanned/untitled PDFs, search the
   contents of their papers, or export citations — even if they don't say
   "bibliographer." Triggers include "add this paper," "save this arXiv link,"
-  "what papers do I have on X," "import these PDFs," "make a bibliography,"
+  "what papers do I have on X," "find papers on X," "do a literature search,"
+  "what's published on X," "import these PDFs," "make a bibliography,"
   "find the DOI/metadata for these PDFs," "search my papers for X," "check my
   library for duplicates," or "export BibTeX." For a tree of internal scientific
   experiments (raw lab/CRO data, extracted measurements, analysis, grounded claims),
@@ -148,6 +152,37 @@ Notes that matter when adding:
   it falls back to the PDF's embedded metadata and marks the record unverified —
   tell the user, and consider supplying the DOI/arXiv id to enrich it.
 
+**Discovering papers on a topic.** `add` needs an identifier you already have;
+`discover` is the other direction — give it a research question and it finds
+candidate papers across many scholarly search APIs, merges and de-duplicates
+them, flags which are already in your library, and (with `--add`) banks the
+net-new ones:
+
+```bash
+bib discover "UBE3A antisense oligonucleotide Angelman syndrome"     # ranked candidates, nothing banked
+bib discover "ASO CNS biodistribution" --year-min 2018 --open-access # filter by year / OA
+bib discover "transferrin receptor ASO delivery" --sources openalex,pubmed,europepmc
+bib discover "ASO CNS biodistribution" --add                         # bank every net-new candidate (citation-only stubs)
+bib discover "ASO CNS biodistribution" --add --fetch-pdfs            # also try to pull an OA PDF for each
+bib discover "ASO CNS biodistribution" --json                        # structured candidates + per-source report
+```
+
+It fans out concurrently over **OpenAlex, Semantic Scholar, Europe PMC, PubMed,
+Crossref, and arXiv** (choose a subset with `--sources`; `--limit` is per-source,
+default 25). A paper surfaced by several sources is corroborated and ranks higher;
+the merged record carries `found_in` (which sources), `source_count`, and
+`cited_by_count` where available. **One source failing never sinks the sweep** —
+its error is reported on the per-source line and the rest still merge (e.g.
+Semantic Scholar 429s when keyless and busy; set `S2_API_KEY` to avoid it).
+
+Discovery is *not* byte-reproducible (relevance engines drift, new papers appear)
+— the point is a uniform, source-broad, **re-runnable** sweep: re-running shows
+what's now `✓in-library` vs. still net-new, so a later run is a diff, not a fresh
+guess. The "bank everything on-topic" habit (`--add`) is what grows the library
+into an asset that outlives any one question — citations are a small subset of
+what you bank. `--add` creates fast citation-only **stubs** (abstract still
+searchable); add `--fetch-pdfs` only when you want the full text now.
+
 **Bulk-importing a folder** (e.g. a Downloads dir or an existing pile). Always
 dry-run first:
 
@@ -238,9 +273,10 @@ metadata. Empty folders under `papers/` are pruned automatically after every com
 
 ## Machine-readable output
 
-`list`, `search`, `show`, `add`, `import`, `enrich`, `query`, `dedupe`, `check`,
-and `audit` take `--json`. Prefer it when you need to parse results, count, or
-feed another step.
+`list`, `search`, `show`, `add`, `import`, `enrich`, `query`, `discover`,
+`dedupe`, `check`, and `audit` take `--json`. Prefer it when you need to parse
+results, count, or feed another step. `discover --json` emits
+`{"results": [...], "sources": {name: count|error}, "added": {...}}`.
 
 ## Good habits
 
