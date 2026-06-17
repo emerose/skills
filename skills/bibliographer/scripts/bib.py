@@ -630,6 +630,133 @@ async def cmd_fetch(args: argparse.Namespace, store: BiblioStore) -> None:
         print(f"    then:  bib fetch {args.citekey} --pdf <downloaded.pdf>")
 
 
+def article_url(rec: dict[str, Any]) -> str | None:
+    """A human-resolvable URL for the article, preferring the DOI.
+
+    Used to seed the manual-fetch worklist: the agent opens this to reach the
+    publisher/landing page (institutional access, Tier 3 in getting-pdfs.md).
+    """
+    doi = (rec.get("doi") or "").strip()
+    if doi:
+        return f"https://doi.org/{doi}"
+    arxiv = rec.get("arxiv_id")
+    if arxiv:
+        return f"https://arxiv.org/abs/{re.sub(r'v\d+$', '', str(arxiv))}"
+    if rec.get("pmcid"):
+        return f"https://www.ncbi.nlm.nih.gov/pmc/articles/{rec['pmcid']}/"
+    if rec.get("pmid"):
+        return f"https://pubmed.ncbi.nlm.nih.gov/{rec['pmid']}/"
+    return None
+
+
+def stub_records(recs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The citation-only stubs (abstract searchable, no full text ingested)."""
+    return [r for r in recs if r.get("content_state") == "stub"]
+
+
+def worklist_entry(rec: dict[str, Any]) -> dict[str, Any]:
+    """A compact, agent-actionable description of a stub still needing a PDF."""
+    ids = {k: rec.get(k) for k in _meta.IDENTIFIER_KEYS if rec.get(k)}
+    return {
+        "citekey": rec.get("citekey"),
+        "title": rec.get("title"),
+        "authors": _meta.short_authors(rec),
+        "year": rec.get("year"),
+        "ids": ids,
+        "url": article_url(rec),
+    }
+
+
+async def cmd_backfill(args: argparse.Namespace, store: BiblioStore) -> None:
+    """Batch-acquire open-access PDFs for citation-only stubs so their full text
+    gets indexed, then hand back a worklist of the stubs that have no OA copy.
+
+    This is the bulk, hands-off counterpart to `fetch`: it runs the same keyless
+    open-access ladder (`_resolvers.acquire_oa_pdf`) over *every* stub and
+    attaches each PDF it finds. The stubs that come up empty need a human in the
+    loop — institutional access via the browser, or (only with the user's
+    explicit authorization) a peer source — so those are *reported*, not
+    auto-fetched, with identifiers + a resolvable URL for the agent to escalate
+    per references/getting-pdfs.md.
+    """
+    import httpx
+
+    import _resolvers
+
+    recs = await store.all_records()
+    stubs = stub_records(recs)
+    if args.tag:
+        stubs = [r for r in stubs if args.tag in (r.get("tags") or [])]
+    if args.limit:
+        stubs = stubs[: args.limit]
+
+    if not stubs:
+        if args.json:
+            emit_json({"checked": 0, "fetched": [], "remaining": []})
+        else:
+            print("No citation-only stubs to backfill — every record has a file.")
+        return
+
+    if args.dry_run:
+        entries = [worklist_entry(r) for r in stubs]
+        if args.json:
+            emit_json({"checked": len(stubs), "fetched": [], "remaining": entries})
+            return
+        print(f"{len(stubs)} citation-only stub(s) would be attempted:")
+        for e in entries:
+            print(f"  [{e['citekey']}] {e['authors']} ({e['year'] or '????'}) — {e['title']}")
+        return
+
+    fetched: list[dict[str, Any]] = []
+    remaining: list[dict[str, Any]] = []
+
+    if not args.json:
+        print(f"{len(stubs)} citation-only stub(s); attempting open-access fetch…")
+    client = httpx.AsyncClient(
+        timeout=90, headers={"User-Agent": _resolvers._user_agent()}, follow_redirects=True
+    )
+    try:
+        for r in stubs:
+            ck = r.get("citekey")
+            tmp = Path(tempfile.mkstemp(suffix=".pdf")[1])
+            source: str | None = None
+            try:
+                source = await _resolvers.acquire_oa_pdf(r, tmp, client)
+            except Exception as exc:  # one bad record must not abort the sweep
+                if not args.json:
+                    print(f"  ! [{ck}] fetch error: {exc}")
+            if source:
+                new = await store.attach_pdf(ck, tmp, move=True)
+                fetched.append({"citekey": ck, "title": new.get("title"), "source": source})
+                if not args.json:
+                    print(f"  ✓ [{ck}] via {source} — {new.get('title')}")
+            else:
+                tmp.unlink(missing_ok=True)
+                remaining.append(worklist_entry(r))
+                if not args.json:
+                    print(f"  ✗ [{ck}] no open-access copy — {r.get('title')}")
+    finally:
+        await client.aclose()
+
+    if fetched:
+        await write_index(store)
+
+    if args.json:
+        emit_json({"checked": len(stubs), "fetched": fetched, "remaining": remaining})
+        return
+
+    print(f"\nFetched {len(fetched)} of {len(stubs)} stub(s).")
+    if remaining:
+        print(f"{len(remaining)} still need a manual/interactive fetch:")
+        for e in remaining:
+            ids = ", ".join(f"{k}:{v}" for k, v in e["ids"].items()) or "(no identifier)"
+            print(f"  - [{e['citekey']}] {e['title']}")
+            print(f"      {ids}" + (f"  → {e['url']}" if e["url"] else ""))
+        print("\nEscalate each per references/getting-pdfs.md — institutional access via the")
+        print("browser (then `bib fetch <ck> --pdf <file>`), or, only with the user's explicit")
+        print("authorization, a peer source by DOI. Confirm the file is the right paper first.")
+
+
 async def cmd_list(args: argparse.Namespace, store: BiblioStore) -> None:
     recs = await store.all_records()
     if getattr(args, "content", False):
@@ -1086,6 +1213,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--move", action="store_true", help="move the --pdf file into the library instead of copying")
     sp.add_argument("--force", action="store_true", help="replace an existing attached file")
     sp.set_defaults(func=cmd_fetch)
+
+    sp = sub.add_parser("backfill", help="batch-attach open-access PDFs to citation-only stubs; list the rest for manual fetch")
+    sp.add_argument("--tag", help="only stubs carrying this tag")
+    sp.add_argument("--limit", type=int, help="attempt at most N stubs")
+    sp.add_argument("--dry-run", action="store_true", help="list the stubs that would be attempted; fetch nothing")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_backfill)
 
     sp = sub.add_parser("enrich", help="recover metadata for unverified/no-year records (filename -> Crossref, content-verified)")
     sp.add_argument("citekeys", nargs="*", help="only these citekeys (default: all unverified)")

@@ -272,6 +272,25 @@ The library's `index.html` viewer is regenerated automatically on every change;
 `bib viewer` just forces a rebuild (and is run by `init`). Open it in a browser to
 search by title/author/venue/tag/year and click straight through to each PDF.
 
+**Backfilling full text for citation-only stubs.** A library grown with
+`discover --add` accumulates **stubs** — abstract searchable, no full text. `bib
+backfill` is the bulk counterpart to `fetch`: it finds every stub, runs the
+keyless open-access ladder over each, attaches each PDF it finds, and prints a
+**worklist** of the stubs that have no OA copy (citekey, identifiers, a resolvable
+URL). That worklist is the interactive part — escalate each via the browser
+(institutional access) or, only with the user's explicit authorization, a peer
+source, then `bib fetch <ck> --pdf <file>`. `backfill` does the mechanical OA
+sweep but never drives the browser or chooses a peer source on its own.
+
+```bash
+bib backfill                  # attach OA PDFs to all stubs; list the rest for manual fetch
+bib backfill --dry-run        # list the stubs that would be attempted; fetch nothing
+bib backfill --tag topic:aso  # only stubs carrying this tag   (--limit N to cap the run)
+```
+
+See [references/getting-pdfs.md](references/getting-pdfs.md) for the escalation
+ladder the worklist feeds into.
+
 **Keeping the library healthy:**
 
 ```bash
@@ -290,9 +309,10 @@ metadata. Empty folders under `papers/` are pruned automatically after every com
 ## Machine-readable output
 
 `list`, `search`, `show`, `add`, `import`, `enrich`, `query`, `discover`,
-`dedupe`, `check`, and `audit` take `--json`. Prefer it when you need to parse
-results, count, or feed another step. `discover --json` emits
-`{"results": [...], "sources": {name: count|error}, "added": {...}}`.
+`backfill`, `dedupe`, `check`, and `audit` take `--json`. Prefer it when you need
+to parse results, count, or feed another step. `discover --json` emits
+`{"results": [...], "sources": {name: count|error}, "added": {...}}`; `backfill
+--json` emits `{"checked": N, "fetched": [...], "remaining": [...]}`.
 
 ## Good habits
 
