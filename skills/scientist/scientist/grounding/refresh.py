@@ -104,7 +104,7 @@ def refresh(report_path: Path | str, cache_path: Path | str | None = None, *,
                                 "reason": "tier-3 span unavailable (no library resolver)"})
                 continue
             try:
-                verdict = judge(span, paraphrase, model_id=mid)
+                verdict = judge_fn(span, paraphrase, model_id=mid)
             except Exception as exc:        # JudgeUnavailable or a transport error → degrade
                 skipped += 1
                 details.append({"citekey": citekey, "status": "skipped", "reason": str(exc)})

@@ -237,6 +237,16 @@ def test_refresh_degrades_without_key(tmp_path):
     assert not (tmp_path / "program" / "analysis" / J.JUDGMENT_CACHE_NAME).exists()
 
 
+def test_refresh_uses_default_judge_when_none(tmp_path, monkeypatch):
+    # judge=None → refresh lazily imports the real client; monkeypatch it so no API is hit.
+    # Exercises the default-judge path (the call site, not just an injected stub).
+    import scientist.grounding.judge as JUDGE
+    monkeypatch.setattr(JUDGE, "judge_entailment", _supported_judge)
+    rp = _report_json(tmp_path, [_tier1_src()])
+    res = REFRESH.refresh(rp, model_id="m1")               # no judge= passed
+    assert res["judged"] == 1 and res["skipped"] == 0
+
+
 def test_refresh_tier3_skips_without_resolver(tmp_path):
     src = {"citekey": "noor2015q", "paraphrase": "whole-doc reading", "tier": 3,
            "span": "", "evidence_sha": "f" * 64, "judge_status": "miss"}
