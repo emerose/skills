@@ -695,30 +695,23 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
         return f"claim `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
 
     def _lit_note_text(cid: str) -> str:
-        # A literature endnote shows the convergence set: the synthesized strength, then each
-        # source with its evidential tags (system, direct/suggestive, relay flag). Verbatim
-        # quotes stay in the spec, not the prose, so the endnote reads cleanly while the claim
-        # remains quote-pinned and auditable. Visibly distinct from a data-claim note.
+        # Parallel to a data-claim endnote: the claim's statement reads as the note, followed by
+        # the supporting papers (author-year) as a subdued citation. No "Literature" label (the
+        # author-years make the source obvious) and no strength (low signal in prose) — the
+        # quote-pinning and the evidential assessment live in the spec and the audit, not here.
         cands = resolve_citation(cid, claim_index)
         if len(cands) != 1:
             return f"literature `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
         c = claim_index[cands[0]]
-        strength = c.get("strength") or "unspecified"
-        srcs = (c.get("evidence") or {}).get("lit_sources", [])
-        parts, seen = [], set()
-        for s in srcs:                       # one entry per paper (a paper cited for several
-            ck = s.get("citekey")            # quotes appears once in the endnote)
+        stmt = (c.get("statement") or "").strip().replace("\n", " ")
+        seen, ays = set(), []
+        for s in (c.get("evidence") or {}).get("lit_sources", []):
+            ck = s.get("citekey")            # one author-year per paper, first-seen order
             if ck in seen:
                 continue
             seen.add(ck)
-            ay = _author_year(s)
-            tags = [t for t in (s.get("system"),
-                                None if s.get("test") == "direct" else "suggestive",
-                                None if s.get("primary", True) else "secondary") if t]
-            parts.append(f"{ay} ({', '.join(tags)})" if tags else ay)
-        groups = len({s.get("group") for s in srcs})
-        lead = f"Literature — **{strength}**" + (f", {groups} independent" if groups > 1 else "") + ": "
-        return lead + "; ".join(parts) if parts else f"Literature — {strength} `{cid}`"
+            ays.append(_author_year(s))
+        return f"{stmt} ({'; '.join(ays)})" if ays else stmt
 
     defs = [f"[^claim-{num[cid]}]: {_note_text(cid)}" for cid in order]
     defs += [f"[^report-{rnum[cid]}]: {_report_note_text(cid)}" for cid in rorder]
