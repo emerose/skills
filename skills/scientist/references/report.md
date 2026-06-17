@@ -119,6 +119,23 @@ useful report is the one that surfaces where the program may be wrong.
 Reports are how the program's understanding grows, so a report should *leave the system
 smarter*, not just answer one question:
 
+- **Always cite the *primary* source — track it down, don't relay.** If author A established
+  finding X, cite **A's own paper**, even when you first met X somewhere else: in a review or
+  meta-analysis (paper Y) that cites A, or in a *Kicho-authored report* (Z) that discusses A's
+  result. A secondary source is a pointer, not the source. When you find X in Y or Z, follow
+  its citation back to A's original paper, *read that paper*, confirm it actually says X, and
+  cite **A** — not Y, not Z. This holds for `[lit:]` grounding (mark a relay `primary=False`
+  and re-source — see the telephone problem below), for background References (give A's DOI,
+  not the review's), and for internal reuse (when an earlier Kicho report leans on A, the new
+  report grounds on A directly, not on "report Z says A found X"). Reasons it matters: the
+  relay may have garbled the number, dropped a caveat, or quoted A out of context; A's paper
+  carries the method and conditions that tell you whether the finding is *direct* and how
+  strong it is; and a chain of reports citing reports citing reviews launders a single weak
+  result into apparent consensus. Citing a review is acceptable *only* for genuinely
+  review-level statements ("the field broadly finds…") or when A's primary source is truly
+  unobtainable — and then say so explicitly. (A Kicho report's own *grounded `[claim:]`s* are
+  primary — they rest on Kicho's measured data — and are cited via `[report:<id>]`/`[claim:<id>]`
+  as normal; this rule is about not relaying *third-party* findings through a report.)
 - **Sweep the literature *before* you write, not after.** The broad search below is step one,
   not a citation-gathering afterthought: do it first, then write the report on the evidence it
   surfaces. Writing first and back-filling citations produces a report built on whatever you
@@ -240,7 +257,12 @@ you cite what the field reports. Two layers:
      quote-mining (a supportive sentence in a paper whose surrounding text qualifies it).
      `support=False` ⇒ the claim is broken.
    - **primary** — is this the *primary* source, or a relay? (The telephone problem: if A says
-     "B showed X", cite **B**; verify A isn't just repeating B.) Mark a relay `primary=False`.
+     "B showed X", cite **B**; verify A isn't just repeating B.) This is not optional bookkeeping:
+     a `primary=False` source is a signal to go *get* B — track down B's paper, add it to the
+     library, read it, and re-ground the quote on B. Mark the relay `primary=False` only when B is
+     genuinely unobtainable; the default outcome of finding a relay is to replace it with the
+     primary source, not to ground on the relay. (See *Always cite the primary source* above —
+     the same rule applies whether the relay is a review paper or a Kicho-authored report.)
    - **independence** — set `group=` so co-lab / shared-model papers count as ONE group; the
      endnote's "N independent" comes from distinct groups.
 
