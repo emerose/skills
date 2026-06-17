@@ -170,6 +170,16 @@ smarter*, not just answer one question:
   papers this report won't cite — the next report reuses them and can search inside their full
   text. Citations are a small subset of what you bank. A library that only contains this
   report's footnotes is a symptom of citation-driven research, not a literature review.
+  - **When an apparently valuable paper won't download, stop and ask — don't route around it.**
+    If a paper looks load-bearing (it states a result the argument leans on, or would set/upgrade a
+    claim's strength) but `bib fetch`/`bib discover` can't get the full text, the right move is
+    **not** to substitute the abstract, a review's gloss, a secondary source, or "what you already
+    know" and carry on. Pause and ask the user to supply the PDF (institutional access:
+    `bib fetch <key> --pdf <downloaded.pdf>`). Proceeding on a degraded substitute silently lowers
+    the evidentiary floor of everything downstream, and the gap is invisible once it is written up.
+    Asking is cheap; a report built on a paper you never actually read is not. (For genuinely
+    *corroborating* — not load-bearing — papers, banking the abstract and moving on is fine; this
+    rule is about the ones the argument rests on.)
 - **Put third-party papers in the bibliographer library, not in the data repo.** A paper
   belongs in the shared bibliographer library, where every future report can reuse it and
   search inside it — *not* copied into `program/refs/`. Cite it in the report's References by
@@ -391,6 +401,18 @@ implies the claim), or secondary, or contested. Keep author seniority / citation
 *context* in `note`/`caveats`, **never** as a scoring input — weighting by prestige is
 argument-from-authority and the machinery would launder it as rigor.
 
+**A weak literature claim still backs — cite the weak disconfirmer, do not drop it.** Strength
+for a `[lit:]` claim is *descriptive*, not a gate: unlike a data `[claim:]` (which must be
+moderate-or-strong to back), a `weak` literature claim that is reviewed, supported, and
+quote-pinned **backs its citation** and renders as an appropriately weak endnote (`lit_verdict`
+blocks only on a failed quote, a non-literature claim, an un-reviewed claim, or an
+agent-judged-unsupported one — never on `weak`). So single/suggestive/secondary evidence is
+*citable*, not unusable. This matters most for **disconfirming** evidence, which is often
+legitimately weak (one contrary case, an inferential tolerance argument): write it as a `weak`
+`[lit:]` claim and cite it, rather than demoting it to a bare reference or omitting it. Dropping a
+weak-but-real disconfirmer to keep the claim set "clean" is the exact failure the
+disconfirming-evidence requirement exists to prevent.
+
 **When the library has only an abstract or a title — and you need the body, pause and ask.**
 Many papers are paywalled, so the bibliographer ingests only their metadata + abstract (and the
 oldest/most-locked, just the title) — `bib fetch` can't get an open-access PDF. You can still
@@ -491,10 +513,50 @@ What the **audit** validates mechanically (a finding fails the audit — `BROKEN
   on disk) · `untracked` (on disk but no edge records it — an ad-hoc graphic) · `dangling`
   (neither recorded nor on disk). Everything but `current` is blocking.
 
-What stays the **semantic pass** (the authoring agent, per §3): is every quantitative
-sentence actually cited; is each cited claim *on-topic* for its sentence (`off-topic`); is
-an unbacked *qualitative* conclusion acceptable (advisory) or over-reaching. `sci report`
-does **not** detect assertions — it resolves the citations/embeds you wrote.
+What stays the **semantic pass** (per §3): is every quantitative sentence actually cited; is
+each cited claim *on-topic* for its sentence (`off-topic`); is a number a `derived` inline
+combination its claims don't assert; is an unbacked *qualitative* conclusion acceptable
+(advisory) or over-reaching. `sci report` does **not** detect assertions — it resolves the
+citations/embeds you wrote, so a `GROUNDED` audit certifies *citation/embed integrity, not
+assertion↔evidence correspondence*. The `derived` case is the sharp edge: a sentence can cite
+two real claims and pass the audit while asserting a product (or a mis-transcribed value)
+neither claim makes.
+
+### Required: the §3 pass runs in a fresh-context subagent
+
+For a report, the §3 prose↔claims pass is **mandatory and must be delegated to a fresh-context
+subagent — not run by the author as self-review.** The reason is in [review-audit.md](review-audit.md):
+the author built the inferences, so the author re-reading the draft carries the same reasoning and
+finish-line bias and waves through exactly the `derived`/over-reaching quantities the mechanical
+audit can't see. A subagent reads the draft cold. Do this after a clean `sci report` audit
+(citations resolve) and before declaring the report done; iterate until the subagent returns no
+blocking findings.
+
+**Hand the subagent** (the inputs are load-bearing — without the claim *values* it can only
+re-check the citation presence the audit already passed):
+
+- the report Markdown;
+- the **resolved contents** of everything it cites — the `{id, statement, outcome, strength,
+  evidence}` for each `[claim:]`/`[lit:]` (from the grounding reports / `sci report --json`), and
+  the abstract/title of each cited paper so it can judge `off-topic`;
+- the report's `prompt.md` (so it can check sub-topic coverage and that no presupposed conclusion
+  was smuggled in).
+
+**Prompt it adversarially and specifically** — not "does this look right" (invites the same bias)
+but: "list every quantitative sentence whose cited claim does not itself contain that value; list
+every number that is an arithmetic combination of two or more claims; list every result with no
+citation; list every cited claim that is not actually about its sentence; list load-bearing
+disconfirming evidence the brief asked for that is absent." (Fresh context defeats *contextual*
+bias; the specific prompt is what guards against the *systematic* model bias a same-model subagent
+still shares.)
+
+**It must return**, per finding: the line, the sentence, the verdict (`unbacked` / `off-topic` /
+`weak-backing` / `derived` / `artifact-only` / `missing-disconfirmer`), the claim it maps to (or
+that none does), and the claim's value where relevant. **Blocking** (must clear before done):
+`unbacked` numeric, `off-topic`, `weak-backing`, `derived`, claim-value ≠ sentence-value, any
+contradicted backing. **Surfaced** (address or explicitly waive in the assumptions section):
+unbacked *qualitative* conclusions and missing disconfirmers. An empty blocking list is the
+objective stop condition — *not* the author's satisfaction.
 
 ### Render toolchain
 
