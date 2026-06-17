@@ -152,6 +152,13 @@ smarter*, not just answer one question:
   evidence-strength/gaps assessment. Eight focused sub-topic agents will surface ~100+ relevant
   papers; a thin single-pass search surfaces a dozen. If your sweep returns only the handful you
   end up citing, it was too shallow — go wider.
+- **Require disconfirming evidence in the sweep.** A sweep that only confirms is a steered
+  sweep. Each research subagent must surface what *cuts against* the report's likely conclusion
+  — contradicting studies, tolerated exceptions, fixed-dose phenotypic variability, regimes
+  where the rule breaks — as explicitly as the supporting evidence, and the report must carry
+  these load-bearing in the prose (and the assumptions section), not bury them. The generation
+  brief names the *specific* contrary findings to hunt for (see "Keep the generation brief in
+  git"); without that demand a literature review quietly becomes a confirmation exercise.
 - **Bank every relevant paper, not just the ones you cite.** The point of the research phase is
   to grow the program's durable knowledge: the bibliographer library is the asset that outlives
   any single report. Add **everything on-topic** the sweep surfaces (`bib add <DOI|PMID>`), even
@@ -227,6 +234,45 @@ carry it over. Two reasons it earns its place:
   that the answer was assumed. Where the report must derive a value the program already holds an
   opinion on, the brief should direct the derivation to ignore that value and compare only
   afterward, walled off (see "Derive; don't presuppose what the report exists to establish").
+
+**Keep the brief thin — reference the discipline, don't restate it.** The generic report
+discipline (this file) and any program-wide context (a `program/.../BRIEF.md` of standing facts,
+the report-dependency graph, the claim-module naming convention) are each written down *once*,
+elsewhere. A brief that re-pastes the literature-sweep method, the `[lit:]` grounding rubric, the
+voice/structure rules, or the program's background facts into every `prompt.md` drifts out of
+sync and buries the one thing the brief is *for*. Open with two pointers — "follow the report
+discipline (`references/report.md`); assume the program context in `<program brief>`" — then
+spend the brief only on what is **specific to this report**:
+
+- the **question**, and the frame for answering it (the decomposition, the bar, the verdict shape);
+- the **scope** — the sub-topics to sweep, each phrased as an open question;
+- what **not to presuppose** for *this* question (including the specific disconfirming evidence to hunt for);
+- the suggested **spine** for the write-up;
+- the report-specific clause of *done-when*.
+
+The steer-detection signal lives entirely in that report-specific content, so referencing the
+generic discipline rather than inlining it costs nothing — there is nowhere for steering to hide
+in boilerplate that is identical across every report.
+
+**Guardrails every brief carries (so steering stays detectable).** State these as standing
+requirements, never as conclusions:
+
+- The grounded `[lit:]`/`[claim:]`/`[report:]` set is the audit trail. A regeneration that
+  reaches a tidy conclusion by dropping the disconfirming claims, collapsing the
+  assumptions/weak-support section, or inflating independence counts is detectable by diffing the
+  claims against the brief's requirements.
+- Keep the assumptions/weak-support section exhaustive and honest — it is the first place tunnel
+  vision shows up, by its absence.
+- Treat a too-tidy result skeptically: if a derived number comes out suspiciously crisp, check it
+  traces to the cited evidence rather than to a convenient value.
+
+**Close with a standard *done-when*.** End the brief with the audit bar the report must clear,
+then add the one report-specific clause (the shape of the conclusion this report owes). The
+standing part is the same for every report: `sci report <report.md>` audits **GROUNDED**
+(including any recursively-GROUNDED supporting reports it cites), every load-bearing third-party
+fact is a quote-pinned `@reviewed` `[lit:]` claim (no load-bearing bare references),
+abstract/title-only gaps are surfaced (and the user was asked about any that are load-bearing),
+and the assumptions section names every weak step.
 
 ## Authoring model
 
