@@ -523,6 +523,16 @@ assertion↔evidence correspondence*. The `derived` case is the sharp edge: a se
 two real claims and pass the audit while asserting a product (or a mis-transcribed value)
 neither claim makes.
 
+As a **non-blocking recall aid** for that pass, the audit also emits `unsupported-quantity`
+**advisories** (shown with `~`, and in `--json` under `advisories`; they never change
+GROUNDED/BROKEN): a %/×/fold number in a *cited paragraph* that **no cited claim anywhere in the
+report asserts**. It is deliberately high-precision and narrow — paragraph-scoped, with a
+report-wide restatement filter, skipping `[report:]`-cited and uncited paragraphs — so it catches
+mis-cited/mis-transcribed figures but **not** an *uncited* inline-derived number (a bare table cell,
+or a value computed in prose that happens to land near an unrelated claim's number). Those, and the
+on-topic/over-reach judgments, remain the subagent's job: the advisory is the mechanical floor, not
+the check.
+
 ### Required: the §3 pass runs in a fresh-context subagent
 
 For a report, the §3 prose↔claims pass is **mandatory and must be delegated to a fresh-context
