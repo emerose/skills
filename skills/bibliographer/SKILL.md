@@ -167,6 +167,11 @@ bib discover "ASO CNS biodistribution" --add --fetch-pdfs            # also try 
 bib discover "ASO CNS biodistribution" --json                        # structured candidates + per-source report
 ```
 
+Give it **keyword terms, not a full-sentence question** — the sources match terms,
+not meaning, so a natural-language question can return junk or nothing; run a few
+term variations to widen recall (see
+[references/literature-search.md](references/literature-search.md)).
+
 It fans out concurrently over **OpenAlex, Semantic Scholar, Europe PMC, PubMed,
 Crossref, and arXiv** (choose a subset with `--sources`; `--limit` is per-source,
 default 25). A paper surfaced by several sources is corroborated and ranks higher;

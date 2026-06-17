@@ -27,11 +27,19 @@ literature review's clothes.
    dozen. If your sweep returns only the handful you end up citing, it was too
    shallow — go wider.
 
-2. **Run each sweep broadly.** Default to all six sources and a generous
-   `--limit` (the default 25 is *per source*). Narrow with `--sources`,
-   `--year-min/--max`, or `--open-access` only when you have a reason —
-   biomedical-only (`--sources pubmed,europepmc`), recent-only, etc. Breadth is
-   cheap here; missing a whole sub-literature is not.
+2. **Run each sweep broadly — in both sources and phrasing.** Default to all six
+   sources and a generous `--limit` (the default 25 is *per source*); narrow with
+   `--sources`, `--year-min/--max`, or `--open-access` only when you have a reason
+   (biomedical-only `--sources pubmed,europepmc`, recent-only, etc.). And **query
+   with keywords, not sentences**: `discover` hands your string to keyword/boolean
+   APIs (PubMed, OpenAlex, Crossref) that match *terms, not meaning*, so a
+   natural-language question matches function words and may return junk or nothing,
+   while a concise term query matches cleanly. Because no single phrasing surfaces
+   everything, run **several keyword variations per sub-topic** — swap synonyms and
+   adjacent terms (intrathecal / intracerebroventricular / CSF; oligonucleotide /
+   ASO / oligodeoxynucleotide) and let the merge dedup the overlap. Breadth of
+   *queries*, not just of sources, is how keyword search matches a semantic
+   engine's recall.
 
 3. **Bank everything on-topic, not just what you'll cite.** `bib discover --add`
    banks every net-new candidate as a fast citation-only **stub** (the abstract
