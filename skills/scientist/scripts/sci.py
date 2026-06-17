@@ -74,6 +74,7 @@ from scientist import extraction as EXT  # noqa: E402
 from scientist.provenance import trace as TRACE  # noqa: E402
 from scientist.provenance import reproduce as REPRODUCE  # noqa: E402
 from scientist.provenance import report as REPORT  # noqa: E402
+from scientist.provenance import coverage as COVERAGE  # noqa: E402
 from scientist.store import cli as STORE_CLI  # noqa: E402
 from scientist.store import _meta as STORE_META  # noqa: E402
 
@@ -136,6 +137,17 @@ def main() -> int:
     p_rep.add_argument("--index", action="store_true",
                        help="index the report into the store as kind=report (needs the store)")
 
+    # ---- coverage: is the grounding keeping up with the library? ----
+    p_cov = sub.add_parser("coverage",
+                           help="library papers cited by NO grounded claim — the completeness "
+                                "counterpart to `report` (catches grounding stagnation)")
+    p_cov.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
+    p_cov.add_argument("--since", help="flag uncited papers added on/after this ISO date "
+                       "(e.g. 2026-06-16); default: the most recently banked uncited")
+    p_cov.add_argument("--bib", help="command to run the bibliographer CLI "
+                       "(default: $SCIENTIST_BIB_CMD, else the sibling bib.py via uv, else `bib`)")
+    p_cov.add_argument("--json", action="store_true", help="machine-readable output")
+
     # ---- store subcommands (init/index/reindex/list/show/search/query/file/read/
     #      entity/new/intake/meta/review/fingerprint/catalog/check/audit/pr) ----
     STORE_CLI.register(sub)
@@ -159,6 +171,8 @@ def main() -> int:
         return _reproduce(args)
     if args.cmd == "report":
         return _report(args)
+    if args.cmd == "coverage":
+        return _coverage(args)
     if args.cmd == "audit":
         return _audit_both(args)
     return STORE_CLI.dispatch(args)
@@ -246,6 +260,55 @@ def _report(args: argparse.Namespace) -> int:
         STORE_CLI.index_report(args, card)
 
     return rc
+
+
+def _coverage(args: argparse.Namespace) -> int:
+    """`sci coverage`: library papers cited by no grounded claim — the completeness
+    counterpart to `report`. Reads cited citekeys from the grounding reports under the
+    data tree and the library via `bib list --json`. Informational (always exit 0); it
+    is a worklist, not a gate."""
+    import json
+    import os
+    import shlex
+    import subprocess
+
+    home = Path(args.home).resolve() if getattr(args, "home", None) else (
+        Path(os.environ["SCIENTIST_HOME"]).resolve() if os.environ.get("SCIENTIST_HOME") else None)
+    if home is None:
+        print("no data folder: pass --home or set $SCIENTIST_HOME", file=sys.stderr)
+        return 1
+
+    cited = COVERAGE.cited_citekeys(REPORT.index_claims(home))
+
+    if args.bib:
+        bib_cmd = shlex.split(args.bib)
+    elif os.environ.get("SCIENTIST_BIB_CMD"):
+        bib_cmd = shlex.split(os.environ["SCIENTIST_BIB_CMD"])
+    else:
+        sibling = Path(__file__).resolve().parent.parent.parent / "bibliographer" / "scripts" / "bib.py"
+        bib_cmd = ["uv", "run", str(sibling)] if sibling.is_file() else ["bib"]
+
+    try:
+        proc = subprocess.run([*bib_cmd, "list", "--json"],
+                              capture_output=True, text=True, check=True)
+        library = json.loads(proc.stdout)
+    except (OSError, subprocess.CalledProcessError) as e:
+        print(f"could not run the bibliographer CLI ({' '.join(bib_cmd)} list --json): {e}\n"
+              f"pass --bib '<cmd>' or set $SCIENTIST_BIB_CMD; ensure $BIBLIOGRAPHER_HOME is set",
+              file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"bibliographer did not return JSON: {e}", file=sys.stderr)
+        return 1
+    if isinstance(library, dict):
+        library = library.get("articles") or library.get("records") or []
+
+    result = COVERAGE.coverage(library, cited, since=args.since)
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    else:
+        print(COVERAGE.render_coverage(result))
+    return 0
 
 
 def _reproduce(args: argparse.Namespace) -> int:
