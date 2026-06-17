@@ -21,6 +21,7 @@ Unpaywall when one exists.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -462,6 +463,106 @@ async def fetch_pmc_oa_pdf(pmcid: str, client: httpx.AsyncClient) -> str | None:
     return None
 
 
+# NCBI PMC guards its article PDFs with a JavaScript proof-of-work challenge: the
+# bare ``/articles/<PMCID>/pdf/<name>.pdf`` path returns an HTML page carrying a
+# ``POW_CHALLENGE`` / ``POW_DIFFICULTY`` pair, and the PDF is served only once the
+# ``cloudpmc-viewer-pow`` cookie proves the work. A real browser runs the JS and
+# solves it transparently; headless clients (and Europe PMC's render endpoint) do
+# not, which is why NIH **author manuscripts** — publicly readable in PMC but *not*
+# in the OA subset — are missed by every other tier. We solve the challenge here.
+_POW_MAX_DIFFICULTY = 6  # each level is 16× the work; cap so a hostile page can't hang us
+_POW_COOKIE_DEFAULT = "cloudpmc-viewer-pow"
+
+
+def _solve_pmc_pow(challenge: str, difficulty: int) -> str | None:
+    """Brute-force a nonce so ``sha256(challenge + nonce)`` has ``difficulty``
+    leading hex zeros. Returns the nonce as a string, or None if capped out.
+
+    Pure and deterministic, so it is unit-tested without the network.
+    """
+    if difficulty <= 0 or difficulty > _POW_MAX_DIFFICULTY:
+        return None
+    prefix = "0" * difficulty
+    base = challenge.encode()
+    # Bound the search: 16**difficulty hashes on average to land `difficulty`
+    # zeros; with the difficulty cap this is at most a few seconds of CPU.
+    for nonce in range(64 * 16**difficulty):
+        if hashlib.sha256(base + str(nonce).encode()).hexdigest().startswith(prefix):
+            return str(nonce)
+    return None
+
+
+def _parse_pmc_pow(html: str) -> tuple[str, int, str] | None:
+    """Extract ``(challenge, difficulty, cookie_name)`` from a PMC PoW page, or None.
+
+    The page declares ``const POW_CHALLENGE = "…"`` / ``POW_DIFFICULTY = "4"`` /
+    ``POW_COOKIE_NAME = "cloudpmc-viewer-pow"`` in an inline module script.
+    """
+    chal = re.search(r'POW_CHALLENGE\s*=\s*"([^"]+)"', html)
+    diff = re.search(r'POW_DIFFICULTY\s*=\s*"?(\d+)"?', html)
+    if not (chal and diff):
+        return None
+    name = re.search(r'POW_COOKIE_NAME\s*=\s*"([^"]+)"', html)
+    return chal.group(1), int(diff.group(1)), (name.group(1) if name else _POW_COOKIE_DEFAULT)
+
+
+async def fetch_pmc_authorms_pdf(
+    pmcid: str, dest: Path, client: httpx.AsyncClient
+) -> bool:
+    """Download a PMC article PDF straight from NCBI, solving the PoW gate.
+
+    The route for NIH author manuscripts (and anything else readable on
+    ``pmc.ncbi.nlm.nih.gov`` but absent from the OA subset). Scrapes the real PDF
+    filename from the article landing page — the bare ``/pdf/`` path returns HTML —
+    then requests it, solving the ``cloudpmc-viewer-pow`` challenge if the server
+    answers with one. Writes ``dest`` and returns True only on real PDF bytes.
+    """
+    base = f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/"
+    headers = {"User-Agent": _BROWSER_UA, "Accept": "text/html,*/*"}
+    try:
+        landing = await client.get(base, headers=headers, follow_redirects=True)
+    except httpx.HTTPError:
+        return False
+    if landing.status_code != 200:
+        return False
+    m = re.search(rf'/articles/{re.escape(pmcid)}/pdf/([^"\']+\.pdf)', landing.text)
+    if not m:
+        return False
+    pdf_url = base + "pdf/" + m.group(1)
+
+    async def _get(cookies: dict[str, str] | None) -> httpx.Response | None:
+        try:
+            return await client.get(
+                pdf_url,
+                headers={"User-Agent": _BROWSER_UA, "Accept": "application/pdf,*/*",
+                         "Referer": base},
+                cookies=cookies,
+                follow_redirects=True,
+            )
+        except httpx.HTTPError:
+            return None
+
+    r = await _get(None)
+    if r is None or r.status_code != 200:
+        return False
+    if b"%PDF-" in r.content[:1024]:
+        dest.write_bytes(r.content)
+        return True
+    # Not a PDF — likely the PoW challenge page. Solve it and retry once.
+    pow_params = _parse_pmc_pow(r.text)
+    if not pow_params:
+        return False
+    challenge, difficulty, cookie_name = pow_params
+    nonce = _solve_pmc_pow(challenge, difficulty)
+    if nonce is None:
+        return False
+    r = await _get({cookie_name: f"{challenge},{nonce}"})
+    if r is None or r.status_code != 200 or b"%PDF-" not in r.content[:1024]:
+        return False
+    dest.write_bytes(r.content)
+    return True
+
+
 async def _derive_pmcid(rec: dict[str, Any], client: httpx.AsyncClient) -> str | None:
     """The record's PMCID, deriving it from the DOI/PMID via NCBI if absent.
 
@@ -536,6 +637,14 @@ async def acquire_oa_pdf(
         try:
             if await _try("pmc_oa", await fetch_pmc_oa_pdf(pmcid, client)):
                 return "pmc_oa"
+        except (httpx.HTTPError, ResolveError):
+            pass
+        # 6b. Direct NCBI PMC, solving the proof-of-work gate — reaches NIH author
+        #     manuscripts readable in PMC but absent from the OA subset (so every
+        #     route above declines). Self-downloads, so not routed through _try.
+        try:
+            if await fetch_pmc_authorms_pdf(pmcid, dest, client):
+                return "pmc_authorms"
         except (httpx.HTTPError, ResolveError):
             pass
     # 7. Semantic Scholar openAccessPdf (fresh)

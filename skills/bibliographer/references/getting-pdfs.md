@@ -33,6 +33,12 @@ tried):
   so this fires even for DOI-only stubs.
 - **NCBI PMC OA service** — `oa.fcgi`, a structured fallback that returns a direct
   PDF href for the OA subset when Europe PMC's render endpoint declines.
+- **NCBI PMC direct (PoW)** — for PMCID records *not* in the OA subset (notably
+  **NIH author manuscripts**, which are publicly readable in PMC but which Europe
+  PMC's render and `oa.fcgi` both decline). Scrapes the real PDF filename from the
+  article landing page and solves the `cloudpmc-viewer-pow` proof-of-work gate (see
+  the note below). This is the route that an open-access paywalled-journal paper
+  (e.g. a *Sci. Transl. Med.* AAAS article deposited by NIH funding) takes.
 - **Semantic Scholar** — its `openAccessPdf` link.
 
 PDF byte downloads use a browser-like User-Agent (the polite-pool UA is kept for
@@ -42,28 +48,28 @@ then `fetch`.
 
 ### Note: NCBI PMC direct downloads and proof-of-work
 
-`fetch` gets PMC PDFs via **Europe PMC** (`europepmc.org`), which has no anti-bot
-gate. Fetching directly from **NCBI** (`pmc.ncbi.nlm.nih.gov`) is harder and
-generally not worth it: it needs browser-like request headers (a plain UA gets
-HTML, not the PDF), the real PDF filename must be scraped from the article landing
-page (the bare `/pdf/` path returns HTML), and the response may be a JavaScript
-**proof-of-work challenge** that must be solved before the PDF is served.
+Most PMC PDFs come via **Europe PMC** (`europepmc.org`), which has no anti-bot gate.
+Fetching directly from **NCBI** (`pmc.ncbi.nlm.nih.gov`) is harder: it needs
+browser-like request headers (a plain UA gets HTML, not the PDF), the real PDF
+filename must be scraped from the article landing page (the bare `/pdf/` path
+returns HTML), and the response is often a JavaScript **proof-of-work challenge**
+that must be solved before the PDF is served. `fetch` now does all of this
+automatically (`fetch_pmc_authorms_pdf` in `scripts/_resolvers.py`), as a tier
+below the OA-subset routes — so author-manuscript deposits no longer need a manual
+download.
 
-If you ever need the direct-NCBI route, the challenge mechanics: the HTML carries
-`POW_CHALLENGE`, `POW_DIFFICULTY`, `POW_COOKIE_NAME` (default
-`cloudpmc-viewer-pow`), and `POW_COOKIE_PATH`. Solve it by brute-forcing a nonce so
-that `sha256(challenge + str(nonce))` (hex) begins with `difficulty` leading
-zeros; set the cookie to `"{challenge},{nonce}"` on `pmc.ncbi.nlm.nih.gov`; then
-re-request the PDF. Cap the difficulty (~6) — each level is 16× the work. Two
-shortcuts make this rarely necessary:
-
-- a **real browser** (Tier 3) runs the challenge's JavaScript and solves it
-  automatically, so the browser route sidesteps the PoW entirely; and
-- a full reference implementation (landing-page scrape + headers + solver) lives
-  in `hive-papers`:
-  `github.com/emerose/hivemind` → `libs/hive-papers/src/hive/papers/services/clients/pubmed_client.py`
-  (`_solve_pow_challenge` / `_solve_pmc_pow`). Port it if you add a headless
-  direct-NCBI fallback; until then Europe PMC + the browser cover PMC.
+The challenge mechanics, for reference: the HTML carries `POW_CHALLENGE`,
+`POW_DIFFICULTY`, `POW_COOKIE_NAME` (default `cloudpmc-viewer-pow`), and
+`POW_COOKIE_PATH`. It's solved by brute-forcing a nonce so that
+`sha256(challenge + str(nonce))` (hex) begins with `difficulty` leading zeros, then
+setting the cookie to `"{challenge},{nonce}"` on `pmc.ncbi.nlm.nih.gov` and
+re-requesting the PDF. The difficulty is capped (~6) — each level is 16× the work,
+so a hostile page can't make the solver grind forever. A **real browser** (Tier 3)
+runs the same JavaScript and solves it transparently, so the browser route remains a
+fallback if NCBI ever changes the scheme. A second reference implementation lives in
+`hive-papers`: `github.com/emerose/hivemind` →
+`libs/hive-papers/src/hive/papers/services/clients/pubmed_client.py`
+(`_solve_pow_challenge` / `_solve_pmc_pow`).
 
 ## Tier 2 — other open sources (agent-assisted discovery)
 
