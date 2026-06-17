@@ -1,0 +1,35 @@
+{
+  "skill_name": "bibliographer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I just read 'Attention Is All You Need' (arXiv 1706.03762). Save it to my paper collection, tag it as 'transformers', and then give me a BibTeX entry for it.",
+      "expected_output": "Article added to a bibliographer library via the bundled CLI (arXiv metadata fetched: title, authors Vaswani et al., year 2017). Tagged 'transformers'. A valid BibTeX entry is produced. The assigned citekey (e.g. vaswani2017attention) is surfaced.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Here's a PDF I just downloaded: /tmp/bert.pdf. Add it to my paper library, and tell me the citekey you assigned and what metadata you found for it.",
+      "expected_output": "PDF added to the library; the tool sniffs the identifier from the PDF filename/text (or falls back to embedded metadata) and resolves it to the BERT paper (Devlin et al., 2018). The PDF is filed into the human-readable author tree under papers/<First Author>/, the record is stored in libkit, and the citekey + resolved metadata are reported. If metadata could only come from the PDF itself, it is flagged as unverified.",
+      "files": ["/tmp/bert.pdf"]
+    },
+    {
+      "id": 3,
+      "prompt": "Add these to my paper library: arXiv 1706.03762, https://arxiv.org/abs/1810.04805, and DOI 10.1038/nphys1170. Then check the whole library for duplicates or integrity problems and summarize what you find.",
+      "expected_output": "All three articles added with correct per-source metadata (arXiv x2, Crossref x1). Those without an attached PDF are stored as citation-only records. A dedupe check and an integrity check are run; since the three are distinct, the summary reports no duplicates and notes the citation-only/no-file records. No false claims of success.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "I have a folder of research PDFs at /tmp/papers organized into topic subfolders. Import them into my paper library, but let me review what will happen before anything moves.",
+      "expected_output": "The skill runs `bib import /tmp/papers --dry-run` FIRST and presents a summary: per-file resolved metadata/citekeys, the planned author-tree paths, the topic:<slug> tags derived from each file's folder, and counts (resolved online vs unverified, sniffed, duplicates). It does not move or ingest anything until the user approves, then re-runs without --dry-run.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "Some of my imported papers are old scans with no DOI and ended up as 'Unknown' entries with junk titles. Can you find proper metadata for them?",
+      "expected_output": "The skill runs `bib enrich` (optionally --dry-run first) to recover metadata for the unverified records: it queries Crossref from each file's original author_year_title filename and verifies the candidate against the document's parsed content before applying (so a mislabeled file isn't given the wrong paper's metadata). Verified matches are auto-applied (real title/authors/DOI, regenerated citekey, re-filed under the author tree) and the rest are listed for review. For holdouts it suggests resolving via Semantic Scholar/PubMed or `bib enrich <citekey> --doi <id>`, and notes that non-articles (GeneReviews, StatPearls, bulletins) can't get a DOI and should be tagged type:<kind>. It does not blindly trust filenames.",
+      "files": []
+    }
+  ]
+}
