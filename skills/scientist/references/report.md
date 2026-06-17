@@ -359,7 +359,10 @@ Two more citation forms, same audit:
   that calls `source(citekey, quote=…, test=…, system=…, primary=…, group=…)` — and
   `converge(...)` for a multi-source fact. The spec **fails if the verbatim quote is not in the
   cited paper's stored text** (read from the LOCAL library DuckDB — keyless, offline; only the
-  library's semantic *query* embeds). `[lit:program::test_literature.py::<node>]` is `backed`
+  library's semantic *query* embeds), and **fails outright if the cited paper is marked
+  retracted** (OpenAlex / Retraction Watch, as of the last `bib add`/enrich — a claim must not
+  rest on retracted work; pass `allow_retracted=True` only to discuss the retraction itself).
+  `[lit:program::test_literature.py::<node>]` is `backed`
   only if that quote check passed **and** the claim carries an agent support-review
   (`@reviewed`); a *weak* but reviewed-and-supported claim still backs (single/suggestive
   evidence is legitimately weak). It is **second-class to `[claim:]`** — rendered as a distinct
@@ -400,7 +403,13 @@ independent (≥2 distinct groups) + direct + primary; **moderate** = a single g
 primary, unreplicated result; **weak** = single + *suggestive* (a related experiment that only
 implies the claim), or secondary, or contested. Keep author seniority / citation count as
 *context* in `note`/`caveats`, **never** as a scoring input — weighting by prestige is
-argument-from-authority and the machinery would launder it as rigor.
+argument-from-authority and the machinery would launder it as rigor. `source()` records the
+cited paper's **credibility markers** from the library automatically — venue legitimacy (DOAJ;
+journal vs. preprint), citation impact (FWCI / percentile / journal h-index), and the retraction
+flag — and they surface on the endnote as reader context. They are exactly the "context, not
+scoring" signals above: shown so a reader can weigh the source, and deliberately **never** fed
+into `@strength`, `support`, or any quality gate (an impact gate would also push toward the
+high-profile *review* over the lower-cited *primary* paper — the opposite of the rule above).
 
 **A weak literature claim still backs — cite the weak disconfirmer, do not drop it.** Strength
 for a `[lit:]` claim is *descriptive*, not a gate: unlike a data `[claim:]` (which must be
