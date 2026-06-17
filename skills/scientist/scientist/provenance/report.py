@@ -378,6 +378,180 @@ def report_scope(report_path: Path, home: Path) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# prose quantity advisories (a non-blocking recall aid for the §3 subagent)
+# --------------------------------------------------------------------------- #
+# NOT an assertion-detector and NOT a gate. A deliberately narrow, advisory pass over
+# %/×/fold quantities: it surfaces a number asserted on the same line as a
+# [claim:]/[lit:] citation whose cited claim(s) do not themselves contain that value —
+# the `derived`/mis-transcribed case the per-citation audit structurally cannot see (see
+# review-audit.md §3). Advisories never change GROUNDED/BROKEN; they are the mechanical
+# floor the required fresh-context §3 review subagent consumes. Scope is intentionally
+# limited to percent/fold magnitudes (the load-bearing quantities in these reports), so
+# years / n= / p-values / locus names don't generate noise; widen later if needed.
+_PCT_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%")
+_FOLD_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*(?:×|x(?![A-Za-z])|-?fold)")
+_RANGE_RE = re.compile(
+    r"(?<![\w.])(\d+(?:\.\d+)?)\s*[–—-]\s*(\d+(?:\.\d+)?)\s*(×|%|x(?![A-Za-z])|-?fold)")
+
+
+def _to_pct(val: float, unit: str) -> float:
+    return val if unit.strip().startswith("%") else val * 100.0
+
+
+def _quantities(text: str) -> set[float]:
+    """The set of %/×/fold magnitudes in ``text``, normalized to percent (2× -> 200)."""
+    if not text:
+        return set()
+    out: set[float] = set()
+    for m in _RANGE_RE.finditer(text):
+        out.add(_to_pct(float(m.group(1)), m.group(3)))
+        out.add(_to_pct(float(m.group(2)), m.group(3)))
+    for m in _PCT_RE.finditer(text):
+        out.add(float(m.group(1)))
+    for m in _FOLD_RE.finditer(text):
+        out.add(float(m.group(1)) * 100.0)
+    return out
+
+
+def _numeric_leaves(obj: Any) -> set[float]:
+    """Every numeric leaf in a (possibly nested) evidence value, skipping bools."""
+    if isinstance(obj, bool):
+        return set()
+    if isinstance(obj, (int, float)):
+        return {float(obj)}
+    if isinstance(obj, dict):
+        out: set[float] = set()
+        for v in obj.values():
+            out |= _numeric_leaves(v)
+        return out
+    if isinstance(obj, (list, tuple)):
+        out = set()
+        for v in obj:
+            out |= _numeric_leaves(v)
+        return out
+    return set()
+
+
+def _claim_quantities(claim: dict[str, Any]) -> set[float]:
+    """Numbers a claim actually asserts. A *data* claim: its structured ``evidence``
+    leaves (already in percent/fold-ish magnitudes) plus %/×/fold numbers in its
+    statement. A *literature* claim: its statement + each source quote (its evidence
+    holds sources, not values), so the figures it attributes are matched verbatim."""
+    nums = _quantities(claim.get("statement") or "")
+    ev = claim.get("evidence") or {}
+    if isinstance(ev, dict) and "lit_sources" in ev:
+        for s in ev.get("lit_sources") or []:
+            nums |= _quantities(s.get("quote") or "")
+    else:
+        nums |= _numeric_leaves(ev)
+    return nums
+
+
+def _qty_close(q: float, pool: set[float]) -> bool:
+    """True if some claim number is within rounding distance of ``q`` (15% relative, or
+    5 percentage points — loose on purpose: an advisory should under-flag, not flood, so
+    a defensible rounding like 2× for a measured 224.8% is *not* surfaced)."""
+    return any(abs(q - b) <= max(5.0, 0.15 * abs(b)) for b in pool)
+
+
+def _cite_ids_in(s: str) -> list[str]:
+    """The ``[claim:]`` + ``[lit:]`` ids in a string (not ``[report:]``)."""
+    return ([m.group(1).strip() for m in _CITE_RE.finditer(s)]
+            + [m.group(1).strip() for m in _LIT_RE.finditer(s)])
+
+
+def _paragraphs(text: str) -> list[tuple[int, str]]:
+    """Split into blank-line-separated paragraphs (``(start_line, text)``), skipping
+    fenced code blocks. Hard-wrapped lines are joined so a sentence's number and its
+    citation share a paragraph even when the line wrap splits them — the unit at which
+    the value↔claim association is reliable."""
+    paras: list[tuple[int, str]] = []
+    cur: list[str] = []
+    start: int | None = None
+    in_fence = False
+    fence_marker = ""
+
+    def flush() -> None:
+        nonlocal cur, start
+        if cur:
+            paras.append((start or 1, "\n".join(cur)))
+        cur, start = [], None
+
+    for n, line in enumerate(text.splitlines(), start=1):
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            marker = stripped[:3]
+            if not in_fence:
+                in_fence, fence_marker = True, marker
+                flush()
+            elif stripped.startswith(fence_marker):
+                in_fence, fence_marker = False, ""
+            continue
+        if in_fence:
+            continue
+        if not stripped:
+            flush()
+            continue
+        if start is None:
+            start = n
+        cur.append(line)
+    flush()
+    return paras
+
+
+def prose_quantity_advisories(
+        text: str, claim_index: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Surface a %/×/fold quantity in a *cited* paragraph that **no cited claim asserts**
+    — the `derived`/mis-transcribed case the per-citation audit can't see. Scoping
+    decisions, each tuned against false positives observed on real reports:
+
+    - **paragraph, not line** — a number and its citation routinely land on different
+      wrapped lines; line scope flags those spuriously.
+    - **report-wide restatement filter** — a number asserted by *some* cited claim
+      elsewhere (an abstract/conclusion restating a backed result) is not flagged; only a
+      value no cited claim anywhere asserts is surfaced.
+    - **skip ``[report:]`` paragraphs** — the value may be supplied by the sub-report,
+      which carries no inline number to match.
+    - **cited paragraphs only** — an uncited number (an abstract gloss, a table cell, an
+      inline-derived figure) is out of scope here; that is the (noisier) uncited-quantity
+      advisory's job, deliberately not bundled in.
+
+    Non-blocking: returns ``{kind, line, value, cites, sentence}`` for the §3 subagent."""
+    paras = _paragraphs(text)
+    global_pool: set[float] = set()
+    for _, ptext in paras:
+        for cid in _cite_ids_in(ptext):
+            cands = resolve_citation(cid, claim_index)
+            if len(cands) == 1:
+                global_pool |= _claim_quantities(claim_index[cands[0]])
+
+    advisories: list[dict[str, Any]] = []
+    for start, ptext in paras:
+        if _REPORT_RE.search(ptext):
+            continue
+        local_pool: set[float] = set()
+        resolved: list[str] = []
+        for cid in _cite_ids_in(ptext):
+            cands = resolve_citation(cid, claim_index)
+            if len(cands) == 1:
+                local_pool |= _claim_quantities(claim_index[cands[0]])
+                resolved.append(_short_claim_id(cands[0]))
+        if not resolved:
+            continue
+        for q in sorted(_quantities(ptext)):
+            if _qty_close(q, local_pool) or _qty_close(q, global_pool):
+                continue
+            advisories.append({
+                "kind": "unsupported-quantity",
+                "line": start,
+                "value": q,
+                "cites": resolved,
+                "sentence": " ".join(ptext.split())[:240],
+            })
+    return advisories
+
+
+# --------------------------------------------------------------------------- #
 # audit
 # --------------------------------------------------------------------------- #
 def resolve_report_paths(cid: str, home: Path) -> list[Path]:
@@ -562,6 +736,9 @@ def audit(report_path: Path, home: Path | None = None,
                                  "detail": detail})
         lit_cites.append(rec)
 
+    # Non-blocking: recall aid for the §3 review subagent, NOT part of the GROUNDED gate.
+    advisories = prose_quantity_advisories(text, claim_index)
+
     status = "GROUNDED" if not findings else "BROKEN"
     return {
         "report": _rel_or_name(rp, home),
@@ -573,6 +750,7 @@ def audit(report_path: Path, home: Path | None = None,
         "report_cites": report_cites,
         "lit_cites": lit_cites,
         "findings": findings,
+        "advisories": advisories,
         "status": status,
     }
 
@@ -1042,4 +1220,20 @@ def render_audit(result: dict[str, Any]) -> str:
         if f.get("detail"):
             loc = f.get("cite") or f.get("embed") or ""
             lines.append(f"  ! {f['kind']} (L{f['line']}) {loc}: {f['detail']}")
+    adv = result.get("advisories", [])
+    for a in adv:
+        cites = ", ".join(a.get("cites", []))
+        lines.append(f"  ~ {a['kind']} (L{a['line']}) {cites}: {_fmt_qty(a['value'])} not "
+                     f"asserted by the cited claim(s) — verify it isn't a derived/mis-transcribed number")
+    if adv:
+        lines.append(f"  advisories: {len(adv)} unsupported-quantity (non-blocking; for the "
+                     f"§3 review subagent — not part of GROUNDED)")
     return "\n".join(lines)
+
+
+def _fmt_qty(v: float) -> str:
+    """Display a normalized percent magnitude compactly (200.0 -> '200%/2×')."""
+    s = f"{v:g}%"
+    if v >= 100 and v % 50 == 0:
+        s += f"/{v / 100:g}×"
+    return s
