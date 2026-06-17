@@ -74,10 +74,18 @@ backing it**. As part of the semantic pass, for each prose doc (the root `README
      `outcome`+`strength`, so prose leaning on a contradicted result is caught, not silently passed;
    - **off-topic** — the cited claim is grounded but isn't actually *about* this sentence (a tolerability
      claim cited next to an efficacy number).
+   - **derived** — the number is a *combination* the cited claims don't individually assert: an arithmetic
+     function of two or more claims (e.g. "≈75% knockdown" obtained by multiplying a "2× baseline" claim
+     by a "≤50% loss tolerated" claim), or a value that differs from the figure in its single cited claim
+     (the sentence says 75%, the claim says 48%). Each citation *resolves and backs*, so the mechanical
+     audit passes — but the asserted quantity itself is ungrounded. Treat it like an `unbacked` number:
+     a derived quantity must be produced by a grounded `analysis/`/`program` **derivation** (then cited
+     as the claim that wraps it), not computed inline in prose. This is the one category the per-citation
+     audit structurally cannot see, so it is the §3 pass's job specifically.
 
 4. **Grade severity, then report.** Three tiers:
-   - **blocking** — an `unbacked` numeric result, a `weak-backing`, an `off-topic` citation, or any
-     contradicted backing. Fix the prose or the citation.
+   - **blocking** — an `unbacked` numeric result, a `weak-backing`, an `off-topic` citation, a `derived`
+     inline quantity, or any contradicted backing. Fix the prose or the citation.
    - **finding (clear it)** — an `artifact-only` result: the number is real but uncovered by a claim →
      author the claim citing the cell. Not blocking (the evidence exists), but not a pass either — it
      stays on the worklist until a claim covers it.
@@ -90,6 +98,22 @@ The grounded rule and `claim_id` format match `index-claims` / `sci query --kind
 claim is the sole backing unit; it cites the sha-pinned artifact, and `sci trace` walks the full chain
 (claim → artifact → data → raw). The report phase (`sci report`, §5) runs the identical procedure over
 generated report Markdown — reports cite claims the same way, never a bare artifact.
+
+**Run this pass in a fresh-context subagent, not as author self-review.** The author of a draft is the
+worst grader of it: having built an inference (especially a `derived` number — "I chained these two claims,
+so it's fine"), the author re-reading its own prose carries the same reasoning and the same finish-line
+bias, and waves the inference through — the exact way an ungrounded derived quantity survives to a GROUNDED
+audit. A subagent given a *fresh context* never sees that reasoning trace and has no stake in defending it,
+so it reads "75% [cites claims saying 48% and ≤50%]" cold. Fresh context defeats *motivated* and
+*contextual* misjudgment; it does not, alone, defeat a *systematic* model bias (same model, same priors) —
+so prompt it **adversarially and specifically** ("list every number whose cited claim does not itself
+contain that value; list every quantitative sentence that combines two or more claims"), and **hand it the
+claim contents** (the grounding report for everything cited), not just the prose — without the claims'
+actual numbers it can only re-check citation presence, the part that already passed. Make the mechanical
+findings (`unbacked`, `off-topic`, `weak-backing`, `derived`, claim-number ≠ sentence-number) **blocking**
+so "empty list" is an objective stop condition rather than "the author is satisfied"; the soft `advisory`
+items are surfaced for the author to address or explicitly waive. For the report phase this subagent pass
+is **required** — see [report.md](report.md).
 
 ## Structural check
 
