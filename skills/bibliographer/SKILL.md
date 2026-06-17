@@ -250,11 +250,30 @@ bib search --tag topic:nlp
 bib query "why do transformers scale"   # SEMANTIC + full-text search INSIDE the papers (libkit)
 bib show vaswani2017attention            # full record
 bib show vaswani2017attention --bibtex   # one BibTeX entry
+bib text shao2021antisense               # a bounded excerpt of the stored text (default, token-safe)
+bib text shao2021antisense --offset 8000 # page to a later window (each ~4000 chars by default)
+bib text shao2021antisense --chars 1000  # a smaller window from --offset
+bib text shao2021antisense --all         # the ENTIRE stored text (opt-in; ~20k tokens for a full paper)
+bib text shao2021antisense --all | grep -in "knockdown"   # locate a phrase (note goes to stderr)
 ```
 
 Use `search` for fast metadata lookup; use `query` when the user wants to find
 *passages/concepts inside* the papers (it embeds the query and runs libkit's
 hybrid vector + BM25 search).
+
+`bib text` prints one paper's **stored library text** — the exact string a scientist
+`[lit:]` quote-check reads (`source(citekey, quote=...)`). Use it to pick a real
+verbatim phrase before authoring a literature claim, instead of guessing and re-running
+the grounding pytest. **By default it prints a bounded excerpt** (~4000 chars) so a
+naive call never dumps a whole paper (~20k tokens) into context; the **stderr** size
+note reports the full length and flags when more remains. `--offset`/`--chars` page
+through it; `--all` prints the whole text (the clean-pipe path, e.g. `bib text K --all |
+grep`); `--json` returns the window plus `content_total`. A citation-only **stub** has
+no full body — `bib text` prints its metadata + abstract and flags that quotes can only
+come from the abstract. Caveat: `bib text … | grep` is a *coarse locator*, not the
+verdict — shell `grep` does not fold unicode dashes / markdown emphasis / split
+whitespace the way the quote-check does, so a grep miss is not authoritative;
+`source(... quote=...)` stays the authority.
 
 **Organizing and exporting:**
 
