@@ -10,6 +10,31 @@ bib fetch <citekey>                      # auto: try all open-access sources
 bib fetch <citekey> --pdf path/to.pdf    # attach a PDF you obtained manually
 ```
 
+## Backfilling many stubs at once — `bib backfill`
+
+A library grown with `discover --add` accumulates **citation-only stubs**
+(abstract searchable, no full text). `bib backfill` is the bulk entry point: it
+finds every stub, runs the Tier-1 open-access ladder below over each, attaches
+each PDF it finds, and **prints a worklist of the stubs that have no OA copy** —
+each with its identifiers and a resolvable URL. Those remaining ones are the
+*interactive* part of the job: the agent escalates them down Tiers 2–4, which need
+a human in the loop (browser access, or the user's explicit Tier-4 authorization).
+`backfill` deliberately does *not* drive the browser itself — it hands you the
+worklist and you escalate per the tiers below.
+
+```bash
+bib backfill                  # attach OA PDFs to all stubs; list the rest
+bib backfill --dry-run        # just list the stubs that would be attempted
+bib backfill --tag topic:aso  # only stubs carrying this tag
+bib backfill --json           # {"checked", "fetched":[…], "remaining":[…]}
+```
+
+The standard interactive loop: run `bib backfill`, then for each entry on the
+`remaining` worklist resolve its URL in the browser (Tier 3) and
+`bib fetch <ck> --pdf <file>`, dropping to Tier 4 only with the user's per-use
+authorization. Re-running `backfill` later is a diff — newly-OA papers attach,
+the rest stay on the worklist.
+
 Attaching upgrades the stub to a full record (re-files it, preserves the citekey)
 and the import path embeds it for search. After attaching, it's worth re-checking
 the content matches (a quick `bib audit`, or just open it) — a wrong download is
