@@ -137,20 +137,27 @@ def main() -> int:
     p_rep.add_argument("--index", action="store_true",
                        help="index the report into the store as kind=report (needs the store)")
 
-    # ---- judge: the literature support-verdict refresh step (the ONLY place the LLM runs) ----
+    # ---- judge: list the literature-support work + record caller-supplied verdicts.
+    #      NO model lives in the tool — the orchestrating agent (ideally a fresh-context judge
+    #      subagent) decides supported/unsupported; this command only surfaces + records it. ----
     p_jd = sub.add_parser("judge",
-                          help="refresh literature support verdicts: an LLM judges whether each "
-                               "[lit:] source's quote entails its paraphrase, cached + key-pinned. "
-                               "The ONLY place a model is invoked (the claims suite stays offline).")
+                          help="literature support verdicts: `--list` the [lit:] sources whose "
+                               "verdict is missing/stale (with the span to judge), then `--record` "
+                               "the caller's verdicts into the pinned cache. No model in the tool.")
+    p_jd.add_argument("--list", dest="do_list", action="store_true",
+                      help="emit the worklist of [lit:] sources to judge (span_text + paraphrase) — "
+                           "what a fresh-context judge subagent reads")
+    p_jd.add_argument("--record", metavar="FILE",
+                      help="ingest caller-supplied verdicts {citekey, paraphrase, supported, "
+                           "rationale} from a JSON file (or `-` for stdin) into the pinned cache")
+    p_jd.add_argument("--judge-id", help="who judged (stamped as metadata; default: 'agent')")
     p_jd.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
-    p_jd.add_argument("--report", help="a single grounding_report.json to refresh "
+    p_jd.add_argument("--report", help="a single grounding_report.json to operate on "
                       "(default: every one under home)")
-    p_jd.add_argument("--cache", help="verdict cache sidecar to write "
+    p_jd.add_argument("--cache", help="verdict cache sidecar to read/write "
                       "(default: <report dir>/lit_judgments.json, next to each report)")
-    p_jd.add_argument("--model", help="judge model id (default: $SCIENTIST_JUDGE_MODEL or the "
-                      "built-in small/fast default)")
     p_jd.add_argument("--force", action="store_true",
-                      help="re-judge even sources whose cached verdict is still fresh")
+                      help="with --list, include sources whose cached verdict is still fresh")
     p_jd.add_argument("--json", action="store_true", help="machine-readable output")
 
     # ---- coverage: is the grounding keeping up with the library? ----
@@ -281,18 +288,25 @@ def _report(args: argparse.Namespace) -> int:
 
 
 def _judge(args: argparse.Namespace) -> int:
-    """`sci judge`: the literature support-verdict refresh step — the ONE place the LLM runs.
+    """`sci judge`: list the literature-support work, or record caller-supplied verdicts.
 
-    For each machine-judged ``[lit:]`` source (``source(paraphrase=…)``) in the grounding
-    report(s), an LLM judges whether the quote/span entails the paraphrase and the verdict is
-    cached, key-pinned by ``(evidence_sha, paraphrase, model_id)``. Re-run the claims suite
-    afterwards so the cached verdicts back the citations. Degrades gracefully with no API key
-    (skips judging — claims stay needs-judgment). Exit 0 always (a worklist refresh, not a gate).
-    """
+    **No model runs in the tool.** ``--list`` surfaces each machine-judged ``[lit:]`` source
+    (``source(paraphrase=…)``) whose cached verdict is missing or stale, with the ``span_text`` and
+    ``paraphrase`` a *fresh-context judge subagent* reads to decide "does the span fairly support
+    the paraphrase?". ``--record <file|->`` ingests that subagent's verdicts ``{citekey,
+    paraphrase, supported, rationale}`` and writes them into the pinned cache (the tool recomputes
+    ``evidence_sha`` from the report's stored span, so a verdict can't attach to a wrong/stale
+    span). Re-run the claims suite afterwards so the cached verdicts back the citations. Exit 0
+    (a worklist/record op, not a gate)."""
     import json
     import os
 
-    from scientist.grounding import refresh as REFRESH  # lazy: pulls the model client only here
+    from scientist.grounding import refresh as REFRESH
+
+    if not args.do_list and not args.record:
+        print("sci judge needs --list (surface work) or --record <file|-> (write verdicts)",
+              file=sys.stderr)
+        return 1
 
     home = Path(args.home).resolve() if getattr(args, "home", None) else (
         Path(os.environ["SCIENTIST_HOME"]).resolve() if os.environ.get("SCIENTIST_HOME") else None)
@@ -309,16 +323,50 @@ def _judge(args: argparse.Namespace) -> int:
               "(pytest … --grounding-out <dir>)", file=sys.stderr)
         return 1
 
+    if args.record:
+        records = _read_verdict_records(args.record)
+        results = []
+        for rp in reports:
+            cache = Path(args.cache) if args.cache else None
+            res = REFRESH.record_verdicts(rp, records, cache, judge_id=args.judge_id)
+            results.append(res)
+            if not args.json:
+                print(REFRESH.render_record(res))
+        if args.json:
+            print(json.dumps({"results": results}, indent=2, ensure_ascii=False, default=str))
+        return 0
+
+    # --list
     results = []
     for rp in reports:
         cache = Path(args.cache) if args.cache else None
-        res = REFRESH.refresh(rp, cache, model_id=args.model, force=args.force)
+        res = REFRESH.worklist(rp, cache, force=args.force)
         results.append(res)
         if not args.json:
-            print(REFRESH.render_summary(res))
+            print(REFRESH.render_worklist(res))
     if args.json:
         print(json.dumps({"results": results}, indent=2, ensure_ascii=False, default=str))
     return 0
+
+
+def _read_verdict_records(src: str) -> list:
+    """Read caller-supplied verdict records from a JSON file (or stdin via ``-``). Accepts either a
+    bare list ``[{citekey, paraphrase, supported, rationale}, …]`` or ``{"verdicts": [...]}``."""
+    import json
+
+    text = sys.stdin.read() if src == "-" else Path(src).read_text(encoding="utf-8")
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        print(f"sci judge --record: not valid JSON ({exc})", file=sys.stderr)
+        raise SystemExit(1)
+    if isinstance(data, dict):
+        data = data.get("verdicts", data.get("records", []))
+    if not isinstance(data, list):
+        print("sci judge --record: expected a JSON list of "
+              "{citekey, paraphrase, supported, rationale}", file=sys.stderr)
+        raise SystemExit(1)
+    return data
 
 
 def _coverage(args: argparse.Namespace) -> int:

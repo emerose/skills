@@ -37,10 +37,11 @@ from typing import Any
 
 from ..provenance import record_provenance as _record_provenance
 from ..labfiles import read_docx_text, read_pdf_text, read_pptx_text
-# Pure, offline cache of literature support verdicts. Safe on the pytest path (stdlib only); the
-# model client (scientist.grounding.judge) is deliberately NOT imported here — see judge.py.
-from .judgments import (JudgmentCache, JUDGMENT_CACHE_NAME, DEFAULT_JUDGE_MODEL,
-                        judge_model_id as _judge_model_id, evidence_sha as _evidence_sha)
+# Pure, offline cache of literature support verdicts. Safe on the pytest path (stdlib only). No
+# model lives anywhere in the tool — the verdict is produced by the orchestrating agent and
+# recorded via `sci judge --record`; this path only READS the cache. See judgments.py.
+from .judgments import (JudgmentCache, JUDGMENT_CACHE_NAME,
+                        evidence_sha as _evidence_sha)
 
 __all__ = [
     "load", "data", "doc", "evidence", "uses", "cross", "record",
@@ -49,7 +50,7 @@ __all__ = [
     "paper", "source", "converge", "PaperRef", "LiteratureError",
     "current_capture", "registry", "TRACKED_SUFFIXES",
     "DerivationAudit", "audit_derivations", "current_audit",
-    "JudgmentCache", "JUDGMENT_CACHE_NAME", "DEFAULT_JUDGE_MODEL",
+    "JudgmentCache", "JUDGMENT_CACHE_NAME",
     "set_judgment_cache", "current_judgment_cache",
 ]
 
@@ -57,7 +58,7 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 # Literature support-verdict cache — read on the pytest path, written by the
 # refresh step (`sci judge`). The plugin loads it once per session and sets it
-# here; `source(paraphrase=…)` consults it. NEVER calls the model (see judge.py).
+# here; `source(paraphrase=…)` consults it. NEVER calls a model (none exists in the tool).
 # --------------------------------------------------------------------------- #
 _JUDGMENT_CACHE: "JudgmentCache | None" = None
 
@@ -544,12 +545,13 @@ def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = N
       tripwire (string-in-stored-text): ``AssertionError`` if absent. Required for the legacy path
       and for tier 1.
     - ``paraphrase`` — the claim's reading of the cited span. Opts the source into the
-      **re-runnable, cache-pinned LLM entailment check** "does the span fairly support P?": the
-      verdict is computed *only* by the refresh step (``sci judge``) and cached; this call merely
-      reads the cached, key-pinned verdict (``(evidence_sha, paraphrase, model_id)``) and asserts
-      *supported* when present. No model is ever called here — the claims suite stays offline and
-      deterministic. A missing/stale verdict is **non-blocking** (the audit reports
-      ``needs-judgment`` / ``stale-judgment``; run ``sci judge``).
+      **re-runnable, cache-pinned entailment check** "does the span fairly support P?": the verdict
+      is produced by the orchestrating agent (``sci judge --list`` surfaces the work; a fresh-context
+      judge subagent decides; ``sci judge --record`` writes it) and cached; this call merely reads
+      the cached, pin-keyed verdict (``(evidence_sha, paraphrase)``) and asserts *supported* when
+      present. No model is ever called here — the claims suite stays offline and deterministic. A
+      missing/stale verdict is **non-blocking** (the audit reports ``needs-judgment`` /
+      ``stale-judgment``; run ``sci judge``).
     - ``chunk``      — a libkit chunk index (or iterable of indices): the **tier-2** locator for a
       paragraph-spanning fact with no single quotable sentence. Used with ``paraphrase=`` (no
       ``quote=``); the judged span is the chunk text.
@@ -602,32 +604,30 @@ def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = N
     else:
         span, tier = ref.text, 3        # tier 3: whole-document; costly, weak only
     rec["tier"] = tier
-    rec["span"] = span if tier <= 2 else ""    # tier 1/2 spans are small → carried for the refresh
+    rec["span"] = span if tier <= 2 else ""    # tier 1/2 spans are small → carried for the worklist
     esha = _evidence_sha(span)
     rec["evidence_sha"] = esha
-    model_id = _judge_model_id()
-    rec["judge_model_id"] = model_id
 
     status, entry = "miss", None
     cache = _JUDGMENT_CACHE
     if cache is not None:
-        status, entry = cache.lookup(citekey, esha, paraphrase, model_id)
+        status, entry = cache.lookup(citekey, esha, paraphrase)
     rec["judge_status"] = status        # fresh | stale | miss (read by the audit)
     if status == "fresh" and entry is not None:
         rec["supported"] = bool(entry.get("supported"))
         rec["judge_rationale"] = entry.get("rationale")
         rec["judged_at"] = entry.get("timestamp")
-        rec["judged_model_id"] = entry.get("model_id")
+        rec["judged_by"] = entry.get("judge_id")
 
     _record_source(rec)
 
-    # Assert on the CACHED, key-pinned verdict (decision: the support judgment is executable).
+    # Assert on the CACHED, pin-keyed verdict (decision: the support judgment is executable).
     # Graceful when absent/stale: a brand-new or re-judged claim stays needs-/stale-judgment
-    # (non-blocking) until `sci judge` runs — never a hard failure on a cache miss.
+    # (non-blocking) until `sci judge --record` runs — never a hard failure on a cache miss.
     if status == "fresh":
         assert rec.get("supported"), (
             f"literature paraphrase NOT supported by the cited span in {citekey} "
-            f"(judged by {rec.get('judged_model_id')}): {rec.get('judge_rationale')!r}\n"
+            f"(judged by {rec.get('judged_by')}): {rec.get('judge_rationale')!r}\n"
             f"  paraphrase: {paraphrase!r}\n"
             f"  -> fix the paraphrase to match the span, or re-source the fact.")
     return rec

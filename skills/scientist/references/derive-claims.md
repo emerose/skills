@@ -134,9 +134,11 @@ def test_report_no_mortality(experiment):
 `@kind("literature")` + `source(citekey, quote=…, paraphrase=…)` grounds a fact on a paper in the
 bibliographer library. Two layers, both re-runnable: the **quote** is the deterministic tripwire
 (verbatim string in the paper's stored text — fails the pytest assert if absent), and the
-**paraphrase** opts the source into a *cache-pinned LLM entailment check* — "does the quote fairly
-support the paraphrase?" — judged ONCE by the refresh step (`sci judge`) and asserted from cache
-on every run. The model is **never** called inside the assert; the suite stays offline and
+**paraphrase** opts the source into a *cache-pinned entailment check* — "does the quote fairly
+support the paraphrase?". There is **no model in the tool**: *you* (the orchestrating agent, ideally
+a fresh-context judge subagent you spawn for independence) judge that question; `sci judge --list`
+surfaces the work and `sci judge --record` writes your verdict to the cache, which `source()`
+asserts on every run. The judging happens outside the assert; the suite stays offline and
 deterministic.
 
 ```python
@@ -156,10 +158,11 @@ def test_target_knockdown_in_humans(experiment):
   `chunk=`+`paraphrase=` (a libkit chunk id from `bib query`) → up to `moderate`; tier 3
   `paraphrase=` only (judge reads the whole doc) → `weak`. Exceeding the ceiling is a blocking
   `over-strength` finding. Default to tier 1.
-- **The verdict is cached + key-pinned** by `(quote_sha, paraphrase, model_id)` in
-  `lit_judgments.json` (next to the grounding report). A quote/paraphrase edit or a model upgrade
-  → `stale-judgment`/`needs-judgment` (re-run `sci judge`). With no API key, judging is skipped
-  (claim stays `needs-judgment`, non-blocking) — never a crash.
+- **The verdict is cached + pin-keyed** by `(quote_sha, paraphrase)` in `lit_judgments.json` (next
+  to the grounding report), stamped with `judge_id` + timestamp as metadata. A quote/span edit →
+  `stale-judgment`, a paraphrase edit → `needs-judgment` (re-`list`, re-judge, re-`record`). Until
+  recorded the claim stays `needs-judgment` (non-blocking) — never a crash. The tool recomputes the
+  pin from the report's current span, so a verdict can't attach to a stale/wrong span.
 - **Backward compatible.** A bare `source(citekey, quote=…)` with a hand-stamped
   `@reviewed(support=…)` is the unchanged legacy path; add `paraphrase=` to upgrade the support
   judgment from a trusted boolean to an executable check. Full authoring rubric (primary /

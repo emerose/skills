@@ -318,10 +318,11 @@ def lit_verdict(claim: dict[str, Any]) -> tuple[str, str | None]:
     judgment of whether the quote fairly backs the paraphrase. That support judgment is recorded
     one of two ways, and this function consumes both with the SAME downstream shape:
 
-    * **machine-judged** (``source(paraphrase=…)``) — a re-runnable, cache-pinned LLM entailment
-      verdict, refreshed by ``sci judge``. ``needs-judgment`` (not yet judged / paraphrase edited)
-      and ``stale-judgment`` (quote / paraphrase / model drifted since judged) are the executable
-      analogue of ``needs-review`` / ``stale-review``; an ``unsupported`` judgment blocks.
+    * **machine-judged** (``source(paraphrase=…)``) — a re-runnable, cache-pinned entailment
+      verdict the orchestrating agent records via ``sci judge --record``. ``needs-judgment`` (not
+      yet judged / paraphrase edited) and ``stale-judgment`` (quote / paraphrase / span drifted
+      since judged) are the executable analogue of ``needs-review`` / ``stale-review``; an
+      ``unsupported`` judgment blocks.
     * **legacy** (``@reviewed(support=…)``) — the hand-stamped human boolean, unchanged.
 
     Unlike a data claim, a *weak* (but supported) literature claim still backs its citation —
@@ -342,11 +343,12 @@ def lit_verdict(claim: dict[str, Any]) -> tuple[str, str | None]:
             return ("broken", f"the quote check did not pass (outcome={claim.get('outcome')}) — "
                               "the verbatim quote is not in the cited paper")
         if any(s.get("judge_status") == "stale" for s in machine):
-            return ("stale-judgment", "the quote / paraphrase / model drifted since the verdict "
-                                      "was cached — re-run `sci judge` to re-judge")
+            return ("stale-judgment", "the quote / paraphrase / span drifted since the verdict "
+                                      "was cached — re-run `sci judge` to re-judge and re-record")
         if any(s.get("judge_status") != "fresh" or "supported" not in s for s in machine):
-            return ("needs-judgment", "no cached support verdict yet — run `sci judge` to have "
-                                      "the model judge whether the quote supports the paraphrase")
+            return ("needs-judgment", "no cached support verdict yet — run `sci judge --list`, "
+                                      "judge whether the span supports the paraphrase, and "
+                                      "`sci judge --record`")
         if any(not s.get("supported") for s in machine):
             return ("unsupported", "the support judge found the paraphrase NOT supported by the "
                                    "cited span")

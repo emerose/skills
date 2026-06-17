@@ -1,6 +1,7 @@
-"""Tests for the literature support-judge: cache mechanics, the machine-judged ``source()`` path,
-the refresh step, and the audit verdicts — all with a STUBBED judge and a FAKE paper, so nothing
-here touches a real model API or the bibliographer library.
+"""Tests for the literature support judge: cache mechanics, the machine-judged ``source()`` path,
+the worklist + record steps (``sci judge --list`` / ``--record``), and the audit verdicts — all
+with a FAKE paper and no model anywhere. The judge is the orchestrating agent; the tool only lists
+the work and records the verdict it is handed, so nothing here touches a model API.
 """
 import json
 from pathlib import Path
@@ -10,7 +11,6 @@ import pytest
 from scientist import grounding
 from scientist.grounding import judgments as J
 from scientist.grounding import refresh as REFRESH
-from scientist.grounding.judge import JudgeUnavailable
 from scientist.provenance import report as R
 
 
@@ -61,47 +61,51 @@ def capture():
         grounding.set_judgment_cache(None)
 
 
-def _supported_judge(span, paraphrase, *, model_id):
-    return {"supported": True, "rationale": "the span states the paraphrase"}
-
-
 # --------------------------------------------------------------------------- #
-# JudgmentCache mechanics
+# JudgmentCache mechanics — the pin is (evidence_sha, paraphrase); judge_id is metadata
 # --------------------------------------------------------------------------- #
 def test_cache_lookup_fresh_stale_miss(tmp_path):
     c = J.JudgmentCache(path=tmp_path / "lit_judgments.json")
     esha = J.evidence_sha("Q")
-    c.put(citekey="k", evidence_sha_=esha, paraphrase="P", model_id="m1",
+    c.put(citekey="k", evidence_sha_=esha, paraphrase="P", judge_id="agent",
           supported=True, rationale="ok", timestamp="2026-06-17T00:00:00+00:00", tier=1)
-    # exact triple → fresh
-    assert c.lookup("k", esha, "P", "m1")[0] == "fresh"
-    # same (citekey, paraphrase), drifted quote → stale
-    assert c.lookup("k", J.evidence_sha("Q2"), "P", "m1")[0] == "stale"
-    # same (citekey, paraphrase), drifted model → stale
-    assert c.lookup("k", esha, "P", "m2")[0] == "stale"
+    # exact (evidence_sha, paraphrase) → fresh
+    assert c.lookup("k", esha, "P")[0] == "fresh"
+    # same (citekey, paraphrase), drifted span → stale
+    assert c.lookup("k", J.evidence_sha("Q2"), "P")[0] == "stale"
     # different paraphrase → miss (a new question)
-    assert c.lookup("k", esha, "P2", "m1")[0] == "miss"
+    assert c.lookup("k", esha, "P2")[0] == "miss"
+
+
+def test_cache_lookup_ignores_judge_id(tmp_path):
+    # a verdict by a different judge is still valid — judge_id is metadata, not part of the key
+    c = J.JudgmentCache(path=tmp_path / "x.json")
+    esha = J.evidence_sha("Q")
+    c.put(citekey="k", evidence_sha_=esha, paraphrase="P", judge_id="subagent-alice",
+          supported=True, rationale="ok", timestamp="t", tier=1)
+    assert c.lookup("k", esha, "P")[0] == "fresh"
 
 
 def test_cache_roundtrip(tmp_path):
     p = tmp_path / "lit_judgments.json"
     c = J.JudgmentCache(path=p)
-    c.put(citekey="k", evidence_sha_=J.evidence_sha("Q"), paraphrase="P", model_id="m1",
+    c.put(citekey="k", evidence_sha_=J.evidence_sha("Q"), paraphrase="P", judge_id="agent",
           supported=True, rationale="ok", timestamp="t", tier=1)
     c.save()
     again = J.JudgmentCache.load(p)
-    assert again.lookup("k", J.evidence_sha("Q"), "P", "m1")[0] == "fresh"
+    assert again.lookup("k", J.evidence_sha("Q"), "P")[0] == "fresh"
+    assert again.entries[next(iter(again.entries))]["judge_id"] == "agent"
 
 
 def test_cache_put_prunes_orphaned_drift(tmp_path):
     c = J.JudgmentCache(path=tmp_path / "x.json")
-    c.put(citekey="k", evidence_sha_=J.evidence_sha("Q"), paraphrase="P", model_id="m1",
+    c.put(citekey="k", evidence_sha_=J.evidence_sha("Q"), paraphrase="P", judge_id="agent",
           supported=True, rationale="", timestamp="t", tier=1)
-    # re-judge same question under a new model → old entry pruned, only the new one survives
-    c.put(citekey="k", evidence_sha_=J.evidence_sha("Q"), paraphrase="P", model_id="m2",
+    # re-judge the same question under a new span → old entry pruned, only the new one survives
+    c.put(citekey="k", evidence_sha_=J.evidence_sha("Q2"), paraphrase="P", judge_id="agent",
           supported=False, rationale="", timestamp="t", tier=1)
     assert len(c.entries) == 1
-    assert c.lookup("k", J.evidence_sha("Q"), "P", "m2")[0] == "fresh"
+    assert c.lookup("k", J.evidence_sha("Q2"), "P")[0] == "fresh"
 
 
 # --------------------------------------------------------------------------- #
@@ -133,12 +137,13 @@ def test_cached_supported_verdict_backs(fake_paper, capture):
     cache = J.JudgmentCache()
     para = "ASO 7 knocks the target down by about half"
     cache.put(citekey="noor2015q", evidence_sha_=J.evidence_sha("53% knockdown"),
-              paraphrase=para, model_id=J.judge_model_id(), supported=True,
+              paraphrase=para, judge_id="subagent", supported=True,
               rationale="states 53%", timestamp="t", tier=1)
     grounding.set_judgment_cache(cache)
     rec = grounding.source("noor2015q", quote="53% knockdown", paraphrase=para)
     assert rec["tier"] == 1
     assert rec["judge_status"] == "fresh" and rec["supported"] is True
+    assert rec["judged_by"] == "subagent"
     assert capture.evidence["lit_sources"][0]["supported"] is True
 
 
@@ -146,7 +151,7 @@ def test_cached_unsupported_verdict_fails_the_claim(fake_paper, capture):
     cache = J.JudgmentCache()
     para = "ASO 7 cures the disease"
     cache.put(citekey="noor2015q", evidence_sha_=J.evidence_sha("53% knockdown"),
-              paraphrase=para, model_id=J.judge_model_id(), supported=False,
+              paraphrase=para, judge_id="subagent", supported=False,
               rationale="overreach", timestamp="t", tier=1)
     grounding.set_judgment_cache(cache)
     # the support judgment is EXECUTABLE: a cached unsupported verdict fails the assert
@@ -162,11 +167,11 @@ def test_cache_miss_is_non_blocking(fake_paper, capture):
     assert rec["judge_status"] == "miss" and "supported" not in rec   # no assert raised
 
 
-def test_key_drift_is_stale(fake_paper, capture):
+def test_span_drift_is_stale(fake_paper, capture):
     cache = J.JudgmentCache()
     para = "a fair reading"
     cache.put(citekey="noor2015q", evidence_sha_=J.evidence_sha("OLD QUOTE"),
-              paraphrase=para, model_id=J.judge_model_id(), supported=True,
+              paraphrase=para, judge_id="agent", supported=True,
               rationale="", timestamp="t", tier=1)
     grounding.set_judgment_cache(cache)
     rec = grounding.source("noor2015q", quote="53% knockdown", paraphrase=para)  # quote changed
@@ -190,7 +195,7 @@ def test_tier3_whole_doc(fake_paper, capture):
 
 
 # --------------------------------------------------------------------------- #
-# refresh step (sci judge) — stubbed judge, no API
+# worklist + record (sci judge --list / --record) — no model, caller supplies verdicts
 # --------------------------------------------------------------------------- #
 def _report_json(tmp_path, sources, *, node="test_lit") -> Path:
     prog = tmp_path / "program" / "analysis"
@@ -207,56 +212,103 @@ def _report_json(tmp_path, sources, *, node="test_lit") -> Path:
 def _tier1_src(quote="53% knockdown", paraphrase="about half knockdown", status="miss"):
     return {"citekey": "noor2015q", "paraphrase": paraphrase, "tier": 1,
             "quote": quote, "span": quote, "evidence_sha": J.evidence_sha(quote),
-            "judge_status": status, "judge_model_id": J.judge_model_id()}
+            "judge_status": status}
 
 
-def test_refresh_populates_cache(tmp_path):
+def test_worklist_surfaces_missing(tmp_path):
     rp = _report_json(tmp_path, [_tier1_src()])
-    res = REFRESH.refresh(rp, judge=_supported_judge, model_id="m1")
-    assert res["judged"] == 1 and res["skipped"] == 0
-    cache = J.JudgmentCache.load(tmp_path / "program" / "analysis" / J.JUDGMENT_CACHE_NAME)
-    assert cache.lookup("noor2015q", J.evidence_sha("53% knockdown"),
-                        "about half knockdown", "m1")[0] == "fresh"
+    res = REFRESH.worklist(rp)
+    assert res["missing"] == 1 and res["fresh"] == 0
+    item = res["items"][0]
+    assert item["citekey"] == "noor2015q" and item["tier"] == 1
+    assert item["span_text"] == "53% knockdown"
+    assert item["paraphrase"] == "about half knockdown"
+    assert item["evidence_sha"] == J.evidence_sha("53% knockdown")
+    assert item["claim_id"].endswith("::test_lit")
 
 
-def test_refresh_skips_fresh(tmp_path):
+def test_worklist_skips_fresh(tmp_path):
     rp = _report_json(tmp_path, [_tier1_src()])
-    REFRESH.refresh(rp, judge=_supported_judge, model_id="m1")
-    res = REFRESH.refresh(rp, judge=_supported_judge, model_id="m1")
-    assert res["fresh"] == 1 and res["judged"] == 0
+    REFRESH.record_verdicts(rp, [{"citekey": "noor2015q", "paraphrase": "about half knockdown",
+                                  "supported": True, "rationale": "ok"}])
+    res = REFRESH.worklist(rp)
+    assert res["fresh"] == 1 and res["items"] == []
+    # --force re-surfaces fresh sources
+    forced = REFRESH.worklist(rp, force=True)
+    assert len(forced["items"]) == 1 and forced["items"][0]["status"] == "fresh"
 
 
-def test_refresh_degrades_without_key(tmp_path):
-    rp = _report_json(tmp_path, [_tier1_src()])
-
-    def _no_key(span, paraphrase, *, model_id):
-        raise JudgeUnavailable("ANTHROPIC_API_KEY is not set")
-
-    res = REFRESH.refresh(rp, judge=_no_key, model_id="m1")
-    assert res["judged"] == 0 and res["skipped"] == 1     # no crash; claim stays needs-judgment
-    assert not (tmp_path / "program" / "analysis" / J.JUDGMENT_CACHE_NAME).exists()
-
-
-def test_refresh_uses_default_judge_when_none(tmp_path, monkeypatch):
-    # judge=None → refresh lazily imports the real client; monkeypatch it so no API is hit.
-    # Exercises the default-judge path (the call site, not just an injected stub).
-    import scientist.grounding.judge as JUDGE
-    monkeypatch.setattr(JUDGE, "judge_entailment", _supported_judge)
-    rp = _report_json(tmp_path, [_tier1_src()])
-    res = REFRESH.refresh(rp, model_id="m1")               # no judge= passed
-    assert res["judged"] == 1 and res["skipped"] == 0
-
-
-def test_refresh_tier3_skips_without_resolver(tmp_path):
+def test_worklist_tier3_has_empty_span_with_note(tmp_path):
     src = {"citekey": "noor2015q", "paraphrase": "whole-doc reading", "tier": 3,
            "span": "", "evidence_sha": "f" * 64, "judge_status": "miss"}
     rp = _report_json(tmp_path, [src])
-    res = REFRESH.refresh(rp, judge=_supported_judge, model_id="m1")
-    assert res["skipped"] == 1 and res["judged"] == 0
+    res = REFRESH.worklist(rp)
+    item = res["items"][0]
+    assert item["span_text"] == "" and "note" in item
+    assert item["evidence_sha"] == "f" * 64
+
+
+def test_record_writes_pinned_verdict(tmp_path):
+    rp = _report_json(tmp_path, [_tier1_src()])
+    res = REFRESH.record_verdicts(
+        rp, [{"citekey": "noor2015q", "paraphrase": "about half knockdown",
+              "supported": True, "rationale": "states 53%"}], judge_id="subagent-bob")
+    assert res["recorded"] == 1 and res["rejected"] == 0
+    cache = J.JudgmentCache.load(tmp_path / "program" / "analysis" / J.JUDGMENT_CACHE_NAME)
+    status, entry = cache.lookup("noor2015q", J.evidence_sha("53% knockdown"),
+                                 "about half knockdown")
+    assert status == "fresh"
+    assert entry["supported"] is True and entry["judge_id"] == "subagent-bob"
+    assert entry["timestamp"]                      # stamped
+
+
+def test_record_rejects_unknown_paraphrase(tmp_path):
+    rp = _report_json(tmp_path, [_tier1_src()])
+    res = REFRESH.record_verdicts(
+        rp, [{"citekey": "noor2015q", "paraphrase": "a DIFFERENT paraphrase",
+              "supported": True, "rationale": "x"}])
+    assert res["recorded"] == 0 and res["rejected"] == 1
+    assert "no machine source" in res["details"][0]["reason"]
+    assert not (tmp_path / "program" / "analysis" / J.JUDGMENT_CACHE_NAME).exists()
+
+
+def test_record_recomputes_pin_ignoring_caller_esha(tmp_path):
+    # the caller cannot pin a wrong span: the tool recomputes evidence_sha from the report's span,
+    # so a bogus evidence_sha in the record is overridden (not trusted) — here it also MATCHES the
+    # current span (echoed correctly), so it records fine.
+    rp = _report_json(tmp_path, [_tier1_src()])
+    res = REFRESH.record_verdicts(
+        rp, [{"citekey": "noor2015q", "paraphrase": "about half knockdown",
+              "evidence_sha": J.evidence_sha("53% knockdown"),
+              "supported": True, "rationale": "ok"}])
+    assert res["recorded"] == 1
+    cache = J.JudgmentCache.load(tmp_path / "program" / "analysis" / J.JUDGMENT_CACHE_NAME)
+    assert cache.lookup("noor2015q", J.evidence_sha("53% knockdown"),
+                        "about half knockdown")[0] == "fresh"
+
+
+def test_record_rejects_stale_echoed_esha(tmp_path):
+    # caller echoes an evidence_sha from an OLD worklist; the report's span has since changed →
+    # the recomputed pin disagrees → rejected (cannot record against a stale span)
+    rp = _report_json(tmp_path, [_tier1_src(quote="53% knockdown")])
+    res = REFRESH.record_verdicts(
+        rp, [{"citekey": "noor2015q", "paraphrase": "about half knockdown",
+              "evidence_sha": J.evidence_sha("STALE OLD QUOTE"),
+              "supported": True, "rationale": "ok"}])
+    assert res["recorded"] == 0 and res["rejected"] == 1
+    assert "stale" in res["details"][0]["reason"]
+
+
+def test_record_missing_supported_is_rejected(tmp_path):
+    rp = _report_json(tmp_path, [_tier1_src()])
+    res = REFRESH.record_verdicts(
+        rp, [{"citekey": "noor2015q", "paraphrase": "about half knockdown", "rationale": "x"}])
+    assert res["recorded"] == 0 and res["rejected"] == 1
+    assert "supported" in res["details"][0]["reason"]
 
 
 # --------------------------------------------------------------------------- #
-# audit (lit_verdict) — the report-level consumption of the machine verdict
+# audit (lit_verdict) — the report-level consumption of the recorded verdict
 # --------------------------------------------------------------------------- #
 def _audit_for(tmp_path, sources, *, outcome="passed", strength="strong", node="test_lit"):
     prog = tmp_path / "program" / "analysis"
@@ -343,12 +395,19 @@ def test_audit_backward_compat_legacy_reviewed(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# end-to-end: refresh → cache → source() asserts on the fresh verdict
+# end-to-end: list → judge (caller) → record → source() asserts on the fresh verdict
 # --------------------------------------------------------------------------- #
-def test_end_to_end_refresh_then_source(tmp_path, fake_paper, capture):
+def test_end_to_end_list_record_then_source(tmp_path, fake_paper, capture):
     rp = _report_json(tmp_path, [_tier1_src()])
-    REFRESH.refresh(rp, judge=_supported_judge, model_id=J.judge_model_id())
+    work = REFRESH.worklist(rp)
+    assert len(work["items"]) == 1
+    # the caller (a fresh-context judge subagent) decides; echo the worklist back as a verdict
+    verdicts = [{"citekey": it["citekey"], "paraphrase": it["paraphrase"],
+                 "evidence_sha": it["evidence_sha"], "supported": True,
+                 "rationale": "the span states the paraphrase"} for it in work["items"]]
+    REFRESH.record_verdicts(rp, verdicts, judge_id="judge-subagent")
     cache = J.JudgmentCache.load(tmp_path / "program" / "analysis" / J.JUDGMENT_CACHE_NAME)
     grounding.set_judgment_cache(cache)
     rec = grounding.source("noor2015q", quote="53% knockdown", paraphrase="about half knockdown")
     assert rec["judge_status"] == "fresh" and rec["supported"] is True
+    assert rec["judged_by"] == "judge-subagent"

@@ -369,7 +369,7 @@ Two more citation forms, same audit:
   rest on retracted work; pass `allow_retracted=True` only to discuss the retraction itself).
   `[lit:program::test_literature.py::<node>]` is `backed`
   only if that quote check passed **and** the claim's *support* is confirmed — either by a
-  re-runnable machine verdict (`source(paraphrase=…)`, refreshed by `sci judge`) or a hand-stamped
+  re-runnable machine verdict (`source(paraphrase=…)`, recorded via `sci judge --record`) or a hand-stamped
   `@reviewed` (see *The machine support judge* below); a *weak* but supported claim still backs
   (single/suggestive evidence is legitimately weak). It is **second-class to `[claim:]`** — rendered as a distinct
   "Literature" endnote and reported on its own audit line — and must never read as data-grounded.
@@ -392,11 +392,13 @@ you cite what the field reports. Two layers:
 2. **Support.** Whether the quote actually *supports the paraphrase* — read in context, no
    quote-mining — is the load-bearing judgment. Record it ONE of two ways:
    - **Machine-judged (preferred, executable).** Add `paraphrase="…"` to `source()` (alongside
-     `quote=`). The support judgment becomes a *re-runnable, cache-pinned* LLM entailment check —
+     `quote=`). The support judgment becomes a *re-runnable, cache-pinned* entailment check —
      "does quote Q fairly support paraphrase P?" — over two short strings (NOT "read the whole
-     paper and decide if it supports X"). See **The machine support judge** below. A cached
-     `unsupported` verdict *fails the claim* on every subsequent run, so quote-mining no longer
-     survives a re-audit.
+     paper and decide if it supports X"). The judge is **you, the orchestrating agent** (ideally a
+     fresh-context judge subagent you spawn — see **The machine support judge** below); the tool
+     only lists the work (`sci judge --list`) and records your verdict (`sci judge --record`). A
+     cached `unsupported` verdict *fails the claim* on every subsequent run, so quote-mining no
+     longer survives a re-audit.
    - **Hand-stamped (legacy).** Stamp `@reviewed(date=…, by=…, support=…, …)` after reading the
      cited span; `support=False` ⇒ the claim is broken. The original path, unchanged — the right
      choice when no judge is configured. Watch for quote-mining (a supportive sentence whose
@@ -460,21 +462,40 @@ The legacy `@reviewed(support=True)` is a trusted, hand-stamped boolean the audi
 re-checks*: it re-verifies the verbatim quote and the paper-text sha every run, but it never
 re-examines whether the paraphrase is a fair reading of the quote. That is the weak link
 (quote-mining survives a green audit). `source(paraphrase=…)` closes it by making the support
-judgment **executable**: an LLM judges the narrow, local question "does quote Q entail paraphrase
-P?" — and the claims suite asserts on the *cached* verdict, never the live model.
+judgment **executable**: the narrow, local question "does quote Q entail paraphrase P?" gets a
+recorded, re-runnable verdict — and the claims suite asserts on that *cached* verdict.
+
+**Who judges: you, the orchestrating agent — not the tool.** There is **no model inside `sci`** (or
+`bib`). You are already an LLM that read the paper, so the tool re-owning a model and re-judging
+would be backwards. Instead the loop is *list → judge → record*, and the judging is done **by a
+fresh-context judge subagent you spawn** — independence matters: don't let the context that *wrote*
+the paraphrase grade it. The tool's only jobs are deterministic: surface the work and record/verify
+the verdict.
+
+- **`sci judge --list`** emits the worklist of `[lit:]` sources whose verdict is **missing or
+  stale**, each as `{claim_id, citekey, tier, span_text, paraphrase, evidence_sha}` — `span_text`
+  is the verbatim quote (tier 1) or the resolved chunk text (tier 2). Spawn a fresh subagent, hand
+  it `span_text` + `paraphrase`, and ask the one narrow question: *does the span fairly support the
+  paraphrase?* → `{supported, rationale}`.
+- **`sci judge --record <file|->`** ingests those verdicts `{citekey, paraphrase, supported,
+  rationale}` (echo the worklist's `evidence_sha` back for an extra stale-span guard) and writes
+  them to the cache. The pin is **recomputed by the tool** from the report's current span — a caller
+  can't record a verdict against a stale or wrong span; a record whose `(citekey, paraphrase)` (or
+  echoed `evidence_sha`) no longer resolves is rejected. `--judge-id` stamps *who* judged.
 
 **The determinism discipline (non-negotiable).** The claims suite is a re-runnable, offline,
-deterministic pytest suite — that is the whole system's value. So **the model is never called
-inside a claim**. The model runs in exactly ONE place: the refresh step (`sci judge`), which
-writes a sidecar verdict cache. `source()` (the pytest path) and the report audit only ever
-*read* that cache — a plain JSON file, a pure function of bytes, no key, no network. A `sci report`
-audit and a normal grounding run stay free and deterministic.
+deterministic pytest suite — that is the whole system's value, and it is **unchanged**: no model is
+ever called on the pytest path. `source()` and the report audit only ever *read* the verdict cache
+— a plain JSON file, a pure function of bytes, no key, no network. Only `sci judge --record` writes
+it. A `sci report` audit and a normal grounding run stay free and deterministic.
 
-**The cache + its key.** Each verdict answers one entailment question, keyed by the triple
-`(evidence_sha, paraphrase, model_id)` and stored in `lit_judgments.json` next to the grounding
-report (a machine-owned artifact, like `grounding_report.json` — never hand-edited):
-`{supported, model_id, timestamp, rationale, …}`. The verdict is **inspectable** — a green claim
-is "this model, on this date, judged Q⊢P with this rationale", not an opaque "the LLM said yes".
+**The cache + its key.** Each verdict answers one entailment question, keyed by the pair
+`(evidence_sha, paraphrase)` and stored in `lit_judgments.json` next to the grounding report (a
+machine-owned artifact, like `grounding_report.json` — never hand-edited): `{supported, judge_id,
+timestamp, rationale, …}`. The verdict is **inspectable** — a green claim is "judged Q⊢P, by this
+judge, on this date, with this rationale", not an opaque "the LLM said yes". `judge_id` is
+**metadata, not part of the key**: a verdict produced by a different judge subagent is still valid,
+so swapping who judges does not mass-invalidate the cache.
 
 **The locator ladder → strength.** *How precisely* a source locates its supporting text caps the
 claim's strength (the audit enforces the ceiling), so a paragraph-spanning gloss can't be sold as
@@ -490,33 +511,30 @@ Tier 1 is the default; reach for tier 2 only for a fact that genuinely spans a p
 single quotable sentence. A claim's ceiling is that of its **weakest-located** source; exceeding
 it is a blocking `over-strength` finding (strengthen the locator, or lower `@strength`).
 
-**Staleness — pin `model_id`, re-judge on drift.** The verdict is invalidated the moment any of
-`(quote_sha | paraphrase | model_id)` drifts: a quote edit or a model upgrade flips the citation
-to `stale-judgment` (blocking) — re-run `sci judge` and re-run the suite. Pinning `model_id` into
-the key means a model upgrade is an explicit, auditable **mass re-judge**, never a silent shift in
-which claims are "supported". A paraphrase edit surfaces as `needs-judgment` (a new question);
-both resolve the same way — `sci judge`. This is the literature analogue of `stale-review`, but
-recomputed every run instead of trusted once.
+**Staleness — re-judge on drift.** The verdict is invalidated the moment `(quote_sha | paraphrase)`
+drifts: a quote edit (the cited paper's text changed, or you tightened the quote) flips the
+citation to `stale-judgment` and a paraphrase edit to `needs-judgment` (both blocking) — re-`list`,
+re-judge, re-`record`, re-run the suite. This is the literature analogue of `stale-review`, but
+recomputed every run instead of trusted once. (Note the key no longer pins a model id — the verdict
+is the agent's judgment, recorded; there is no model to upgrade.)
 
-**Graceful with no key.** If no judge is configured (no `ANTHROPIC_API_KEY`), `sci judge` skips
-judging — it never crashes — and the un-judged source stays `needs-judgment` (the citation does
-not back until judged). So the feature is fully **opt-in and additive**: existing `quote=` +
-`@reviewed(support=…)` claims keep working unchanged; only sources that add `paraphrase=` are
-machine-judged.
+**Opt-in and additive.** A source that adds `paraphrase=` is machine-judged; existing `quote=` +
+`@reviewed(support=…)` claims keep working unchanged. Until a verdict is recorded, the source stays
+`needs-judgment` (non-blocking until the citation needs to back) — never a crash. The cache the
+pytest path reads defaults to `<grounding-out>/lit_judgments.json` (next to each grounding report);
+override with `--cache`.
 
-**The judge model is configurable** via `$SCIENTIST_JUDGE_MODEL` (default: a small/fast model —
-the entailment task is narrow and does not need a frontier model). The cache the pytest path reads
-defaults to `<grounding-out>/lit_judgments.json`; override with `--judge-cache` /
-`$SCIENTIST_JUDGE_CACHE`.
-
-**The refresh command (the only place the model runs).**
+**The list → judge → record loop.**
 
 ```
-# 1. run the claims suite to (re)emit the grounding report (records paraphrase + quote_sha)
+# 1. run the claims suite to (re)emit the grounding report (records paraphrase + the span)
 uv run --with-editable <scientist> --with libkit pytest program/claims/ --grounding-out program/analysis
-# 2. judge the cache misses / stale keys — the ONE model invocation
-ANTHROPIC_API_KEY=… sci judge --home <data> --model claude-haiku-4-5
-# 3. re-run the suite: source() now asserts on the cached verdicts (unsupported → red)
+# 2. surface the missing/stale support verdicts to judge
+sci judge --list --home <data> --json > worklist.json
+# 3. YOU judge each {span_text, paraphrase} — ideally via a fresh-context judge subagent for
+#    independence — and write {citekey, paraphrase, supported, rationale} records, then record them:
+sci judge --record verdicts.json --home <data> --judge-id <who>
+# 4. re-run the suite: source() now asserts on the cached verdicts (unsupported → red)
 uv run --with-editable <scientist> --with libkit pytest program/claims/ --grounding-out program/analysis
 ```
 
