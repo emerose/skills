@@ -18,6 +18,10 @@ class _FakeResp:
         self.content = content
         self.headers = {"content-type": content_type}
 
+    @property
+    def text(self):
+        return self.content.decode("utf-8", "replace")
+
 
 class _FakeClient:
     """Minimal stand-in for httpx.AsyncClient driven by a (url, params)->resp fn."""
@@ -209,4 +213,86 @@ def test_acquire_oa_uses_pmc_oa_service_fallback(monkeypatch, tmp_path):
     rec = {"doi": "10.1/x", "pmcid": "PMC6742065"}
     src = asyncio.run(R.acquire_oa_pdf(rec, dest, _FakeClient(handler)))
     assert src == "pmc_oa"
+    assert dest.read_bytes().startswith(b"%PDF-")
+
+
+def _pow_page(challenge, difficulty, cookie="cloudpmc-viewer-pow"):
+    return (
+        '<html><head></head><body><script type="module">\n'
+        f'const POW_CHALLENGE = "{challenge}"\n'
+        f'const POW_DIFFICULTY = "{difficulty}"\n'
+        f'const POW_COOKIE_NAME = "{cookie}"\n'
+        "window.ncbi.pmc.pow.init(POW_CHALLENGE, POW_DIFFICULTY);\n"
+        "</script></body></html>"
+    ).encode()
+
+
+def test_parse_pmc_pow():
+    chal, diff, cookie = R._parse_pmc_pow(_pow_page("aZ9:wq", 4).decode())
+    assert (chal, diff, cookie) == ("aZ9:wq", 4, "cloudpmc-viewer-pow")
+    assert R._parse_pmc_pow("<html>no challenge here</html>") is None
+
+
+def test_solve_pmc_pow_meets_difficulty():
+    import hashlib
+    nonce = R._solve_pmc_pow("some-challenge:token", 2)
+    assert nonce is not None
+    assert hashlib.sha256(("some-challenge:token" + nonce).encode()).hexdigest().startswith("00")
+    # Difficulty outside the safe band is refused rather than ground forever.
+    assert R._solve_pmc_pow("x", 0) is None
+    assert R._solve_pmc_pow("x", R._POW_MAX_DIFFICULTY + 1) is None
+
+
+def test_fetch_pmc_authorms_pdf_solves_pow(tmp_path):
+    """Landing page → scrape PDF name → PoW challenge → solve → real PDF on retry."""
+    dest = tmp_path / "out.pdf"
+    state = {"pdf_hits": 0}
+    landing = (
+        '<html><body><a href="/articles/PMC8976688/pdf/nihms-1785194.pdf">PDF</a>'
+        "</body></html>"
+    ).encode()
+
+    def handler(url, params):
+        if url.endswith("/articles/PMC8976688/"):
+            return _FakeResp(200, landing, "text/html")
+        if url.endswith("nihms-1785194.pdf"):
+            state["pdf_hits"] += 1
+            if state["pdf_hits"] == 1:  # first hit: the proof-of-work page
+                return _FakeResp(200, _pow_page("chal:abc", 2), "text/html")
+            return _FakeResp(200, _PDF, "application/pdf")  # after cookie set
+        return _FakeResp(404, b"", "text/plain")
+
+    ok = asyncio.run(R.fetch_pmc_authorms_pdf("PMC8976688", dest, _FakeClient(handler)))
+    assert ok is True
+    assert dest.read_bytes().startswith(b"%PDF-")
+    assert state["pdf_hits"] == 2  # challenge, then solved retry
+
+
+def test_acquire_oa_uses_authorms_pow_when_not_in_oa_subset(monkeypatch, tmp_path):
+    """Shao repro: not in the OA subset, so only the direct-NCBI PoW route works."""
+    _no_cache(monkeypatch)
+    dest = tmp_path / "out.pdf"
+    state = {"pdf_hits": 0}
+    landing = b'<a href="/articles/PMC8976688/pdf/nihms-1785194.pdf">PDF</a>'
+
+    def handler(url, params):
+        if "api.unpaywall.org" in url:  # is_oa false
+            return _FakeResp(200, json.dumps({"best_oa_location": None, "oa_locations": []}).encode(),
+                             "application/json")
+        if "pdf=render" in url or "ptpmcrender" in url:
+            return _FakeResp(500, b'{"error":"no full text"}', "application/json")
+        if "oa.fcgi" in url:  # author manuscript: absent from OA subset
+            return _FakeResp(200, b"<OA><error code='idDoesNotExist'/></OA>", "application/xml")
+        if url.endswith("/articles/PMC8976688/"):
+            return _FakeResp(200, landing, "text/html")
+        if url.endswith("nihms-1785194.pdf"):
+            state["pdf_hits"] += 1
+            if state["pdf_hits"] == 1:
+                return _FakeResp(200, _pow_page("chal:abc", 2), "text/html")
+            return _FakeResp(200, _PDF, "application/pdf")
+        return _FakeResp(404, b"", "text/plain")
+
+    rec = {"doi": "10.1126/scitranslmed.aaz7785", "pmcid": "PMC8976688"}
+    src = asyncio.run(R.acquire_oa_pdf(rec, dest, _FakeClient(handler)))
+    assert src == "pmc_authorms"
     assert dest.read_bytes().startswith(b"%PDF-")
