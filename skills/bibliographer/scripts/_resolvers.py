@@ -662,6 +662,114 @@ async def acquire_oa_pdf(
 
 
 # --------------------------------------------------------------------------- #
+# OpenAlex metadata enrichment (impact + venue trustworthiness)
+# --------------------------------------------------------------------------- #
+# OpenAlex carries work- and venue-level metadata none of the bibliographic
+# resolvers do: a Retraction-Watch-backed ``is_retracted`` flag, field-weighted
+# citation impact (``fwci``) and its normalized percentile, OA status, and — at
+# the journal level — DOAJ membership, Scopus indexing, an impact-factor-like
+# 2-year mean citedness, and an h-index. ``enrich_openalex`` stamps these onto a
+# record at ingest under a single ``metrics`` sub-dict (best-effort: a 404 or
+# network blip never blocks an add).
+_OPENALEX_WORK_SELECT = (
+    "id,ids,doi,cited_by_count,fwci,citation_normalized_percentile,"
+    "is_retracted,open_access,type,primary_location"
+)
+
+
+async def fetch_openalex_work(
+    client: httpx.AsyncClient, *, doi: str | None = None, pmid: str | None = None
+) -> dict[str, Any] | None:
+    """An OpenAlex work by DOI (preferred) or PMID, or None. Cached."""
+    for path in ([f"doi:{doi.lower()}"] if doi else []) + ([f"pmid:{pmid}"] if pmid else []):
+        status, body = await _cached_get(
+            client, f"https://api.openalex.org/works/{path}",
+            key=f"openalex-work|{path}|v1",
+            params={"mailto": mailto(), "select": _OPENALEX_WORK_SELECT},
+        )
+        if status == 200:
+            return json.loads(body)
+    return None
+
+
+async def fetch_openalex_source(source_id: str, client: httpx.AsyncClient) -> dict[str, Any] | None:
+    """An OpenAlex Source (journal) by id, for its ``summary_stats``. Cached."""
+    sid = source_id.rsplit("/", 1)[-1]
+    status, body = await _cached_get(
+        client, f"https://api.openalex.org/sources/{sid}",
+        key=f"openalex-source|{sid}|v1",
+        params={"mailto": mailto(), "select": "id,summary_stats"},
+    )
+    return json.loads(body) if status == 200 else None
+
+
+def _openalex_metrics(work: dict[str, Any], source: dict[str, Any] | None) -> dict[str, Any]:
+    """Build the ``metrics`` sub-dict from an OpenAlex work (+ optional Source).
+
+    Pure (no network). ``is_retracted`` is kept even when ``False`` — an explicit
+    "checked, not retracted" is itself a signal; unknown fields are dropped.
+    """
+    src = (work.get("primary_location") or {}).get("source") or {}
+    venue = _drop_empty({
+        "name": src.get("display_name"),
+        "type": src.get("type"),
+        "in_doaj": src.get("is_in_doaj"),
+        "indexed_in_scopus": src.get("is_indexed_in_scopus"),
+        "issn_l": src.get("issn_l"),
+        "publisher": src.get("host_organization_name"),
+    })
+    stats = (source or {}).get("summary_stats") or {}
+    if stats.get("2yr_mean_citedness") is not None:
+        venue["impact_2yr"] = round(stats["2yr_mean_citedness"], 3)
+    if stats.get("h_index") is not None:
+        venue["h_index"] = stats["h_index"]
+    cnp = (work.get("citation_normalized_percentile") or {}).get("value")
+    metrics = _drop_empty({
+        "source": "openalex",
+        "openalex_id": (work.get("id") or "").replace("https://openalex.org/", "") or None,
+        "fwci": round(work["fwci"], 3) if work.get("fwci") is not None else None,
+        "citation_percentile": round(cnp, 4) if cnp is not None else None,
+        "open_access": (work.get("open_access") or {}).get("oa_status"),
+        "work_type": work.get("type"),
+    })
+    if "is_retracted" in work:
+        metrics["is_retracted"] = bool(work["is_retracted"])
+    if venue:
+        metrics["venue"] = venue
+    return metrics
+
+
+async def enrich_openalex(rec: dict[str, Any], client: httpx.AsyncClient) -> bool:
+    """Stamp ``rec['metrics']`` with OpenAlex work + venue metadata. Best-effort.
+
+    Looks the work up by the record's DOI (preferred) or PMID, then fetches the
+    journal Source for its h-index / impact when available. Also backfills a
+    top-level ``cited_by_count`` when the record lacks one (e.g. a Crossref-only
+    ``add``). Returns True if metrics were attached.
+    """
+    doi, pmid = rec.get("doi"), rec.get("pmid")
+    if not (doi or pmid):
+        return False
+    work = await fetch_openalex_work(client, doi=doi, pmid=str(pmid) if pmid else None)
+    if not work:
+        return False
+    src = (work.get("primary_location") or {}).get("source") or {}
+    source = None
+    if src.get("id"):
+        try:
+            source = await fetch_openalex_source(src["id"], client)
+        except (httpx.HTTPError, ResolveError):
+            source = None
+    metrics = _openalex_metrics(work, source)
+    if not metrics:
+        return False
+    rec["metrics"] = metrics
+    if rec.get("cited_by_count") is None and work.get("cited_by_count") is not None:
+        rec["cited_by_count"] = work["cited_by_count"]
+    return True
+
+
+# --------------------------------------------------------------------------- #
 # orchestration
 # --------------------------------------------------------------------------- #
 async def resolve(

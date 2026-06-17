@@ -43,7 +43,24 @@ in a free-form `metadata` JSON column (see libkit's own schema, v2):
 | `sniffed_from` | the identifier recovered from a PDF, e.g. `doi:10.1/x` |
 | `enriched_from` | set to `unverified` when `enrich` upgraded a file-only record to resolved metadata |
 | `oa_pdf_url` | open-access PDF URL from Unpaywall, if any |
+| `cited_by_count` | citation count (from discovery sources, or backfilled from OpenAlex at add) |
+| `metrics` | OpenAlex work + venue metadata stamped at ingest — see below |
 | `added_at`, `updated_at` | ISO timestamps |
+
+The **`metrics`** sub-dict (best-effort from OpenAlex when the record has a
+DOI/PMID, stamped at `add`/`import`/`discover --add`) carries impact and
+journal-trust signals no bibliographic resolver provides:
+
+| field | notes |
+|-------|-------|
+| `source` | always `openalex` |
+| `openalex_id` | the OpenAlex work id (`W…`) |
+| `fwci` | field-weighted citation impact (citations normalized by field + year; 1.0 = average) |
+| `citation_percentile` | normalized citation percentile within field/year, 0–1 |
+| `is_retracted` | Retraction-Watch-backed flag (kept even when `False` = checked, not retracted) |
+| `open_access` | OA status: `gold`/`green`/`hybrid`/`bronze`/`closed` |
+| `work_type` | OpenAlex type (`article`, `review`, `editorial`, …) |
+| `venue` | `{name, type, in_doaj, indexed_in_scopus, issn_l, publisher, impact_2yr, h_index}` — `in_doaj` is an anti-predatory signal; `impact_2yr`/`h_index` are journal-level (`indexed_in_scopus` is sparsely populated by OpenAlex, so absence ≠ not indexed) |
 
 An **unverified** record (`source` = `pdf`/`file`, no identifier recovered) is
 filed under `papers/Unknown/` with an `anon…` citekey. `bib enrich` upgrades these:
