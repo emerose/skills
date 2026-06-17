@@ -362,6 +362,8 @@ class PaperRef:
     title: str = ""
     year: str = ""
     doi: str = ""
+    is_retracted: bool = False
+    credibility: dict = field(default_factory=dict, repr=False, compare=False)
     text: str = field(default="", repr=False, compare=False)
 
     def __str__(self) -> str:
@@ -374,6 +376,33 @@ class PaperRef:
         if normalize_ws:
             return _fold_match(phrase) in _fold_match(self.text)
         return phrase in self.text
+
+
+def _credibility_from_rec(rec: dict) -> dict:
+    """Flatten a library record's OpenAlex ``metrics`` (+ top-level ``cited_by_count``)
+    into display **credibility markers** for a literature source: venue legitimacy
+    (DOAJ / Scopus / type) and citation impact (FWCI / percentile / journal h-index),
+    plus the ``is_retracted`` flag. These are *advisory context for the reader* — they
+    surface on the claim/report but deliberately **do NOT feed into a claim's strength
+    or outcome** (popularity is not correctness, and an impact gate would fight the
+    cite-primary rule). Only ``is_retracted`` is load-bearing, and via its own check,
+    not a score. ``None`` values are dropped."""
+    m = rec.get("metrics") or {}
+    v = m.get("venue") or {}
+    cred = {
+        "is_retracted": m.get("is_retracted"),
+        "fwci": m.get("fwci"),
+        "citation_percentile": m.get("citation_percentile"),
+        "cited_by_count": rec.get("cited_by_count"),
+        "open_access": m.get("open_access"),
+        "work_type": m.get("work_type"),
+        "venue_type": v.get("type"),
+        "in_doaj": v.get("in_doaj"),
+        "indexed_in_scopus": v.get("indexed_in_scopus"),
+        "journal_impact_2yr": v.get("impact_2yr"),
+        "journal_h_index": v.get("h_index"),
+    }
+    return {k: val for k, val in cred.items() if val is not None}
 
 
 def _load_paper(citekey: str) -> PaperRef:
@@ -398,7 +427,8 @@ def _load_paper(citekey: str) -> PaperRef:
             else:
                 txt, mode = (rec.get("abstract") or ""), "abstract"
             return {"text": txt, "mode": mode, "title": rec.get("title") or "",
-                    "year": str(rec.get("year") or ""), "doi": rec.get("doi") or ""}
+                    "year": str(rec.get("year") or ""), "doi": rec.get("doi") or "",
+                    "credibility": _credibility_from_rec(rec)}
         finally:
             await store.close()
 
@@ -411,25 +441,38 @@ def _load_paper(citekey: str) -> PaperRef:
         raise LiteratureError(
             f"paper({citekey!r}) has no readable text (citation-only stub with no abstract) — "
             f"`bib fetch {citekey}` to attach an open-access PDF, then re-run.")
+    cred = res["credibility"]
     ref = PaperRef(citekey=citekey, sha256=_sha256(res["text"].encode("utf-8")),
                    mode=res["mode"], title=res["title"], year=res["year"], doi=res["doi"],
+                   is_retracted=bool(cred.get("is_retracted")), credibility=cred,
                    text=res["text"])
     _PAPER_CACHE[citekey] = ref
     return ref
 
 
-def paper(citekey: str) -> PaperRef:
+def paper(citekey: str, *, allow_retracted: bool = False) -> PaperRef:
     """Resolve a bibliographer-library paper by citekey and record it as provenance. The
     returned :class:`PaperRef` is sha-pinned to the exact text read, so the claim is grounded in
     that content (re-ingest -> new sha -> a stamped review re-validates). Use :func:`source` to
-    assert a quote in one call; use ``paper(...).contains(...)`` for a bare check."""
+    assert a quote in one call; use ``paper(...).contains(...)`` for a bare check.
+
+    **Retraction integrity check:** if the library record marks the paper retracted (OpenAlex /
+    Retraction Watch, refreshed each time it's re-added), this raises :class:`LiteratureError` —
+    a literature claim must not ground on retracted work. Pass ``allow_retracted=True`` *only* to
+    deliberately discuss the retraction itself. (The flag is as fresh as the last `bib add`/
+    enrich; the check stays offline/deterministic by reading the stored value, not the network.)"""
     ref = _load_paper(citekey)
+    if ref.is_retracted and not allow_retracted:
+        raise LiteratureError(
+            f"paper({citekey!r}) is RETRACTED (OpenAlex / Retraction Watch) — a literature claim "
+            f"must not ground on retracted work. Re-source the statement from a sound paper, or "
+            f"pass allow_retracted=True only to discuss the retraction itself.")
     record("paper", ref.citekey, ref.sha256, via="literature")
     return ref
 
 
 def source(citekey: str, *, quote: str, test: str = "direct", system: str = "",
-           primary: bool = True, group: str | None = None) -> dict:
+           primary: bool = True, group: str | None = None, allow_retracted: bool = False) -> dict:
     """One source backing a literature claim: assert ``quote`` is present in paper ``citekey``
     and record the source's evidential tags for the report.
 
@@ -443,7 +486,7 @@ def source(citekey: str, *, quote: str, test: str = "direct", system: str = "",
     Raises ``AssertionError`` if the quote isn't found (the deterministic, every-audit check —
     pytest pass/fail). The evidential weight (independence/directness/primary) is judged by the
     agent and stamped via :func:`reviewed`; this call only pins the quote."""
-    ref = paper(citekey)
+    ref = paper(citekey, allow_retracted=allow_retracted)
     if not ref.contains(quote):
         where = "full text" if ref.mode == "fulltext" else "abstract (citation-only — no full text)"
         raise AssertionError(
@@ -452,7 +495,10 @@ def source(citekey: str, *, quote: str, test: str = "direct", system: str = "",
             f"in the body of a citation-only paper, `bib fetch {citekey}` to ingest full text.")
     rec = {"citekey": citekey, "quote": quote, "test": test, "system": system,
            "primary": bool(primary), "group": group or citekey, "mode": ref.mode,
-           "title": ref.title, "year": ref.year, "doi": ref.doi}
+           "title": ref.title, "year": ref.year, "doi": ref.doi,
+           # Display-only credibility markers (venue legitimacy + citation impact); these
+           # surface on the claim/report but never feed strength/outcome — see _credibility_from_rec.
+           "credibility": ref.credibility}
     cap = _CURRENT.get()
     if cap is not None:
         cap.evidence.setdefault("lit_sources", []).append(rec)
