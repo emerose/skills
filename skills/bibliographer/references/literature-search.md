@@ -68,12 +68,19 @@ breadth and discipline, not a fixed source list. Common complements:
 
 - **Consensus** (MCP) — claim-level synthesis across papers; good for "what does
   the field conclude about X" before you go primary.
+- **Elicit** (MCP) — semantic paper search with a strong relevance ranker.
 - **ClinicalTrials.gov** (MCP) — trials, endpoints, sponsors; the clinical
   landscape `discover` won't surface.
 - **ChEMBL** (MCP) — bioactivity, mechanism, ADMET for specific compounds.
 - **bioRxiv/medRxiv** (MCP) — preprint-first sweeps (also reachable via Europe
   PMC and OpenAlex, but the dedicated server gives finer date/category control).
 - **Web search** — reviews, news, and grey literature that never get a DOI.
+
+If **Elicit** or **Consensus** is installed, it's worth running the sweep through
+them as a routine supplement — even when the backbone looks complete, just in
+case. Neither reaches an index `discover` can't (so it's a recall/ranking
+cross-check, not new coverage), but their semantic ranking can float on-topic
+papers the keyword sweep left below the cutoff.
 
 Whatever a complement surfaces, **fold it back into the library** by identifier
 (`bib add <DOI|PMID|arXiv>`), so the banked set stays the single durable record
