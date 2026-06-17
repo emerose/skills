@@ -183,6 +183,11 @@ into an asset that outlives any one question — citations are a small subset of
 what you bank. `--add` creates fast citation-only **stubs** (abstract still
 searchable); add `--fetch-pdfs` only when you want the full text now.
 
+For a *thorough* review — decomposing a question into sub-topics, sweeping each
+broadly, reaching for other sources when the six-source backbone misses, and
+recording the sweep so it re-runs as a diff — follow the standard pattern in
+[references/literature-search.md](references/literature-search.md).
+
 **Bulk-importing a folder** (e.g. a Downloads dir or an existing pile). Always
 dry-run first:
 
@@ -339,6 +344,9 @@ specific notes:
   a throwaway `--home`.
 - **Never hand-edit `catalog.duckdb` or move files manually** — go through `bib`.
 
+For the standard pattern for running a broad, intentional, re-runnable literature
+sweep with `bib discover` (sub-topic decomposition, banking, other-source
+latitude), see [references/literature-search.md](references/literature-search.md).
 For getting a PDF when there's no open-access copy (preprint servers, PMC, the
 institutional browser, and authorized peer sources), see
 [references/getting-pdfs.md](references/getting-pdfs.md). For the metadata model
