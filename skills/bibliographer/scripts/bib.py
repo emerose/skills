@@ -732,6 +732,66 @@ async def cmd_show(args: argparse.Namespace, store: BiblioStore) -> None:
         print(f"\nabstract:\n{rec['abstract']}")
 
 
+async def cmd_text(args: argparse.Namespace, store: BiblioStore) -> None:
+    """Print one paper's full stored library text — the exact string a scientist
+    ``[lit:]`` quote-check reads. To author a verbatim ``source(citekey, quote=...)``
+    the quote must appear in this text, so the author needs to SEE it.
+
+    Faithful to the grounding path (scientist/grounding/_load_paper): dump the libkit
+    document's text via the same ``leading_text`` accessor (every chunk) when the record
+    has a document, else fall back to the abstract. A citation-only **stub** still has a
+    libkit document — a generated stub holding the metadata + abstract — so its dumped
+    text is exactly what a quote-check sees, but it contains no full body; the stderr note
+    flags that (``content_state == 'stub'``) so the author knows quotes can only come from
+    the abstract. Default dumps the whole text (clean stdout for piping, e.g.
+    ``bib text K | grep ...``); --offset/--chars page through it; the size note goes
+    to stderr so the pipe stays pure. NOTE: shell ``grep`` is a coarse locator, not
+    the quote-check — it does not fold unicode dashes / markdown emphasis / split
+    whitespace the way grounding does, so a grep miss is not authoritative.
+    """
+    rec = await store.get_by_citekey(args.citekey)
+    if rec is None:
+        die(f"no article with citekey '{args.citekey}'")
+    doc_id = rec.get("document_id")
+    if doc_id:
+        text = await store.leading_text(doc_id, chunks=100000)
+    else:
+        text = rec.get("abstract") or ""
+    is_stub = rec.get("content_state") == "stub" or not doc_id
+    mode = "stub" if is_stub else "fulltext"
+
+    total = len(text)
+    offset = max(0, getattr(args, "offset", 0) or 0)
+    length = None if getattr(args, "all", False) else getattr(args, "chars", None)
+    window = text[offset:] if length is None else text[offset : offset + length]
+
+    if args.json:
+        emit_json({
+            "citekey": rec.get("citekey"),
+            "content_state": rec.get("content_state"),
+            "mode": mode,
+            "text": window,
+            "content_offset": offset,
+            "content_chars": len(window),
+            "content_total": total,
+        })
+        return
+
+    if is_stub:
+        note = (f"[{args.citekey}] citation-only stub — no full text stored; the stored text "
+                f"is metadata + abstract ({total} chars). Quotes can only come from the abstract.")
+    else:
+        approx_k = round(total / 4000, 1)  # ~4 chars/token, then ÷1000 for k-tokens
+        tok = "<1k" if approx_k < 0.1 else f"~{approx_k:g}k"
+        windowed = offset or len(window) < total
+        span = f"; showing {offset + 1}–{offset + len(window)}" if windowed else ""
+        note = f"[{args.citekey}] stored text: {total} chars ({tok} tokens){span}"
+    print(note, file=sys.stderr)
+    if not window.strip():
+        print(f"(no stored text at offset {offset})", file=sys.stderr)
+    print(window)
+
+
 async def cmd_tag(args: argparse.Namespace, store: BiblioStore) -> None:
     try:
         rec = await store.set_tags(args.citekey, add=args.add or [], remove=args.remove or [])
@@ -1128,6 +1188,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--bibtex", action="store_true")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_show)
+
+    sp = sub.add_parser("text", help="print one paper's full stored library text (the text a [lit:] quote-check reads)")
+    sp.add_argument("citekey")
+    sp.add_argument("--offset", type=int, default=0, help="start at this character offset (for paging)")
+    sp.add_argument("--chars", type=int, default=None, help="print at most N chars from --offset (default: all)")
+    sp.add_argument("--all", action="store_true", help="print the entire stored text (the default; explicit for clarity)")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_text)
 
     sp = sub.add_parser("tag", help="add/remove tags on an article")
     sp.add_argument("citekey")

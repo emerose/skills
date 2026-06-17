@@ -250,11 +250,27 @@ bib search --tag topic:nlp
 bib query "why do transformers scale"   # SEMANTIC + full-text search INSIDE the papers (libkit)
 bib show vaswani2017attention            # full record
 bib show vaswani2017attention --bibtex   # one BibTeX entry
+bib text vaswani2017attention            # the paper's FULL stored library text (to stdout)
+bib text shao2021antisense --chars 4000  # first 4000 chars (bounded read)
+bib text shao2021antisense --offset 4000 --chars 4000   # page through it
+bib text shao2021antisense | grep -in "knockdown"       # locate a phrase (note goes to stderr)
 ```
 
 Use `search` for fast metadata lookup; use `query` when the user wants to find
 *passages/concepts inside* the papers (it embeds the query and runs libkit's
 hybrid vector + BM25 search).
+
+`bib text` prints one paper's **full stored library text** — the exact string a
+scientist `[lit:]` quote-check reads (`source(citekey, quote=...)`). Use it to pick a
+real verbatim phrase before authoring a literature claim, instead of guessing and
+re-running the grounding pytest. It dumps the whole text to stdout (clean for piping)
+with a size note on **stderr**; `--offset`/`--chars` page through it, `--json` returns
+the text plus `content_total`. A citation-only **stub** has no full body — `bib text`
+prints its metadata + abstract and flags that quotes can only come from the abstract.
+Caveat: `bib text … | grep` is a *coarse locator*, not the verdict — shell `grep`
+does not fold unicode dashes / markdown emphasis / split whitespace the way the
+quote-check does, so a grep miss is not authoritative; `source(... quote=...)` stays
+the authority.
 
 **Organizing and exporting:**
 
