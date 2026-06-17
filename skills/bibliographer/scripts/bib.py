@@ -732,6 +732,12 @@ async def cmd_show(args: argparse.Namespace, store: BiblioStore) -> None:
         print(f"\nabstract:\n{rec['abstract']}")
 
 
+# Default excerpt length for `bib text` (~1k tokens): enough to orient / see the
+# abstract+intro without a naive call dumping a whole paper (~20k tokens). --all / --offset
+# / --chars escalate from here.
+_DEFAULT_TEXT_CHARS = 4000
+
+
 async def cmd_text(args: argparse.Namespace, store: BiblioStore) -> None:
     """Print one paper's full stored library text — the exact string a scientist
     ``[lit:]`` quote-check reads. To author a verbatim ``source(citekey, quote=...)``
@@ -743,11 +749,13 @@ async def cmd_text(args: argparse.Namespace, store: BiblioStore) -> None:
     libkit document — a generated stub holding the metadata + abstract — so its dumped
     text is exactly what a quote-check sees, but it contains no full body; the stderr note
     flags that (``content_state == 'stub'``) so the author knows quotes can only come from
-    the abstract. Default dumps the whole text (clean stdout for piping, e.g.
-    ``bib text K | grep ...``); --offset/--chars page through it; the size note goes
-    to stderr so the pipe stays pure. NOTE: shell ``grep`` is a coarse locator, not
-    the quote-check — it does not fold unicode dashes / markdown emphasis / split
-    whitespace the way grounding does, so a grep miss is not authoritative.
+    the abstract. Default prints a bounded excerpt (the first ``_DEFAULT_TEXT_CHARS``) so a
+    naive call never dumps ~20k tokens into a context window; --offset/--chars page through
+    it and --all prints the whole text (the clean-pipe path, e.g. ``bib text K --all | grep``).
+    The size note goes to stderr so the pipe stays pure and flags when more text remains.
+    NOTE: shell ``grep`` is a coarse locator, not the quote-check — it does not fold unicode
+    dashes / markdown emphasis / split whitespace the way grounding does, so a grep miss is
+    not authoritative.
     """
     rec = await store.get_by_citekey(args.citekey)
     if rec is None:
@@ -762,8 +770,13 @@ async def cmd_text(args: argparse.Namespace, store: BiblioStore) -> None:
 
     total = len(text)
     offset = max(0, getattr(args, "offset", 0) or 0)
-    length = None if getattr(args, "all", False) else getattr(args, "chars", None)
+    if getattr(args, "all", False):
+        length = None  # whole text from offset
+    else:
+        length = args.chars if args.chars is not None else _DEFAULT_TEXT_CHARS
     window = text[offset:] if length is None else text[offset : offset + length]
+    shown_end = offset + len(window)
+    more = shown_end < total  # text remains past this window
 
     if args.json:
         emit_json({
@@ -777,15 +790,15 @@ async def cmd_text(args: argparse.Namespace, store: BiblioStore) -> None:
         })
         return
 
+    approx_k = round(total / 4000, 1)  # ~4 chars/token, then ÷1000 for k-tokens
+    tok = "<1k" if approx_k < 0.1 else f"~{approx_k:g}k"
+    span = f"; showing {offset + 1}–{shown_end}" if (offset or len(window) < total) else ""
+    hint = " (--all for full text, --offset to page)" if more else ""
     if is_stub:
-        note = (f"[{args.citekey}] citation-only stub — no full text stored; the stored text "
-                f"is metadata + abstract ({total} chars). Quotes can only come from the abstract.")
+        note = (f"[{args.citekey}] citation-only stub — no full text stored; the stored text is "
+                f"metadata + abstract ({total} chars). Quotes can only come from the abstract.{span}{hint}")
     else:
-        approx_k = round(total / 4000, 1)  # ~4 chars/token, then ÷1000 for k-tokens
-        tok = "<1k" if approx_k < 0.1 else f"~{approx_k:g}k"
-        windowed = offset or len(window) < total
-        span = f"; showing {offset + 1}–{offset + len(window)}" if windowed else ""
-        note = f"[{args.citekey}] stored text: {total} chars ({tok} tokens){span}"
+        note = f"[{args.citekey}] stored text: {total} chars ({tok} tokens){span}{hint}"
     print(note, file=sys.stderr)
     if not window.strip():
         print(f"(no stored text at offset {offset})", file=sys.stderr)
@@ -1189,11 +1202,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_show)
 
-    sp = sub.add_parser("text", help="print one paper's full stored library text (the text a [lit:] quote-check reads)")
+    sp = sub.add_parser("text", help="print one paper's stored library text (the text a [lit:] quote-check reads)")
     sp.add_argument("citekey")
     sp.add_argument("--offset", type=int, default=0, help="start at this character offset (for paging)")
-    sp.add_argument("--chars", type=int, default=None, help="print at most N chars from --offset (default: all)")
-    sp.add_argument("--all", action="store_true", help="print the entire stored text (the default; explicit for clarity)")
+    sp.add_argument("--chars", type=int, default=None,
+                    help=f"print at most N chars from --offset (default {_DEFAULT_TEXT_CHARS}; use --all for the whole text)")
+    sp.add_argument("--all", action="store_true", help="print the entire stored text (no excerpt cap)")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_text)
 

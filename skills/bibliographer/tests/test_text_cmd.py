@@ -75,17 +75,18 @@ def _args(citekey, *, offset=0, chars=None, all=False, json=False):
     return argparse.Namespace(citekey=citekey, offset=offset, chars=chars, all=all, json=json)
 
 
-# A body long enough to exercise windowing; the marker phrase is what an author
-# would copy as a verbatim quote.
-_BODY = (
-    "# Antisense oligonucleotide knockdown\n\n"
-    "The treatment reduced target transcript by 78% at the lumbar segment on Day 29. "
-    + ("Additional discussion of methods and controls. " * 40)
-)
+# A body comfortably longer than the default excerpt cap, with a marker near the
+# start (inside the default window) and another past it (only --all reaches it).
+_HEAD = ("# Antisense oligonucleotide knockdown\n\n"
+         "The treatment reduced target transcript by 78% at the lumbar segment on Day 29. ")
 _MARKER = "reduced target transcript by 78% at the lumbar segment on Day 29"
+_FILLER = "Additional discussion of methods and controls. " * 200  # ~9.4k chars
+_TAIL_MARKER = "the conclusion phrase appears only at the very end"
+_BODY = _HEAD + _FILLER + "In closing, " + _TAIL_MARKER + "."
+assert len(_BODY) > bib._DEFAULT_TEXT_CHARS  # the default must actually truncate
 
 
-def test_text_dumps_full_stored_text(store, tmp_path, capsys):
+def test_text_default_is_a_bounded_excerpt(store, tmp_path, capsys):
     def go():
         async def _():
             md = tmp_path / "paper.md"
@@ -95,18 +96,36 @@ def test_text_dumps_full_stored_text(store, tmp_path, capsys):
                                  "authors": [{"family": "Shao", "given": "X"}]},
                                 file_path=md)
             assert r["record"]["content_state"] == "full"
-            ck = r["record"]["citekey"]
-            await bib.cmd_text(_args(ck), store)
-            return ck
+            await bib.cmd_text(_args(r["record"]["citekey"]), store)
         return asyncio.run(_())
 
-    ck = go()
+    go()
     out = capsys.readouterr()
-    # The verbatim phrase an author would quote is present in stdout (the text).
+    # Default returns a bounded excerpt: the head marker is in it, the tail is not.
     assert _MARKER in out.out
-    # Size note goes to stderr (so `bib text K | grep` stays a pure pipe).
+    assert _TAIL_MARKER not in out.out
+    assert len(out.out.rstrip("\n")) == bib._DEFAULT_TEXT_CHARS
+    # Size note goes to stderr (so a pipe stays pure) and flags that more remains.
     assert "stored text:" in out.err
+    assert "--all" in out.err
     assert _MARKER not in out.err
+
+
+def test_text_all_dumps_everything(store, tmp_path, capsys):
+    def go():
+        async def _():
+            md = tmp_path / "paper.md"
+            md.write_text(_BODY)
+            r = await store.add({"title": "ASO Knockdown Study", "year": 2021,
+                                 "doi": "10.9/asoall"}, file_path=md)
+            await bib.cmd_text(_args(r["record"]["citekey"], all=True), store)
+        return asyncio.run(_())
+
+    go()
+    out = capsys.readouterr()
+    assert _TAIL_MARKER in out.out          # only --all reaches the end
+    assert out.out.rstrip("\n") == _BODY
+    assert "--all" not in out.err           # nothing more to fetch
 
 
 def test_text_offset_and_chars_window(store, tmp_path, capsys):
