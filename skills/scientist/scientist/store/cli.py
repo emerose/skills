@@ -648,8 +648,30 @@ async def _experiment_dirs(store: Store, only: str | None):
             yield child.resolve(), parsed["exp_id"]
 
 
+def _grounding_report_paths(home: Path) -> list[Path]:
+    """Every experiment's grounding_report.json under ``home`` (``analysis/`` first, then
+    the experiment root). Pure folder walk — no store needed; used by the cross-module
+    literature-divergence lint."""
+    out: list[Path] = []
+    if not home.is_dir():
+        return out
+    for child in sorted(home.iterdir()):
+        if not child.is_dir():
+            continue
+        for cand in (child / "analysis" / "grounding_report.json",
+                     child / "grounding_report.json"):
+            if cand.is_file():
+                out.append(cand)
+                break
+    return out
+
+
 async def cmd_check(store: Store, args: argparse.Namespace) -> None:
-    """Deterministic structural integrity report (reports only; never mutates)."""
+    """Deterministic structural integrity report (reports only; never mutates).
+
+    Plus a cross-module hygiene pass — the literature-divergence lint — which warns (never
+    fails) when the same ``(citekey, paraphrase)`` is grounded on quotes that fold to
+    different spans across the program's grounding reports. See ``grounding.refresh``."""
     worklist = []
     async for exp_dir, exp_id in _experiment_dirs(store, args.experiment):
         rec = await store.get_experiment(exp_id) or {"exp_id": exp_id}
@@ -657,16 +679,22 @@ async def cmd_check(store: Store, args: argparse.Namespace) -> None:
         flags = _audit.structural_flags(store.home, exp_dir, rec, files)
         if flags:
             worklist.append({"exp_id": exp_id, "flags": flags})
+    # Cross-module literature-divergence lint. A divergence is a *program* property (the same
+    # (citekey, paraphrase) grounded on different spans in two modules), so it scans every
+    # grounding report under home even when --experiment narrows the structural pass.
+    from ..grounding import refresh as _refresh
+    divergences = _refresh.divergence_lint(_grounding_report_paths(store.home))
     if args.json:
-        emit_json(worklist)
+        emit_json({"structural": worklist, "literature_divergence": divergences})
         return
     if not worklist:
         print("✓ no structural issues found")
-        return
     for item in worklist:
         print(f"{item['exp_id']}:")
         for f in item["flags"]:
             print(f"    {f}")
+    if divergences:
+        print(_refresh.render_divergence(divergences))
 
 
 def _staleness_entry(home: Path, exp_dir: Path, exp_id: str) -> dict[str, Any]:
@@ -971,7 +999,8 @@ def register(sub: argparse._SubParsersAction) -> None:
                          "repeatable — the agent's per-document role call")
     sp.add_argument("--commit", action="store_true", help="actually copy + index (default: dry-run)")
     add("catalog", "export the experiment catalog (CATALOG.md + catalog.json)")
-    sp = add("check", "structural integrity report (missing/unindexed files, layout, redundant archives)")
+    sp = add("check", "structural integrity report (missing/unindexed files, layout, redundant "
+             "archives) + cross-module literature-quote divergence lint")
     sp.add_argument("experiment", nargs="?", help="limit to one experiment (default: all)")
     sp = add("audit", "provenance staleness of the experiment.yml ledger + a worklist for the "
              "semantic pass (which includes the prose↔claims check)")

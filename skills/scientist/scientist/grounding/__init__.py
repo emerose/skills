@@ -37,6 +37,10 @@ from typing import Any
 
 from ..provenance import record_provenance as _record_provenance
 from ..labfiles import read_docx_text, read_pdf_text, read_pptx_text
+# The one verbatim-quote normalizer, shared with judgments.py so the verdict-cache identity
+# (sha of the folded span) matches what quote-matching considers the same evidence. See
+# normalize.py for why this MUST be the same function both places.
+from .normalize import collapse_ws as _collapse_ws, fold_match as _fold_match
 # Pure, offline cache of literature support verdicts. Safe on the pytest path (stdlib only). No
 # model lives anywhere in the tool — the verdict is produced by the orchestrating agent and
 # recorded via `sci judge --record`; this path only READS the cache. See judgments.py.
@@ -197,32 +201,6 @@ def _preserve_identifier(col, str_col):
 
 class UnsupportedDocFormat(ValueError):
     """Raised by :meth:`DocRef.text` for a suffix no built-in reader handles."""
-
-
-def _collapse_ws(s: str) -> str:
-    """Collapse every run of whitespace to a single space (and strip). External claims
-    match *verbatim* phrases, but extractors split a sentence across runs/lines/cells
-    (worst in pptx); normalizing both sides makes a short quote match reliably."""
-    return " ".join(s.split())
-
-
-# Unicode dash/hyphen variants that publishers and PDF extractors use interchangeably with
-# ASCII "-": en/em dashes, the Unicode hyphen, non-breaking hyphen, minus sign, etc. Folding
-# them (plus NFKC, which normalizes ligatures/full-width/compatibility forms) makes a verbatim
-# quote match a paper's stored text without the author having to reproduce the exact glyph —
-# the single most common reason a real, correct quote fails a naive substring check.
-_DASHES = "‐‑‒–—―⁃−﹘﹣－"
-_DASH_MAP = {ord(c): "-" for c in _DASHES}
-
-
-def _fold_match(s: str) -> str:
-    """Normalize text for verbatim-quote matching: NFKC-normalize, fold Unicode dashes to
-    ASCII ``-``, drop Markdown emphasis markers (``*``/``_`` — the library stores parsed
-    Markdown, so a gene name reads ``*Xyz1*``; that's markup, not content), then collapse
-    whitespace. Case is preserved (a quote is still verbatim)."""
-    import unicodedata
-    folded = unicodedata.normalize("NFKC", s).translate(_DASH_MAP).replace("*", "").replace("_", "")
-    return _collapse_ws(folded)
 
 
 # --- per-format text readers (pure-Python; the [reports] extra) ------------- #
