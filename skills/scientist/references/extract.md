@@ -58,10 +58,10 @@ vocabulary: [naming.md](naming.md).
 
 ## Provenance & audit
 
-`--commit` records each output as an entry in the unified `provenance` list — a data entry is
-`artifact: data/<file>` with its raw sources **and the recipe (`data/extract.py`)** as `inputs`
-(path + sha256). The artifact path is the only thing distinguishing an extraction edge (`data/…`)
-from a review edge (`README.md`), so `raw → data → README` is one DAG. `sci.py audit` re-runs the recipe
+`--commit` records each output as an entry in the unified `provenance` list (see SKILL.md §Core
+invariants — *One provenance ledger*) — a data entry is `artifact: data/<file>` with its raw
+sources **and the recipe (`data/extract.py`)** as `inputs` (path + sha256). The artifact path is
+what distinguishes an extraction edge (`data/…`) from a review edge (`README.md`). `sci.py audit` re-runs the recipe
 and checks: **determinism** (byte-identical reruns), **grounding** (inputs exist, shas match),
 **data/ ↔ recipe** (every output present + byte-identical), **recipe sha** still current,
 **reconciliation** (no measurement value in any pre-existing `data/` file is missing, checked
