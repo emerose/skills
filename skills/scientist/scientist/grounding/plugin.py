@@ -31,6 +31,7 @@ _MARKERS = {
     "caveats": "caveats(text): scope/limits to keep in mind",
     "kind": "kind(category): result|design|external|interpretive|literature",
     "reviewed": "reviewed(**verdict): agent support-review of a literature claim",
+    "must_confront": "must_confront(reason): a litreview's must-confront obligation claim",
 }
 
 
@@ -179,6 +180,7 @@ def pytest_runtest_makereport(item, call):
         "strength": _marker_val(item, "strength", "unspecified"),
         "caveats": _marker_val(item, "caveats"),
         "reviewed": _marker_kwargs(item, "reviewed"),
+        "must_confront": _marker_val(item, "must_confront"),
         "evidence": evidence,
         "inputs": inputs,
         "bypassed": list(cap.bypassed) if cap else [],

@@ -48,6 +48,7 @@ Stdlib + PyYAML (pandas only for ``*.csv`` table inlining); pure, store-free —
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections import Counter
 from pathlib import Path
@@ -83,6 +84,15 @@ _LIT_RE = re.compile(r"\[lit:\s*([^\[\]]+?)\s*\]")
 # hand-authored references list so the auto-generated bibliography defers to it (see
 # render_markdown). Matched per-line outside code fences, like the citation parse.
 _REFS_HEADING_RE = re.compile(r"(?i)^\s{0,3}#{1,6}\s+(references|bibliography|works cited)\s*$")
+# Inline litreview citation: [litreview:<id>] — grounds a report on a *neutral literature survey*
+# (kind=litreview). <id> is <exp-or-program>::<slug> (almost always program::<slug>) or a bare
+# <slug>. NOT [report:] — a litreview has no conclusion to rest on; it carries an obligation: the
+# citing report must address each of the litreview's must-confront claims (the omissions audit).
+_LITREVIEW_RE = re.compile(r"\[litreview:\s*([^\[\]]+?)\s*\]")
+# A waiver for one must-confront claim: [litreview-waive:<claim-id>] — used in the report's
+# assumptions section to account for a must-confront claim that does not bear on this report's
+# argument. The hyphen keeps it disjoint from _LITREVIEW_RE (which requires ':' after "litreview").
+_LITREVIEW_WAIVE_RE = re.compile(r"\[litreview-waive:\s*([^\[\]]+?)\s*\]")
 # An experiment folder id prefix (K1-YYMMXX …), to derive an exp_id from a folder name.
 _EXP_ID_RE = re.compile(r"^\s*(K1-[A-Za-z0-9]+)")
 
@@ -181,6 +191,8 @@ def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
     embeds: list[dict[str, Any]] = []
     report_cites: list[dict[str, Any]] = []
     lit_cites: list[dict[str, Any]] = []
+    litreview_cites: list[dict[str, Any]] = []
+    litreview_waives: list[dict[str, Any]] = []
     for n, line in _iter_lines_outside_fences(text):
         for m in _CITE_RE.finditer(line):
             citations.append({"id": m.group(1).strip(), "line": n})
@@ -188,10 +200,15 @@ def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
             report_cites.append({"id": m.group(1).strip(), "line": n})
         for m in _LIT_RE.finditer(line):
             lit_cites.append({"id": m.group(1).strip(), "line": n})
+        for m in _LITREVIEW_RE.finditer(line):
+            litreview_cites.append({"id": m.group(1).strip(), "line": n})
+        for m in _LITREVIEW_WAIVE_RE.finditer(line):
+            litreview_waives.append({"id": m.group(1).strip(), "line": n})
         for m in _EMBED_RE.finditer(line):
             embeds.append({"target": m.group(1).strip(), "line": n})
     return {"citations": citations, "embeds": embeds, "report_cites": report_cites,
-            "lit_cites": lit_cites}
+            "lit_cites": lit_cites, "litreview_cites": litreview_cites,
+            "litreview_waives": litreview_waives}
 
 
 def parse_sections(text: str) -> dict[str, Any]:
@@ -214,6 +231,8 @@ def parse_sections(text: str) -> dict[str, Any]:
     def _clean(s: str) -> str:
         s = _CITE_RE.sub("", s)
         s = _REPORT_RE.sub("", s)
+        s = _LITREVIEW_WAIVE_RE.sub("", s)   # before _LIT_RE/_LITREVIEW_RE (disjoint, but explicit)
+        s = _LITREVIEW_RE.sub("", s)
         s = _LIT_RE.sub("", s)
         s = _EMBED_RE.sub("", s)
         return s.strip()
@@ -829,6 +848,94 @@ def resolve_report_paths(cid: str, home: Path) -> list[Path]:
     return sorted(home.glob(f"**/reports/{cid}/report.md"))
 
 
+def resolve_litreview_paths(cid: str, home: Path) -> list[Path]:
+    """Resolve a ``[litreview:<id>]`` citation to review.md path(s). ``<id>`` is
+    ``<exp-or-program>::<slug>`` (almost always ``program::<slug>``) or a bare ``<slug>``
+    (searched tree-wide). Returns 0 (missing), 1 (resolved), or >1 (ambiguous) paths.
+    Mirrors :func:`resolve_report_paths` but over ``litreviews/<slug>/review.md``."""
+    cid = cid.strip()
+    if "::" in cid:
+        scope_id, slug = cid.split("::", 1)
+        if scope_id == "program":
+            cand = home / "program" / "litreviews" / slug / "review.md"
+            return [cand] if cand.is_file() else []
+        hits = [d / "litreviews" / slug / "review.md" for d in sorted(home.glob(f"{scope_id}*"))]
+        return [h for h in hits if h.is_file()]
+    return sorted(home.glob(f"**/litreviews/{cid}/review.md"))
+
+
+def litreview_module_prefix(review_path: Path, home: Path) -> str:
+    """The claim-id prefix for a litreview's own claim module:
+    ``<scope>::test_litreview_<slug>.py::`` — with the slug's hyphens mapped to underscores (a
+    Python module name can't carry hyphens — slug ``it-biodist`` → ``test_litreview_it_biodist.py``).
+    Every claim id starting with this belongs to the litreview; the convention is the single source
+    of truth for the obligation set and the staleness pin."""
+    sc = report_scope(review_path, home)
+    scope_id = "program" if sc["scope"] == "program" else (sc["exp_id"] or "program")
+    module = "test_litreview_" + str(sc["slug"]).replace("-", "_") + ".py"
+    return f"{scope_id}::{module}::"
+
+
+def litreview_must_confront(
+        review_path: Path, home: Path,
+        claim_index: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The ``{claim_id -> claim}`` a litreview marks **must-confront** — the obligation set a
+    citing report must address. Filters the global claim index to the litreview's own module
+    (:func:`litreview_module_prefix`) *and* a non-empty ``must_confront`` tag, so the obligation is
+    the litreview's contested core — not whatever the report happens to cite."""
+    prefix = litreview_module_prefix(review_path, home)
+    return {cid: c for cid, c in claim_index.items()
+            if cid.startswith(prefix) and c.get("must_confront")}
+
+
+def _claim_drift_sig(claim: dict[str, Any]) -> str:
+    """A stable signature of the drift-relevant facts of a literature claim — its ``outcome`` and
+    ``strength`` plus, per source, the citekey + the quoted/paraphrased span + the retraction flag.
+    Changes exactly when a cited claim *drifts* in a way a citing report must re-examine: a strength
+    re-grade, a paraphrase/quote edit, or a newly-retracted source."""
+    ev = claim.get("evidence") or {}
+    srcs = ev.get("lit_sources") if isinstance(ev, dict) else None
+    src_sigs = sorted(
+        (str(s.get("citekey") or ""), str(s.get("quote") or s.get("paraphrase") or ""),
+         bool((s.get("credibility") or {}).get("is_retracted")))
+        for s in (srcs or []) if isinstance(s, dict))
+    return json.dumps([str(claim.get("outcome")), str(claim.get("strength")), src_sigs],
+                      sort_keys=True)
+
+
+def litreview_pin_sha(review_path: Path, home: Path,
+                      claim_index: dict[str, dict[str, Any]], cited_ids: set[str]) -> str:
+    """The staleness pin a citing report records for one ``[litreview:]`` edge: a sha over the
+    litreview's **must-confront set** (membership) + the drift signatures of the litreview claims
+    the report **cites** (``cited_ids`` ∩ the litreview's module). It changes iff the must-confront
+    set gains/loses a claim or a cited claim drifts — the two changes that can break the report's
+    obligation; a non-cited, non-must-confront claim changing leaves it untouched (so the litreview
+    can grow without a BROKEN cascade). See references/litreview.md → *Staleness*."""
+    prefix = litreview_module_prefix(review_path, home)
+    must_confront = sorted(cid for cid, c in claim_index.items()
+                           if cid.startswith(prefix) and c.get("must_confront"))
+    cited = sorted(cid for cid in cited_ids if cid.startswith(prefix))
+    payload = {"must_confront": must_confront,
+               "cited": {cid: _claim_drift_sig(claim_index[cid]) for cid in cited}}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def litreview_pins(text: str) -> dict[str, str]:
+    """The ``litreview_pins`` mapping (``{litreview-id -> recorded pin sha}``) from a report's YAML
+    front matter, or ``{}`` if absent/malformed. The report records the pin it last re-examined the
+    litreview against; the audit recomputes the current pin and flags ``stale-litreview`` on drift."""
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+    if not m:
+        return {}
+    try:
+        import yaml
+        data = yaml.safe_load(m.group(1)) or {}
+    except Exception:
+        return {}
+    pins = data.get("litreview_pins") if isinstance(data, dict) else None
+    return {str(k): str(v) for k, v in pins.items()} if isinstance(pins, dict) else {}
+
+
 def audit(report_path: Path, home: Path | None = None,
           _seen: frozenset[str] | None = None) -> dict[str, Any]:
     """Mechanically validate a report's citations, embeds, and report-citations.
@@ -998,6 +1105,74 @@ def audit(report_path: Path, home: Path | None = None,
                                  "detail": detail})
         lit_cites.append(rec)
 
+    # ---- litreview citations + the omissions audit ------------------------- #
+    # A [litreview:<id>] obliges the report to ADDRESS each of that litreview's must-confront
+    # claims: cite it ([claim:]/[lit:] anywhere in the report) or waive it
+    # ([litreview-waive:<id>] in the assumptions section). The contested core is the obligation,
+    # by design — not every claim of the survey. An unaddressed must-confront claim is blocking.
+    cited_ids: set[str] = set()                      # claims the report actually cites (for the pin)
+    for cit in parsed["citations"] + parsed.get("lit_cites", []):
+        cands = resolve_citation(cit["id"], claim_index)
+        if len(cands) == 1:
+            cited_ids.add(cands[0])
+    addressed: set[str] = set(cited_ids)             # cited OR waived satisfies the obligation
+    for w in parsed.get("litreview_waives", []):
+        addressed.add(w["id"])                       # waive by exact claim_id …
+        cands = resolve_citation(w["id"], claim_index)
+        if len(cands) == 1:                          # … or by a resolvable short id
+            addressed.add(cands[0])
+    pins = litreview_pins(text)
+
+    litreview_cites: list[dict[str, Any]] = []
+    for lrc in parsed.get("litreview_cites", []):
+        cid, line = lrc["id"], lrc["line"]
+        rec = {"id": cid, "line": line}
+        paths = resolve_litreview_paths(cid, home)
+        if not paths:
+            rec["verdict"] = "missing"
+            findings.append({"kind": "missing-litreview", "line": line, "cite": cid,
+                             "detail": "no litreview with this id; write the litreview first"})
+        elif len(paths) > 1:
+            rec["verdict"] = "ambiguous"
+            findings.append({"kind": "ambiguous-litreview", "line": line, "cite": cid,
+                             "detail": f"matches {len(paths)} litreviews — qualify with <scope>::<slug>"})
+        else:
+            target = paths[0].resolve()
+            rec["litreview"] = _rel_or_name(target, home)
+            mc = litreview_must_confront(target, home, claim_index)
+            rec["must_confront"] = sorted(mc)
+            unaddressed = sorted(uid for uid in mc if uid not in addressed)
+            rec["unaddressed"] = unaddressed
+            if unaddressed:
+                rec["verdict"] = "unaddressed-must-confront"
+                for uid in unaddressed:
+                    reason = mc[uid].get("must_confront")
+                    findings.append({
+                        "kind": "unaddressed-must-confront", "line": line, "cite": cid,
+                        "claim_id": uid,
+                        "detail": f"must-confront claim not cited or waived: "
+                                  f"{_short_claim_id(uid)}"
+                                  + (f" — {reason}" if reason else "")})
+            else:
+                rec["verdict"] = "backed"
+            # staleness pin: did the must-confront set / a cited claim drift since last re-examined?
+            cur_pin = litreview_pin_sha(target, home, claim_index, cited_ids)
+            rec["pin"] = cur_pin[:12]
+            recorded = pins.get(cid)
+            if recorded:
+                rec["recorded_pin"] = str(recorded)
+                if not cur_pin.startswith(str(recorded)):
+                    findings.append({
+                        "kind": "stale-litreview", "line": line, "cite": cid,
+                        "detail": "the litreview's must-confront set or a cited claim changed since "
+                                  f"pinned (pin={str(recorded)[:12]}, now={cur_pin[:12]}) — "
+                                  "re-examine, then re-pin litreview_pins in the front matter"})
+                    if rec["verdict"] == "backed":
+                        rec["verdict"] = "stale-litreview"
+            elif not unaddressed:
+                rec["pin_unrecorded"] = True         # advisory nudge (non-blocking)
+        litreview_cites.append(rec)
+
     # Non-blocking: recall aids for the §3 review subagent, NOT part of the GROUNDED gate.
     # unsupported-quantity catches a number no cited claim asserts; weak-load-bearing catches a
     # bound backed only by non-robust claim(s) — incommensurate evidence the prose may not hedge.
@@ -1014,6 +1189,7 @@ def audit(report_path: Path, home: Path | None = None,
         "embeds": embeds,
         "report_cites": report_cites,
         "lit_cites": lit_cites,
+        "litreview_cites": litreview_cites,
         "findings": findings,
         "advisories": advisories,
         "status": status,
@@ -1088,6 +1264,8 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     rnum: dict[str, int] = {}          # report-cite id -> 1-based index
     lorder: list[str] = []
     lnum: dict[str, int] = {}          # lit-cite id -> 1-based index
+    lvorder: list[str] = []
+    lvnum: dict[str, int] = {}         # litreview-cite id -> 1-based index
 
     def _make_footnote_sub(order_list: list[str], num_dict: dict[str, int], prefix: str):
         """A footnote-marker substitution: assign each distinct cited id a 1-based,
@@ -1105,6 +1283,7 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     _cite_sub = _make_footnote_sub(order, num, "claim")
     _report_sub = _make_footnote_sub(rorder, rnum, "report")
     _lit_sub = _make_footnote_sub(lorder, lnum, "lit")
+    _litreview_sub = _make_footnote_sub(lvorder, lvnum, "litreview")
 
     def _embed_sub(m: re.Match) -> str:
         path = m.group(1).strip()
@@ -1122,9 +1301,13 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     # Bind each note marker to the preceding word: drop any whitespace (incl. a soft line
     # wrap) immediately before a citation, so the superscript attaches like a footnote mark
     # rather than drifting onto the next line.
-    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _CITE_RE.pattern, _cite_sub, text)
+    # Drop waivers first (audit annotations in the assumptions section, not prose to typeset);
+    # disjoint from _LITREVIEW_RE (hyphen vs. colon), stripped explicitly so the bracket never renders.
+    body = _LITREVIEW_WAIVE_RE.sub("", text)
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _CITE_RE.pattern, _cite_sub, body)
     body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _REPORT_RE.pattern, _report_sub, body)
     body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _LIT_RE.pattern, _lit_sub, body)
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _LITREVIEW_RE.pattern, _litreview_sub, body)
     # embeds can span only a line each; substitute per match on the citation-substituted text
     body = _EMBED_RE.sub(_embed_sub, body)
 
@@ -1166,9 +1349,19 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
             ays.append(_author_year(s))
         return f"{stmt} ({'; '.join(ays)})" if ays else stmt
 
+    def _litreview_note_text(cid: str) -> str:
+        # A litreview citation footnotes the survey it rests on (title + id) — the reader sees
+        # which neutral evidence map the argument draws from. No conclusion (a litreview has none).
+        paths = resolve_litreview_paths(cid, home)
+        if len(paths) == 1:
+            title = _report_title(paths[0].read_text(encoding="utf-8")) or cid
+            return f"Literature review: *{title}* — `{cid}`"
+        return f"litreview `{cid}` ({'unresolved' if not paths else 'ambiguous'})"
+
     defs = [f"[^claim-{num[cid]}]: {_note_text(cid)}" for cid in order]
     defs += [f"[^report-{rnum[cid]}]: {_report_note_text(cid)}" for cid in rorder]
     defs += [f"[^lit-{lnum[cid]}]: {_lit_note_text(cid)}" for cid in lorder]
+    defs += [f"[^litreview-{lvnum[cid]}]: {_litreview_note_text(cid)}" for cid in lvorder]
 
     def _bib_entry(s: dict[str, Any]) -> tuple[tuple, str]:
         # (sort-key, rendered entry) for one cited paper: "Authors (Year). *Title*. Venue. <doi>".
@@ -1576,6 +1769,21 @@ def render_audit(result: dict[str, Any]) -> str:
             (lc.get("strength") if lc["verdict"] == "backed" else lc["verdict"]) for lc in lits)
         spread = ", ".join(f"{n} {k}" for k, n in tally.items())
         lines.append(f"  literature: {len(lits)} cited — {spread}")
+    for lr in result.get("litreview_cites", []):
+        if lr["verdict"] == "backed":
+            n = len(lr.get("must_confront") or [])
+            mark = f"✅ backed  ({n} must-confront, all addressed)"
+            if lr.get("pin_unrecorded"):
+                mark += f"  [unpinned — record litreview_pins: {{{lr['id']}: \"{lr.get('pin','')}\"}}]"
+        elif lr["verdict"] == "unaddressed-must-confront":
+            n = len(lr.get("unaddressed") or [])
+            mark = f"❌ unaddressed-must-confront ({n} not cited/waived)"
+        elif lr["verdict"] == "stale-litreview":
+            mark = "❌ stale-litreview (must-confront set or a cited claim drifted — re-examine + re-pin)"
+        else:
+            mark = f"❌ {lr['verdict']}"
+        tail = f"  → {lr.get('litreview')}" if lr.get("litreview") else ""
+        lines.append(f"  [litreview L{lr['line']}] {lr['id']}: {mark}{tail}")
     for f in result["findings"]:
         if f.get("detail"):
             loc = f.get("cite") or f.get("embed") or ""
