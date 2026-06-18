@@ -250,7 +250,7 @@ def test_render_markdown_assembles(tmp_path):
     md = _report_md(exp, _GOOD_BODY)
 
     out = R.render_markdown(md, home=tmp_path)
-    # citations are native pandoc footnotes (endnotes.lua relocates them on render)
+    # citations are native pandoc footnotes (typeset per-page by the writer on render)
     assert "[^claim-1]" in out
     # the note reads statement-first, then a compact claim-id citation (test-file + the
     # `test_` prefix dropped); no outcome / strength
@@ -410,9 +410,46 @@ def test_render_pdf_if_pandoc(tmp_path):
     assert Path(res["output"]).is_file()
     html = out.read_text(encoding="utf-8")
     assert html.strip()
-    # endnotes.lua relocated the footnote into a "Notes" endnotes section with anchors
-    assert 'id="notes"' in html
-    assert 'id="en-1"' in html and 'href="#en-1"' in html
+    # the citation renders as a native footnote (no endnotes relocation): pandoc emits a
+    # footnotes section + cross-linked in-text marker (#fn1 / #fnref1)
+    assert 'id="fn1"' in html and 'href="#fn1"' in html
+    assert 'id="fnref1"' in html
+
+
+def test_strip_front_matter_keys():
+    md = ("---\ntitle: A report\nauthor: Kicho Science\ndate: 2026-06-17\n"
+          "classification: INTERNAL\n---\n\n# Body\n\ntext\n")
+    out = R._strip_front_matter_keys(md, ("author", "date"))
+    assert "author:" not in out and "date:" not in out
+    # title + other keys + the body survive untouched
+    assert "title: A report" in out and "classification: INTERNAL" in out
+    assert "# Body" in out and out.endswith("text\n")
+    # no front matter → no-op
+    assert R._strip_front_matter_keys("# Body\n", ("author", "date")) == "# Body\n"
+
+
+def test_render_unnumbers_references_and_dates_footer(tmp_path):
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc not installed; render toolchain unavailable")
+    exp = _exp(tmp_path)
+    _report_json(exp)
+    body = ("---\ntitle: KD\nauthor: Kicho Science\ndate: 2026-06-17\n---\n\n"
+            "# Knockdown summary\n\n"
+            "Sustained knockdown of 53% [claim:test_knockdown].\n\n"
+            "## References\n\n"
+            "1. Noor et al. *Journal* (2015). doi:10.1/x\n"
+            "2. Smith et al. *Journal* (2020). doi:10.2/y\n")
+    md = _report_md(exp, body)
+    out = tmp_path / "out.html"
+    R.render(md, out, home=tmp_path, to="html")
+    html = out.read_text(encoding="utf-8")
+    # References render as an unnumbered list: references.lua turned the ordered list into a
+    # bullet list, so a <ul> appears (the source has no other bullet list; the only other
+    # list pandoc emits is the footnotes <ol>).
+    assert "Noor et al." in html and "Smith et al." in html
+    assert "<ul>" in html
+    # author/date are stripped from the title block (no byline in the rendered header)
+    assert "Kicho Science" not in html
 
 
 # --------------------------------------------------------------------------- #

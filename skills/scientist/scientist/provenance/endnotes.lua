@@ -1,7 +1,12 @@
 --[[
 endnotes.lua — a pandoc filter that turns footnotes into endnotes.
 
-Used by `sci report`'s renderer (ROADMAP §5). The report's `[claim:<id>]` citations are
+NOTE: no longer wired into `sci report`'s render chain — citations now render as true
+per-page footnotes (locality over a relocated endnotes section). Kept in-tree for reference
+and in case an endnotes layout is wanted again; re-add `--lua-filter=endnotes.lua` to the
+pandoc invocation in report.py to restore the old behavior.
+
+Originally used by `sci report`'s renderer (ROADMAP §5). The report's `[claim:<id>]` citations are
 assembled as native pandoc footnotes (hyperlinked, auto-numbered); this filter relocates
 them — at the *AST* level, so it is format-agnostic and does no typesetting itself — into a
 single "Grounding notes" section at the end of the document. Each in-text marker links to
