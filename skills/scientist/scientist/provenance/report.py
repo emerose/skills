@@ -50,6 +50,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -638,6 +639,12 @@ def prose_quantity_advisories(
 # %/×/fold quantity (a bound), and ONLY when EVERY cited claim backing it is non-robust. A
 # quantity also backed by one strong, independent, in-scope claim is not surfaced — the weak
 # corroborating cite alongside a strong one is fine. This under-flags on purpose.
+#
+# The all-non-robust gate is the key precision lever and is deliberate: `strength<strong` alone
+# is intentionally NOT sufficient to flag a paragraph. A lone `moderate` cite is common (most
+# literature claims in a real report are `moderate`) and usually fine; flagging every one of them
+# would flood the §3 reviewer and train waive-throughs. So the advisory fires only when EVERY
+# backing claim of a bound is non-robust — under-flagging for precision, by design.
 
 # A lit source whose locator is weaker than tier 1 (a paragraph/section chunk, not a sentence).
 _WEAK_LOCATOR_TIER = 2
@@ -661,6 +668,21 @@ def _independent_groups(claim: dict[str, Any]) -> int | None:
     rev = claim.get("reviewed") or {}
     ig = rev.get("independent_groups")
     return int(ig) if isinstance(ig, (int, float)) else None
+
+
+def _review_note(claim: dict[str, Any]) -> str | None:
+    """The human review-note / caveat text for ``claim``, when the grounding report carries one —
+    the single most useful thing to put in front of the §3 reviewer, because it is where the
+    author's own "all one lab" / scope caveat already lives. In real reports this rides on
+    ``reviewed.note`` (the ``@reviewed(note=…)`` / independent-review path); a top-level
+    ``note``/``caveats`` is also honored if present. Machine-judged claims carry no note
+    (``reviewed`` is null) — they have only the per-source signals, so this returns ``None`` and
+    the advisory surfaces strength + the structural deficits instead."""
+    rev = claim.get("reviewed") or {}
+    for src in (rev.get("note"), claim.get("note"), claim.get("caveats")):
+        if isinstance(src, str) and src.strip():
+            return " ".join(src.split())
+    return None
 
 
 def claim_robustness_weaknesses(claim: dict[str, Any]) -> list[str]:
@@ -723,10 +745,16 @@ def incommensurate_evidence_advisories(
     paragraph is non-robust — one strong, in-scope backing clears it. Skips ``[report:]`` and
     uncited paragraphs, like the unsupported-quantity advisory.
 
-    Non-blocking: returns ``{kind, line, value, cites, weaknesses, sentence}`` per candidate,
-    where ``weaknesses`` maps each cited claim to its named deficits. The tool cannot judge
-    *which* claims are load-bearing or whether a source's measured scope transfers to the use —
-    those stay §3/human judgments; this just raises the candidate."""
+    Non-blocking: returns ``{kind, line, value, cites, weaknesses, claims, sentence}`` per
+    candidate, where ``weaknesses`` maps each cited claim to its named deficits and ``claims``
+    carries, per cited claim, the evidence the author had — its ``strength``, its named
+    ``weaknesses``, and its review ``note`` text when the grounding report records one
+    (``@reviewed(note=…)`` / caveats). Surfacing the note is the point: the motivating failure's
+    signal *existed* — the claim's own review note said "all one lab" — but nothing put it in
+    front of the reviewer. The tool still cannot judge *which* claims are load-bearing or whether
+    a source's measured scope transfers to the use — those stay §3/human judgments; this just
+    raises the candidate, now with the strength + note so the reviewer can weigh scope/robustness
+    with what the author saw."""
     advisories: list[dict[str, Any]] = []
     for start, ptext in _paragraphs(text):
         if _REPORT_RE.search(ptext):
@@ -742,7 +770,13 @@ def incommensurate_evidence_advisories(
                 continue
             claim = claim_index[cands[0]]
             weaknesses = claim_robustness_weaknesses(claim)
-            resolved.append({"cite": _short_claim_id(cands[0]), "weaknesses": weaknesses})
+            short = _short_claim_id(cands[0])
+            # Surface the evidence the author had: strength + the review note ("all one lab" etc.)
+            # when present, so the §3 reviewer can weigh centrality vs. robustness, not just see a
+            # bare tag. note is None for machine-judged claims (they carry no review note).
+            rec = {"cite": short, "strength": str(claim.get("strength") or "") or None,
+                   "weaknesses": weaknesses, "note": _review_note(claim)}
+            resolved.append(rec)
             if not weaknesses:                  # a robust backing clears the whole paragraph
                 all_non_robust = False
         if not resolved or not all_non_robust:
@@ -753,6 +787,7 @@ def incommensurate_evidence_advisories(
             "value": sorted(quantities),
             "cites": [r["cite"] for r in resolved],
             "weaknesses": {r["cite"]: r["weaknesses"] for r in resolved},
+            "claims": resolved,
             "sentence": " ".join(ptext.split())[:240],
         })
     return advisories
@@ -1454,7 +1489,6 @@ def render_audit(result: dict[str, Any]) -> str:
     if lits:
         # A separate literature line so the green badge never launders attribution as
         # data-grounding: show the tier spread across all [lit:] citations.
-        from collections import Counter
         tally = Counter(
             (lc.get("strength") if lc["verdict"] == "backed" else lc["verdict"]) for lc in lits)
         spread = ", ".join(f"{n} {k}" for k, n in tally.items())
@@ -1466,10 +1500,26 @@ def render_audit(result: dict[str, Any]) -> str:
     adv = result.get("advisories", [])
     for a in adv:
         cites = ", ".join(a.get("cites", []))
-        lines.append(f"  ~ {a['kind']} (L{a['line']}) {cites}: {_fmt_qty(a['value'])} not "
-                     f"asserted by the cited claim(s) — verify it isn't a derived/mis-transcribed number")
+        if a["kind"] == "weak-load-bearing":
+            vals = "/".join(_fmt_qty(v) for v in a["value"])
+            lines.append(f"  ~ {a['kind']} (L{a['line']}) {cites}: bound {vals} backed only by "
+                         f"non-robust claim(s) — weigh centrality vs. robustness (§3)")
+            for rec in a.get("claims", []):
+                bits = []
+                if rec.get("strength"):
+                    bits.append(f"strength={rec['strength']}")
+                bits.extend(w for w in rec.get("weaknesses", []) if w not in bits)
+                tags = ", ".join(dict.fromkeys(bits))
+                lines.append(f"      {rec['cite']}: {tags}")
+                if rec.get("note"):
+                    lines.append(f"        note: {rec['note']}")
+        else:
+            lines.append(f"  ~ {a['kind']} (L{a['line']}) {cites}: {_fmt_qty(a['value'])} not "
+                         f"asserted by the cited claim(s) — verify it isn't a derived/mis-transcribed number")
     if adv:
-        lines.append(f"  advisories: {len(adv)} unsupported-quantity (non-blocking; for the "
+        kinds = Counter(a["kind"] for a in adv)
+        summary = ", ".join(f"{n} {k}" for k, n in kinds.items())
+        lines.append(f"  advisories: {summary} (non-blocking; for the "
                      f"§3 review subagent — not part of GROUNDED)")
     return "\n".join(lines)
 

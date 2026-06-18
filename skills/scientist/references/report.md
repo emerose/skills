@@ -357,9 +357,10 @@ on the prior draft cannot reveal that the evidence moved or that a conclusion wa
    voice, not a paraphrase of the old one. Re-derive every number from the evidence; do not carry a
    value over because you remember it.
 4. **Finalize on the standard path.** `sci report` audit to GROUNDED, the §3 prose↔claims pass in a
-   fresh-context subagent (hand it the cited claims' *source quotes*), clear the unsupported-quantity
-   and weak-load-bearing advisories (the latter by hedging the load-bearing bound in prose or
-   strengthening its evidence — see "Candor proportional to centrality"), render.
+   fresh-context subagent (hand it the cited claims' *source quotes*, plus each weak-load-bearing
+   claim's strength + review note), address the unsupported-quantity and weak-load-bearing advisories
+   (the latter by hedging the load-bearing bound in prose or strengthening its evidence — or waiving
+   it with a one-line assumptions note; see "Candor proportional to centrality"), render.
 5. **Then diff against the committed version and report material divergence.** Per the brief, a
    *materially* different regeneration is a signal to investigate (the evidence moved, or the prior
    draft was steered), not an error to hide — call it out. Near-identical conclusions in genuinely
@@ -702,11 +703,21 @@ fires only when **every** cited claim in the paragraph is non-robust — one str
 in-scope backing clears it — and names the specific deficit per claim (`strength<strong`,
 `single-group` = one lab / `independent_groups<=1`, `suggestive-source` = indirect,
 `secondary-source` = a relay, `abstract-only`, `weak-locator` = a tier-≥2 chunk, or an
-`interpretive`/`external` claim doing the work). This is the mechanical half of the **candor
-principle** below: it raises *candidates* where importance and robustness may diverge. It cannot
-judge which claim is actually load-bearing, nor whether a source's *measured scope* transfers to
-the use (a prenatal-model datum bounding a postnatal therapy) — those stay §3/human judgments; the
-advisory just surfaces the paragraph for the reviewer to weigh.
+`interpretive`/`external` claim doing the work). For each flagged claim it also hands the reviewer
+the evidence the author had — the claim's `strength` and its review **note** text (the
+`@reviewed(note=…)`/caveats — the "all one lab" caveat the author already wrote, when the grounding
+report records one; machine-judged claims carry no note, only the per-source signals) — so the
+reviewer can weigh scope and robustness with what the author saw, not a bare tag. This is the
+mechanical half of the **candor principle** below: it raises *candidates* where importance and
+robustness may diverge. It cannot judge which claim is actually load-bearing, nor whether a
+source's *measured scope* transfers to the use (a prenatal-model datum bounding a postnatal
+therapy) — those stay §3/human judgments; the advisory just surfaces the paragraph for the reviewer
+to weigh.
+
+The mechanical advisory covers only quantitative **bounds** (a %/×/fold magnitude). A purely
+*qualitative* load-bearing claim on weak evidence produces no advisory and remains the §3
+reviewer's responsibility via the verdict mandate — the recall-aid intentionally doesn't try to
+catch those, because flagging every qualitative claim on a `moderate` source would flood.
 
 #### Candor proportional to centrality — a load-bearing claim on thin evidence must say so
 
@@ -753,7 +764,11 @@ re-check the citation presence the audit already passed):
   lets it judge *robustness* (per-source `group`/`primary`/`test`/`mode`/`tier`) for the
   centrality check below;
 - the audit's `advisories` (both `unsupported-quantity` and `weak-load-bearing`) — the mechanical
-  candidates it must adjudicate;
+  candidates it must adjudicate. For each `weak-load-bearing`-flagged claim the advisory carries its
+  `strength`, its review **note** (the author's own caveat, when recorded), and the named per-source
+  robustness signals (`single-group`/`suggestive-source`/`secondary-source`/`abstract-only`/
+  `weak-locator`/`interpretive`/`external`) — hand all of these to the reviewer so it can judge
+  scope and robustness with the same evidence the author had;
 - the report's `prompt.md` (so it can check sub-topic coverage and that no presupposed conclusion
   was smuggled in).
 
@@ -765,7 +780,9 @@ claim or bound, weigh how robust its evidence is against how much the conclusion
 flag any the conclusion leans on hard whose support is non-robust (single lab, `suggestive`/
 secondary/abstract-only source, contested, used outside its measured scope, a tidy bound on one
 study, an analogy) where the prose does not visibly acknowledge that thinness in the sentence that
-uses it**; list load-bearing disconfirming evidence the brief asked for that is absent." (Fresh
+uses it, then either hedge it there or waive it with a one-line note in the assumptions/weak-support
+section** (it is address-or-waive, not a hard stop); list load-bearing disconfirming evidence the
+brief asked for that is absent." (Fresh
 context defeats *contextual* bias; the specific prompt is what guards against the *systematic*
 model bias a same-model subagent still shares.) Use the `weak-load-bearing` advisories as a
 starting candidate list, but do not stop there: the tool sees only %/×/fold bounds and the
@@ -775,13 +792,17 @@ strength/independence signals, not a qualitative load-bearing claim or a scope m
 `weak-backing` / `derived` / `artifact-only` / `incommensurate-evidence` / `missing-disconfirmer`),
 the claim it maps to (or that none does), and the claim's value where relevant. **Blocking** (must
 clear before done): `unbacked` numeric, `off-topic`, `weak-backing`, `derived`, claim-value ≠
-sentence-value, any contradicted backing, and an `incommensurate-evidence` finding — a
-load-bearing claim/bound on non-robust evidence with **no strength-discussion in the prose where it
-does its work** (clear it by hedging in that sentence and marking the bound provisional, or by
-strengthening the evidence; not by deleting the assumptions-list note). **Surfaced** (address or
-explicitly waive in the assumptions section): unbacked *qualitative* conclusions and missing
-disconfirmers. An empty blocking list is the objective stop condition — *not* the author's
-satisfaction.
+sentence-value, any contradicted backing. **Surfaced** (address or explicitly waive in the
+assumptions section): unbacked *qualitative* conclusions, missing disconfirmers, and
+`incommensurate-evidence` — a load-bearing claim/bound on non-robust evidence with no
+strength-discussion in the prose where it does its work. Like `missing-disconfirmer`, the reviewer
+must EITHER ensure the prose discusses the claim's evidentiary strength where it does its work
+(hedge in that sentence and mark the bound provisional, or strengthen the evidence — not delete the
+assumptions-list note) OR explicitly waive it with a one-line note in the assumptions/weak-support
+section. It is deliberately *not* a hard auto-fail gate: a hard block on a genuine judgment call
+trains reflexive waive-throughs, and the goal is that the text ends up acknowledging the weakness,
+not that the audit refuses. An empty blocking list is the objective stop condition — *not* the
+author's satisfaction.
 
 ### Required: a voice/tone review (fresh-context)
 

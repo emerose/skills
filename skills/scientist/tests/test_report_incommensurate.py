@@ -125,6 +125,46 @@ def test_paragraph_scope_joins_wrapped_lines():
     assert len(adv) == 1 and 50.0 in adv[0]["value"]
 
 
+# --- the payload surfaced to the §3 subagent (strength + review note) ------- #
+
+def test_payload_carries_strength_and_review_note():
+    # The key change: the advisory hands the reviewer each flagged claim's strength and its review
+    # note (the "all one lab" caveat the author already wrote), not just a bare weakness tag.
+    claim = _lit("test_floor", "~50% loss tolerated", strength="moderate", sources=[
+        {"group": "elgersma", "test": "suggestive", "primary": True, "mode": "fulltext", "tier": 1}])
+    claim["reviewed"] = {"independent_groups": 1, "note": "all one lab; prenatal model"}
+    idx = _index(claim)
+    adv = R.incommensurate_evidence_advisories(
+        "The ceiling sits near 50% [claim:test_floor].", idx)
+    assert len(adv) == 1
+    rec = adv[0]["claims"][0]
+    assert rec["strength"] == "moderate"
+    assert rec["note"] == "all one lab; prenatal model"
+    assert "single-group" in rec["weaknesses"]
+
+
+def test_machine_judged_claim_has_no_note_but_carries_strength():
+    # Machine-judged claims carry no review note (reviewed is null) — only per-source signals.
+    # The payload still surfaces strength + the structural weaknesses; note is None.
+    idx = _index(_lit("test_floor", "~50%", strength="moderate", sources=[
+        {"group": "elgersma", "test": "suggestive", "primary": True, "mode": "fulltext", "tier": 1}]))
+    adv = R.incommensurate_evidence_advisories(
+        "The ceiling sits near 50% [claim:test_floor].", idx)
+    rec = adv[0]["claims"][0]
+    assert rec["note"] is None and rec["strength"] == "moderate"
+
+
+def test_review_note_falls_back_to_top_level_note_and_caveats():
+    c = {"node": "n", "kind": "literature", "strength": "moderate",
+         "evidence": {"lit_sources": []}, "caveats": "  contested  result  "}
+    assert R._review_note(c) == "contested result"
+    c2 = {"node": "n", "kind": "literature", "strength": "moderate",
+          "evidence": {"lit_sources": []}, "note": "single study"}
+    assert R._review_note(c2) == "single study"
+    assert R._review_note({"node": "n", "kind": "result", "strength": "strong",
+                           "evidence": {}}) is None
+
+
 def test_advisory_present_in_audit_and_never_flips_grounded(tmp_path):
     # End-to-end: a real grounding report + a report citing a single-group moderate claim with a
     # bound. The audit must surface a weak-load-bearing advisory but stay GROUNDED.
@@ -153,3 +193,24 @@ def test_advisory_present_in_audit_and_never_flips_grounded(tmp_path):
     assert result["status"] == "GROUNDED"
     kinds = [a["kind"] for a in result["advisories"]]
     assert "weak-load-bearing" in kinds
+
+
+def test_render_audit_shows_strength_note_and_does_not_crash_on_bound_list():
+    # render_audit must handle a weak-load-bearing advisory (its `value` is a *list*, unlike
+    # unsupported-quantity) and print the surfaced strength + review note.
+    result = {
+        "report": "demo/report.md", "status": "GROUNDED", "scope": "experiment",
+        "citations": [], "embeds": [], "report_cites": [], "lit_cites": [], "findings": [],
+        "advisories": [{
+            "kind": "weak-load-bearing", "line": 3, "value": [50.0],
+            "cites": ["K1::floor"],
+            "weaknesses": {"K1::floor": ["strength=moderate", "single-group"]},
+            "claims": [{"cite": "K1::floor", "strength": "moderate",
+                        "weaknesses": ["strength=moderate", "single-group"],
+                        "note": "all one lab; prenatal model"}],
+            "sentence": "The ceiling sits near 50%."}]}
+    out = R.render_audit(result)
+    assert "weak-load-bearing" in out
+    assert "single-group" in out
+    assert "all one lab" in out
+    assert "1 weak-load-bearing" in out      # summary counts by kind, not hard-coded label
