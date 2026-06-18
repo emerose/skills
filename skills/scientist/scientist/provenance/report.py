@@ -79,6 +79,10 @@ _REPORT_RE = re.compile(r"\[report:\s*([^\[\]]+?)\s*\]")
 # claim (kind=literature) that verifies a verbatim quote against a paper in the bibliographer
 # library and carries an agent support-review. Epistemically second-class to [claim:].
 _LIT_RE = re.compile(r"\[lit:\s*([^\[\]]+?)\s*\]")
+# A References / Bibliography / Works-cited section heading (any ATX level), used to detect a
+# hand-authored references list so the auto-generated bibliography defers to it (see
+# render_markdown). Matched per-line outside code fences, like the citation parse.
+_REFS_HEADING_RE = re.compile(r"(?i)^\s{0,3}#{1,6}\s+(references|bibliography|works cited)\s*$")
 # An experiment folder id prefix (K1-YYMMXX …), to derive an exp_id from a folder name.
 _EXP_ID_RE = re.compile(r"^\s*(K1-[A-Za-z0-9]+)")
 
@@ -126,6 +130,20 @@ def _author_year(src: dict[str, Any]) -> str:
         return f"{m.group(1).capitalize()} {m.group(2)}"
     yr = str(src.get("year") or "")
     return f"{ck} {yr}".strip() or "source"
+
+
+def _short_authors(authors_text: str) -> str:
+    """A compact ``First et al.`` lead from a stored ``authors_text`` ("Family, Given; …"):
+    one name verbatim, two joined with ``&``, three-or-more as ``First et al.``. Empty when
+    there are no names (the caller then falls back to the citekey-derived surname)."""
+    names = [p.split(",")[0].strip() for p in authors_text.split(";") if p.strip()]
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} & {names[1]}"
+    return f"{names[0]} et al."
 
 
 # --------------------------------------------------------------------------- #
@@ -1051,7 +1069,14 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     Citations are native footnotes (hyperlinked, auto-numbered): :func:`render` lets the
     writer typeset them as true bottom-of-page footnotes (native LaTeX ``\\footnote`` for
     PDF, native footnotes for HTML / docx) — locality over a relocated endnotes section.
-    The result is what the render is produced from."""
+
+    The literature cited via ``[lit:]`` is also collected into an auto-generated
+    ``# References`` section appended at the end — one entry per distinct paper
+    (author-year · title · DOI, from the fields each source snapshotted at grounding time),
+    sorted by author-year. The per-page footnote is the inline pointer; this is the
+    works-cited list. Skipped when the report already carries its own References /
+    Bibliography heading (the author then owns the list). The result is what the render is
+    produced from."""
     rp = Path(report_path).resolve()
     home = _resolve_home(home, rp)
     text = rp.read_text(encoding="utf-8")
@@ -1144,6 +1169,61 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     defs = [f"[^claim-{num[cid]}]: {_note_text(cid)}" for cid in order]
     defs += [f"[^report-{rnum[cid]}]: {_report_note_text(cid)}" for cid in rorder]
     defs += [f"[^lit-{lnum[cid]}]: {_lit_note_text(cid)}" for cid in lorder]
+
+    def _bib_entry(s: dict[str, Any]) -> tuple[tuple, str]:
+        # (sort-key, rendered entry) for one cited paper: "Authors (Year). *Title*. Venue. <doi>".
+        # All fields are read from what the source snapshotted at grounding time, so the
+        # bibliography needs no live library. Authors/year fall back to the citekey-derived
+        # surname+year (`<lastname><year>…`) for a source that predates the authors/venue snapshot
+        # (re-running the claims regenerates it with the full fields). Sorted author, year, title, ck.
+        ck = str(s.get("citekey") or "")
+        year = (s.get("year") or "").strip()
+        authors = _short_authors((s.get("authors_text") or "").strip())
+        if not authors or not year:
+            m = re.match(r"^([a-z]+)(\d{4})", ck)
+            if m:
+                authors = authors or m.group(1).capitalize()
+                year = year or m.group(2)
+        authors = authors or ck or "Anonymous"
+        title = (s.get("title") or "").strip()
+        venue = (s.get("venue") or "").strip()
+        doi = (s.get("doi") or "").strip()
+        bits = [f"{authors} ({year})." if year else f"{authors}."]
+        if title:
+            bits.append(f"*{title}*.")
+        if venue:
+            bits.append(f"{venue}.")
+        if doi:
+            bits.append(f"<{doi if doi.startswith('http') else 'https://doi.org/' + doi}>")
+        return ((authors.lower(), year, title.lower(), ck), " ".join(bits))
+
+    def _bibliography() -> str:
+        # An auto-generated works-cited list for the [lit:]-cited papers. Deferred to the
+        # author when the report already has its own References/Bibliography heading; otherwise
+        # one entry per distinct paper (by citekey) across every cited literature claim.
+        if not lorder or any(_REFS_HEADING_RE.match(ln)
+                             for _, ln in _iter_lines_outside_fences(text)):
+            return ""
+        seen: set[str] = set()
+        entries: list[tuple[tuple, str]] = []
+        for cid in lorder:
+            cands = resolve_citation(cid, claim_index)
+            if len(cands) != 1:
+                continue
+            for s in (claim_index[cands[0]].get("evidence") or {}).get("lit_sources", []):
+                ck = str(s.get("citekey") or "")
+                if not ck or ck in seen:
+                    continue
+                seen.add(ck)
+                entries.append(_bib_entry(s))
+        if not entries:
+            return ""
+        entries.sort()
+        return "\n\n# References\n\n" + "\n".join(f"- {e}" for _, e in entries) + "\n"
+
+    refs = _bibliography()
+    if refs:
+        body = body.rstrip() + refs
     if defs:
         # pandoc footnote definitions; the writer typesets them as per-page footnotes
         body = body.rstrip() + "\n\n" + "\n".join(defs) + "\n"

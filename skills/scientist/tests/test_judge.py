@@ -28,6 +28,8 @@ class FakePaper:
         self.title = "A paper"
         self.year = "2015"
         self.doi = "10.1/x"
+        self.authors_text = "Noor, Adila; Smith, Jane"
+        self.venue = "Nature Neuroscience"
         self.credibility = {}
         self.is_retracted = False
         self.document_id = document_id
@@ -128,6 +130,8 @@ def test_legacy_quote_only_unchanged(fake_paper, capture):
     rec = grounding.source("noor2015q", quote="53% knockdown")
     assert rec["quote"] == "53% knockdown"
     assert "paraphrase" not in rec and "tier" not in rec and "judge_status" not in rec
+    # the bibliographic display fields are snapshotted for the report bibliography
+    assert rec["authors_text"] == "Noor, Adila; Smith, Jane" and rec["venue"] == "Nature Neuroscience"
 
 
 def test_machine_mode_needs_both_or_quote(fake_paper, capture):

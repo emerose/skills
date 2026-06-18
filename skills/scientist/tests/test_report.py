@@ -398,6 +398,54 @@ def test_lit_stale_review_blocks(tmp_path):
     assert res["lit_cites"][0]["verdict"] == "stale-review"
 
 
+# --------------------------------------------------------------------------- #
+# auto-generated bibliography — the [lit:]-cited papers collected into # References
+# --------------------------------------------------------------------------- #
+_BIB_SOURCES = [
+    # rich: full authors + venue snapshotted (the post-snapshot grounding path)
+    {"citekey": "noor2015q", "title": "Allele-specific silencing", "year": "2015",
+     "doi": "10.1/x", "authors_text": "Noor, Adila; Smith, Jane; Lee, Kim",
+     "venue": "Nature Neuroscience", "system": "human", "test": "direct", "primary": True,
+     "group": "noor"},
+    # legacy: no authors_text/venue — the entry falls back to the citekey-derived surname+year
+    {"citekey": "abbott2020z", "title": "Knockdown durability", "year": "2020",
+     "doi": "https://doi.org/10.2/y", "system": "human", "test": "direct", "group": "abbott"},
+]
+
+
+def test_render_markdown_auto_bibliography(tmp_path):
+    # each distinct [lit:]-cited paper gets one entry (authors · year · title · venue · DOI),
+    # sorted by author — built purely from the fields the source snapshotted, no live library.
+    _lit_json(tmp_path, sources=_BIB_SOURCES)
+    out = R.render_markdown(_lit_report(tmp_path), home=tmp_path)
+
+    assert "\n# References\n" in out
+    # rich entry: ≥3 authors compact to "Noor et al.", venue included
+    assert ("Noor et al. (2015). *Allele-specific silencing*. Nature Neuroscience. "
+            "<https://doi.org/10.1/x>") in out
+    # legacy entry: surname+year recovered from the citekey, no venue
+    assert "Abbott (2020). *Knockdown durability*. <https://doi.org/10.2/y>" in out
+    # alphabetical by author: Abbott precedes Noor
+    assert out.index("Abbott (2020)") < out.index("Noor et al.")
+    # the inline citation is still a per-page footnote (the bibliography complements it)
+    assert "[^lit-1]" in out
+
+
+def test_render_markdown_bibliography_defers_to_authored(tmp_path):
+    # a report that manages its own References list suppresses the auto-generated one
+    _lit_json(tmp_path, sources=_BIB_SOURCES)
+    d = tmp_path / "program" / "reports" / "lit"
+    d.mkdir(parents=True, exist_ok=True)
+    md = d / "report.md"
+    md.write_text("# Lit\n\nA fact [lit:program::test_literature.py::test_lit].\n\n"
+                  "## References\n\n1. Hand-authored entry.\n", encoding="utf-8")
+    out = R.render_markdown(md, home=tmp_path)
+
+    assert out.count("References") == 1               # no second, auto-generated heading
+    assert "Hand-authored entry." in out
+    assert "Allele-specific silencing" not in out     # auto entries not injected
+
+
 def test_render_pdf_if_pandoc(tmp_path):
     if shutil.which("pandoc") is None:
         pytest.skip("pandoc not installed; render toolchain unavailable")
