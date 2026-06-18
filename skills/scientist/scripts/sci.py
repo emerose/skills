@@ -71,6 +71,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scientist import extraction as EXT  # noqa: E402
+from scientist.cli_utils import emit, resolve_home  # noqa: E402
 from scientist.provenance import trace as TRACE  # noqa: E402
 from scientist.provenance import reproduce as REPRODUCE  # noqa: E402
 from scientist.provenance import report as REPORT  # noqa: E402
@@ -210,23 +211,15 @@ def _trace(args: argparse.Namespace) -> int:
     If the target is a report Markdown file (``<…>/reports/…/*.md``), trace it
     report-rooted instead: a report node atop the DAG, walked down through each cited
     claim to raw."""
-    import json
-
     target = Path(args.exp)
     if target.is_file() and target.suffix.lower() == ".md":
-        home = Path(args.home).resolve() if getattr(args, "home", None) else None
+        home = resolve_home(args)
         result = TRACE.trace_report(target, repo_root=home)
-        if args.json:
-            print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
-        else:
-            print(TRACE.render_report_trace(result))
+        emit(result, args.json, TRACE.render_report_trace)
         return 0 if result["status"] == "GROUNDED" else 1
 
     result = TRACE.trace(target, report_path=args.report, claim_id=args.claim)
-    if args.json:
-        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
-    else:
-        print(TRACE.render(result))
+    emit(result, args.json, TRACE.render)
     return 0 if result["status"] == "GROUNDED" else 1
 
 
@@ -235,17 +228,12 @@ def _report(args: argparse.Namespace) -> int:
     the report phase), and optionally render / trace / index it. Exit 0 if the audit is
     GROUNDED (and any requested render succeeded), 1 otherwise."""
     import json
-    import os
 
     path = Path(args.path)
-    home = Path(args.home).resolve() if getattr(args, "home", None) else (
-        Path(os.environ["SCIENTIST_HOME"]).resolve() if os.environ.get("SCIENTIST_HOME") else None)
+    home = resolve_home(args)
 
     result = REPORT.audit(path, home=home)
-    if args.json:
-        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
-    else:
-        print(REPORT.render_audit(result))
+    emit(result, args.json, REPORT.render_audit)
 
     rc = 0 if result["status"] == "GROUNDED" else 1
 
@@ -299,7 +287,6 @@ def _judge(args: argparse.Namespace) -> int:
     span). Re-run the claims suite afterwards so the cached verdicts back the citations. Exit 0
     (a worklist/record op, not a gate)."""
     import json
-    import os
 
     from scientist.grounding import refresh as REFRESH
 
@@ -308,8 +295,7 @@ def _judge(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
-    home = Path(args.home).resolve() if getattr(args, "home", None) else (
-        Path(os.environ["SCIENTIST_HOME"]).resolve() if os.environ.get("SCIENTIST_HOME") else None)
+    home = resolve_home(args)
 
     if args.report:
         reports = [Path(args.report)]
@@ -379,8 +365,7 @@ def _coverage(args: argparse.Namespace) -> int:
     import shlex
     import subprocess
 
-    home = Path(args.home).resolve() if getattr(args, "home", None) else (
-        Path(os.environ["SCIENTIST_HOME"]).resolve() if os.environ.get("SCIENTIST_HOME") else None)
+    home = resolve_home(args)
     if home is None:
         print("no data folder: pass --home or set $SCIENTIST_HOME", file=sys.stderr)
         return 1
@@ -411,10 +396,7 @@ def _coverage(args: argparse.Namespace) -> int:
         library = library.get("articles") or library.get("records") or []
 
     result = COVERAGE.coverage(library, cited, since=args.since)
-    if args.json:
-        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
-    else:
-        print(COVERAGE.render_coverage(result))
+    emit(result, args.json, COVERAGE.render_coverage)
     return 0
 
 
@@ -422,13 +404,8 @@ def _reproduce(args: argparse.Namespace) -> int:
     """`sci reproduce <exp>`: re-run analysis/derive.py and check it reproduces the
     recorded artifacts within tolerance and read only from data/. Pure re-run (scratch
     output only); no libkit store. Exit 0 if REPRODUCES, 1 otherwise."""
-    import json
-
     result = REPRODUCE.reproduce(Path(args.exp), rtol=args.rtol, atol=args.atol)
-    if args.json:
-        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
-    else:
-        print(REPRODUCE.render(result))
+    emit(result, args.json, REPRODUCE.render)
     return 0 if result["status"] == "REPRODUCES" else 1
 
 
