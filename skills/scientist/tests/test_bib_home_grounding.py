@@ -37,13 +37,15 @@ def test_dotenv_never_overrides_real_env(monkeypatch, tmp_path):
     assert grounding._bib_home() == real
 
 
-def test_clear_error_when_unset_and_no_dotenv(monkeypatch, tmp_path):
+def test_clear_error_when_unset_and_no_dotenv(monkeypatch):
+    # Intent: _bib_home() raises the clear error when the var is unset and the .env search
+    # supplies nothing. Neutralize the loader instead of trying to scrub every .env candidate
+    # from the filesystem: cwd/.env and ~/.env can be sandboxed, but the module-parents walk
+    # climbs the *real* install path up to the repo root and would find a developer's repo-root
+    # or ~/.env there (the var-leak that made this test pass only on machines with no such file).
+    # Stubbing _load_dotenv_for to a no-op makes _bib_home genuinely see nothing, hermetically.
     monkeypatch.delenv("BIBLIOGRAPHER_HOME", raising=False)
-    # Run somewhere with no .env on cwd; HOME also has none, so the search finds nothing.
-    bare = tmp_path / "bare"
-    bare.mkdir()
-    monkeypatch.chdir(bare)
-    monkeypatch.setenv("HOME", str(bare))
+    monkeypatch.setattr(literature, "_load_dotenv_for", lambda _: None)
     with pytest.raises(grounding.LiteratureError, match="BIBLIOGRAPHER_HOME is not set"):
         grounding._bib_home()
 
