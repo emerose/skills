@@ -330,11 +330,33 @@ the assumptions section names every weak step, and the report has cleared the fr
 **§3 prose↔claims pass** and the **voice/tone review** (no blocking findings in either) — see
 "Required: a voice/tone review".
 
-## Regenerating a report from its prompt — delete first, then write fresh
+## Keeping a report current — scoped update by default, full regeneration only on request
 
-When asked to **regenerate a report from its prompt**, the deliverable is a *fully new* report, not
-an edit of the existing one. The single most common failure is to open the current `report.md` and
-revise it — the old prose then anchors the new one (same structure, same sentences, the same blind
+A finished report is kept current in steady state by **scoped, incremental update — not by
+regeneration.** When the evidence under it moves — most often a litreview it cites gains, drops, or
+re-grades a claim — judge whether the change reaches the report's *core* argument and revise only
+what it touches: re-pin to the updated litreview, address the new claim where it lands, and
+re-derive a section only when the delta actually undercuts it. Most literature updates touch the
+margins, not the thesis, and cost a scoped edit; match the depth of the revision to how deep the
+change cuts. The cheap path for deciding this is the litreview delta-judge (a fresh-context subagent
+weighs the *claim-set* delta against the report and returns no-impact / add-citation / needs-rewrite),
+escalating only on signal.
+
+**A complete from-scratch regeneration happens only when the user explicitly asks for it.** It is a
+**debugging / validation step**, not routine maintenance — the tool you reach for after changing the
+skill's own infrastructure (the grounding model, the audit machinery, the brief discipline), or to
+deliberately re-derive a finished report from its prompt to check it for steering. In steady state,
+updated litreviews flow through the scoped path above; **do not** rebuild a report from scratch to
+absorb a literature update unless the new evidence impacts the **core** of the report *and* the user
+has asked for the rebuild. A routine evidence refresh is never a reason to regenerate on your own
+initiative.
+
+### When a from-scratch regeneration *is* requested — delete first, then write fresh
+
+When the user explicitly asks to **regenerate a report from its prompt**, the deliverable is a
+*fully new* report, not an edit of the existing one. The single most common failure is to open the
+current `report.md` and revise it — the old prose then anchors the new one (same structure, same
+sentences, the same blind
 spots), which defeats the entire point of having a conclusion-free brief: a regeneration that rides
 on the prior draft cannot reveal that the evidence moved or that a conclusion was steered. So:
 

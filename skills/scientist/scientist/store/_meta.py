@@ -193,6 +193,44 @@ def report_card_markdown(rec: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def litreview_card_markdown(rec: dict[str, Any]) -> str:
+    """Deterministic Markdown for a litreview card (``kind=litreview``).
+
+    Leads with the litreview **title** and **abstract** (the primary searchable text), then its
+    **section summaries**, the **must-confront** obligation set, and the literature it cites.
+    Determinism (sorted ids, no timestamps in the body) keeps re-ingest stable. Mirrors
+    :func:`report_card_markdown`; the must-confront block is what distinguishes a survey card."""
+    title = (rec.get("title") or rec.get("slug") or rec.get("litreview_id") or "(litreview)").strip()
+    lines = [f"# Literature review: {title}", ""]
+    facts = _facts_block([
+        ("Scope", rec.get("scope")),
+        ("Path", rec.get("path")),
+        ("Status", rec.get("audit_status")),
+    ])
+    if facts:
+        lines += facts + [""]
+    if rec.get("abstract"):
+        lines += ["## Abstract", "", str(rec["abstract"]).strip(), ""]
+    sections = rec.get("sections") or []
+    if sections:
+        lines += ["## Sections", ""]
+        for s in sections:
+            if isinstance(s, dict):
+                head = str(s.get("heading", "")).strip()
+                summ = str(s.get("summary", "")).strip()
+                lines.append(f"- **{head}** — {summ}" if summ else f"- **{head}**")
+            else:
+                lines.append(f"- {s}")
+        lines.append("")
+    must = sorted({str(c) for c in (rec.get("must_confront") or []) if c})
+    if must:
+        lines += ["## Must-confront", ""] + [f"- `{c}`" for c in must] + [""]
+    cited = sorted({str(c) for c in (rec.get("cited_claims") or []) if c})
+    if cited:
+        lines += ["## Cites", ""] + [f"- `{c}`" for c in cited] + [""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def classify_ext(suffix: str) -> str:
     """Return ``narrative`` | ``tabular`` | ``binary`` for a file extension."""
     s = suffix.lower()

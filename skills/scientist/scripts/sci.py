@@ -75,6 +75,7 @@ from scientist.cli_utils import emit, resolve_home  # noqa: E402
 from scientist.provenance import trace as TRACE  # noqa: E402
 from scientist.provenance import reproduce as REPRODUCE  # noqa: E402
 from scientist.provenance import report as REPORT  # noqa: E402
+from scientist.provenance import litreview as LITREVIEW  # noqa: E402
 from scientist.provenance import coverage as COVERAGE  # noqa: E402
 from scientist.store import cli as STORE_CLI  # noqa: E402
 from scientist.store import _meta as STORE_META  # noqa: E402
@@ -138,6 +139,30 @@ def main() -> int:
     p_rep.add_argument("--index", action="store_true",
                        help="index the report into the store as kind=report (needs the store)")
 
+    # ---- litreview: audit a neutral literature survey (kind=litreview). ----
+    p_lr = sub.add_parser("litreview",
+                          help="audit a literature review (review.md): every [lit:] claim backed, "
+                               "literature-only, a gaps section present; list its must-confront set; "
+                               "render/trace it. The [litreview:] omissions audit lives in `sci report`.")
+    p_lr.add_argument("path", help="litreview Markdown (program/litreviews/<slug>/review.md)")
+    p_lr.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
+    p_lr.add_argument("--json", action="store_true", help="machine-readable output")
+    p_lr.add_argument("--must-confront", dest="must_confront", action="store_true",
+                      help="list the must-confront obligation set (claims any citing report must address)")
+    p_lr.add_argument("--render", metavar="OUT", help="render the validated litreview to OUT (via pandoc)")
+    p_lr.add_argument("--to", choices=["pdf", "html", "docx"], default="pdf",
+                      help="render format (default pdf; via pandoc)")
+    p_lr.add_argument("--force", action="store_true",
+                      help="render even if the audit is BROKEN (default: refuse)")
+    p_lr.add_argument("--trace", action="store_true",
+                      help="also print the provenance trace (litreview -> each [lit:] claim -> paper)")
+    p_lr.add_argument("--delta", metavar="BASELINE",
+                      help="claim-set delta of this litreview's module vs a baseline "
+                           "grounding_report.json (e.g. `git show <ref>:program/analysis/"
+                           "grounding_report.json > base.json`) — the cheap-update filter")
+    p_lr.add_argument("--index", action="store_true",
+                      help="index the litreview into the store as kind=litreview (needs the store)")
+
     # ---- judge: list the literature-support work + record caller-supplied verdicts.
     #      NO model lives in the tool — the orchestrating agent (ideally a fresh-context judge
     #      subagent) decides supported/unsupported; this command only surfaces + records it. ----
@@ -195,6 +220,8 @@ def main() -> int:
         return _reproduce(args)
     if args.cmd == "report":
         return _report(args)
+    if args.cmd == "litreview":
+        return _litreview(args)
     if args.cmd == "judge":
         return _judge(args)
     if args.cmd == "coverage":
@@ -271,6 +298,78 @@ def _report(args: argparse.Namespace) -> int:
             "path": result["report"],
         }
         STORE_CLI.index_report(args, card)
+
+    return rc
+
+
+def _litreview(args: argparse.Namespace) -> int:
+    """`sci litreview <path>`: audit a litreview (review.md) — every [lit:] claim backed,
+    literature-only, a gaps section present — and optionally list its must-confront set, render,
+    or trace it. The [litreview:] *omissions* audit (a property of the consuming report) lives in
+    `sci report`. Exit 0 if GROUNDED (and any render succeeded), 1 otherwise."""
+    import json
+
+    path = Path(args.path)
+    home = resolve_home(args)
+
+    if args.delta:
+        d = LITREVIEW.delta(path, Path(args.delta), home=home)
+        if args.json:
+            print(json.dumps(d, indent=2, ensure_ascii=False, default=str))
+        else:
+            print(LITREVIEW.render_delta(d))
+        return 0
+
+    if args.must_confront:
+        listing = LITREVIEW.must_confront_listing(path, home=home)
+        if args.json:
+            print(json.dumps(listing, indent=2, ensure_ascii=False, default=str))
+        else:
+            if not listing:
+                print("(no must-confront claims tagged — mark the pivotal/contested/disconfirming ones)")
+            for m in listing:
+                print(f"- {REPORT._short_claim_id(m['claim_id'])}  [{m.get('strength')}]"
+                      f"  {m.get('reason') or ''}".rstrip())
+        return 0
+
+    result = LITREVIEW.audit(path, home=home)
+    emit(result, args.json, LITREVIEW.render_audit)
+    rc = 0 if result["status"] == "GROUNDED" else 1
+
+    if args.trace:
+        tr = TRACE.trace_report(path, repo_root=home)
+        if args.json:
+            print(json.dumps(tr, indent=2, ensure_ascii=False, default=str))
+        else:
+            print("\n" + TRACE.render_report_trace(tr))
+        if tr["status"] != "GROUNDED":
+            rc = 1
+
+    if args.render:
+        if result["status"] != "GROUNDED" and not args.force:
+            print(f"refusing to render a BROKEN litreview (fix the findings, or --force): {args.render}",
+                  file=sys.stderr)
+            rc = 1
+        else:
+            try:
+                out = REPORT.render(path, Path(args.render), home=home, to=args.to)
+                print(f"rendered {out['format'].upper()} → {out['output']}")
+            except REPORT.RenderError as e:
+                print(f"render failed: {e}", file=sys.stderr)
+                rc = 1
+
+    if args.index:
+        sc = REPORT.report_scope(path, home or REPORT._infer_home(path.resolve()))
+        sec = REPORT.parse_sections(path.read_text(encoding="utf-8"))
+        cited = sorted({lc.get("claim_id") or lc["id"] for lc in result.get("lit_cites", [])})
+        card = {
+            "litreview_id": STORE_META.report_id_for(sc["scope"], sc["exp_id"], sc["slug"]),
+            "scope": sc["scope"], "slug": sc["slug"],
+            "title": sec["title"], "abstract": sec["abstract"], "sections": sec["sections"],
+            "cited_claims": cited, "must_confront": result.get("must_confront", []),
+            "audit_status": result["status"], "path": result["report"],
+        }
+        STORE_CLI.index_litreview(args, card)
 
     return rc
 
