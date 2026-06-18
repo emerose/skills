@@ -82,10 +82,30 @@ backing it**. As part of the semantic pass, for each prose doc (the root `README
      a derived quantity must be produced by a grounded `analysis/`/`program` **derivation** (then cited
      as the claim that wraps it), not computed inline in prose. This is the one category the per-citation
      audit structurally cannot see, so it is the §3 pass's job specifically.
+   - **incommensurate-evidence** — the citation resolves and is grounded, but the conclusion *leans on it
+     out of proportion to how robust it is*, and the prose doesn't say so. **For each load-bearing claim
+     or bound, weigh evidentiary robustness against how much the conclusion depends on it**, and check
+     that the cited evidence's *measured scope actually transfers to the use*. Grounding certifies that a
+     quote backs its paraphrase — not that a single, indirect, out-of-scope, or one-lab result is *enough*
+     for the weight a central conclusion puts on it. "Not robust" is broader than weak strength: a single
+     group (`independent_groups<=1` / "all one lab"), an indirect (`suggestive`) or secondary/relayed
+     source, an abstract-/title-only source, a contested or unreplicated result, a result used **outside
+     the scope it was measured in** (a prenatal-model datum bounding a postnatal therapy), a tidy
+     quantitative bound resting on one study, or an analogy doing load-bearing work — any of these, *when
+     a central conclusion leans on it*, must be acknowledged in the prose **where the claim does its work**
+     (the sentence that derives the ceiling), not only in an assumptions list. Flag a load-bearing
+     conclusion on non-robust evidence that the prose does not visibly hedge. The `weak-load-bearing`
+     audit advisory (report.md §5) mechanically raises candidates from the strength/independence/source
+     fields and %/×/fold bounds, but it cannot judge *which* claim is load-bearing or whether the scope
+     transfers — that judgment is this pass's, specifically. Clear it by hedging the claim in the prose
+     that uses it and marking the bound provisional (or by strengthening the evidence), **not** by deleting
+     the assumptions note.
 
 4. **Grade severity, then report.** Three tiers:
    - **blocking** — an `unbacked` numeric result, a `weak-backing`, an `off-topic` citation, a `derived`
-     inline quantity, or any contradicted backing. Fix the prose or the citation.
+     inline quantity, an `incommensurate-evidence` finding (a load-bearing claim/bound on non-robust
+     evidence the prose doesn't hedge where it does its work), or any contradicted backing. Fix the prose
+     or the citation.
    - **finding (clear it)** — an `artifact-only` result: the number is real but uncovered by a claim →
      author the claim citing the cell. Not blocking (the evidence exists), but not a pass either — it
      stays on the worklist until a claim covers it.
@@ -109,10 +129,12 @@ so it reads "75% [cites claims saying 48% and ≤50%]" cold. Fresh context defea
 so prompt it **adversarially and specifically** ("list every number whose cited claim does not itself
 contain that value; list every quantitative sentence that combines two or more claims"), and **hand it the
 claim contents** (the grounding report for everything cited), not just the prose — without the claims'
-actual numbers it can only re-check citation presence, the part that already passed. Make the mechanical
-findings (`unbacked`, `off-topic`, `weak-backing`, `derived`, claim-number ≠ sentence-number) **blocking**
-so "empty list" is an objective stop condition rather than "the author is satisfied"; the soft `advisory`
-items are surfaced for the author to address or explicitly waive. For the report phase this subagent pass
+actual numbers *and their evidence's robustness signals* (per-source `group`/`primary`/`test`/`mode`/
+`tier`, the claim's `strength`) it can only re-check citation presence, the part that already passed, and
+can't weigh whether a load-bearing claim's support is commensurate with its centrality. Make the mechanical
+findings (`unbacked`, `off-topic`, `weak-backing`, `derived`, claim-number ≠ sentence-number,
+`incommensurate-evidence`) **blocking** so "empty list" is an objective stop condition rather than "the
+author is satisfied"; the soft `advisory` items are surfaced for the author to address or explicitly waive. For the report phase this subagent pass
 is **required** — see [report.md](report.md).
 
 ## Structural check

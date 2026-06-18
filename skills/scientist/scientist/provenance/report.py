@@ -615,6 +615,150 @@ def prose_quantity_advisories(
 
 
 # --------------------------------------------------------------------------- #
+# incommensurate-evidence advisory (a non-blocking recall aid for the §3 subagent)
+# --------------------------------------------------------------------------- #
+# Grounding checks *attribution faithfulness* — every number maps to a real claim, every
+# quote backs its paraphrase. It does NOT check *evidentiary weight relative to how much a
+# conclusion leans on the claim*: a report can audit fully GROUNDED while a central,
+# load-bearing bound rests on evidence that is not commensurate with its importance, and the
+# prose never says so. That is a judgment call (the tool can't know which claim is
+# load-bearing, nor whether the evidence's measured scope transfers to the use) — so this is
+# a RECALL AID, not a gate. It raises *candidates*: a quantity/bound in a cited paragraph
+# backed ONLY by claim(s) that fall short of robust, with the specific weakness named, for the
+# required fresh-context §3 pass to weigh. It never changes GROUNDED/BROKEN.
+#
+# "Robust" is deliberately broader than "strong strength / multiple groups" — the maintaining
+# principle is candor proportional to centrality × (lack of robustness), and non-robust
+# includes contested/indirect/secondary/abstract-only/out-of-scope evidence, a tidy bound on
+# one study, an analogy doing load-bearing work. The signals below are the ones the grounding
+# report actually carries per claim/source; the §3 reviewer judges the rest.
+#
+# Precision model (mirrors unsupported-quantity): paragraph-scoped, skips [report:] and
+# uncited paragraphs, and — the load-bearing proxy — fires ONLY on a paragraph that asserts a
+# %/×/fold quantity (a bound), and ONLY when EVERY cited claim backing it is non-robust. A
+# quantity also backed by one strong, independent, in-scope claim is not surfaced — the weak
+# corroborating cite alongside a strong one is fine. This under-flags on purpose.
+
+# A lit source whose locator is weaker than tier 1 (a paragraph/section chunk, not a sentence).
+_WEAK_LOCATOR_TIER = 2
+
+
+def _independent_groups(claim: dict[str, Any]) -> int | None:
+    """How many *independent* groups back a literature claim, or ``None`` for a non-literature
+    claim / when it can't be told. Machine-judged claims carry a per-source ``group`` (defaults
+    to the citekey) — count the distinct non-empty ones; legacy ``@reviewed`` claims stamp
+    ``independent_groups`` directly. ``<=1`` is the "all one lab" signal."""
+    if str(claim.get("kind")) != "literature":
+        return None
+    ev = claim.get("evidence") or {}
+    srcs = ev.get("lit_sources") if isinstance(ev, dict) else None
+    if isinstance(srcs, list) and srcs:
+        groups = {str(s.get("group") or s.get("citekey") or "").strip()
+                  for s in srcs if isinstance(s, dict)}
+        groups.discard("")
+        if groups:
+            return len(groups)
+    rev = claim.get("reviewed") or {}
+    ig = rev.get("independent_groups")
+    return int(ig) if isinstance(ig, (int, float)) else None
+
+
+def claim_robustness_weaknesses(claim: dict[str, Any]) -> list[str]:
+    """The robustness deficits a load-bearing use of ``claim`` would need the prose to own —
+    the named weaknesses the §3 reviewer weighs against how central the claim is. Empty list ⇒
+    nothing the tool can see makes it non-robust (strong, multi-group, direct, primary,
+    full-text, in-tier — a use of it needs no special hedge). Each entry is a short tag the
+    advisory surfaces; the list is the recall signal, the *judgment* stays human/§3.
+
+    Signals are exactly the fields a ``grounding_report.json`` carries:
+
+    * ``strength<strong`` — moderate/weak evidence (the coarsest, most common signal);
+    * ``single-group`` — a literature claim resting on one lab (``independent_groups<=1``) —
+      the "all one lab" case, the motivating failure;
+    * ``suggestive-source`` — an *indirect* literature source (``test=suggestive``);
+    * ``secondary-source`` — a non-primary / relayed source (``primary=False`` — the telephone
+      problem);
+    * ``abstract-only`` — a source read from the abstract/title, not full text;
+    * ``weak-locator`` — a source pinned by a tier-≥2 chunk locator (a paragraph, not a quoted
+      sentence);
+    * ``interpretive`` / ``external`` — an *interpretation* or a CRO's own conclusion doing
+      load-bearing work, rather than a direct measurement.
+    """
+    weaknesses: list[str] = []
+    strength = str(claim.get("strength") or "")
+    if strength and strength not in ("strong",):
+        weaknesses.append(f"strength={strength}")
+
+    kind = str(claim.get("kind") or "")
+    if kind in ("interpretive", "external"):
+        weaknesses.append(kind)
+
+    if kind == "literature":
+        ig = _independent_groups(claim)
+        if ig is not None and ig <= 1:
+            weaknesses.append("single-group")
+        ev = claim.get("evidence") or {}
+        srcs = ev.get("lit_sources") if isinstance(ev, dict) else None
+        if isinstance(srcs, list):
+            if any(isinstance(s, dict) and str(s.get("test")) == "suggestive" for s in srcs):
+                weaknesses.append("suggestive-source")
+            if any(isinstance(s, dict) and s.get("primary") is False for s in srcs):
+                weaknesses.append("secondary-source")
+            if any(isinstance(s, dict) and str(s.get("mode")) in ("abstract", "title")
+                   for s in srcs):
+                weaknesses.append("abstract-only")
+            if any(isinstance(s, dict) and isinstance(s.get("tier"), (int, float))
+                   and int(s.get("tier")) >= _WEAK_LOCATOR_TIER for s in srcs):
+                weaknesses.append("weak-locator")
+    return weaknesses
+
+
+def incommensurate_evidence_advisories(
+        text: str, claim_index: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Surface a load-bearing *bound* (a %/×/fold quantity in a cited paragraph) backed
+    **only** by non-robust claim(s) — a candidate for the candor-proportional-to-centrality
+    discipline (see review-audit.md §3 / report.md). The quantity is the load-bearing proxy
+    the tool can see; the paragraph is the association unit (a number and its citation share a
+    paragraph even across wrapped lines). Fires only when EVERY resolved cited claim in the
+    paragraph is non-robust — one strong, in-scope backing clears it. Skips ``[report:]`` and
+    uncited paragraphs, like the unsupported-quantity advisory.
+
+    Non-blocking: returns ``{kind, line, value, cites, weaknesses, sentence}`` per candidate,
+    where ``weaknesses`` maps each cited claim to its named deficits. The tool cannot judge
+    *which* claims are load-bearing or whether a source's measured scope transfers to the use —
+    those stay §3/human judgments; this just raises the candidate."""
+    advisories: list[dict[str, Any]] = []
+    for start, ptext in _paragraphs(text):
+        if _REPORT_RE.search(ptext):
+            continue
+        quantities = _quantities(ptext)
+        if not quantities:                      # load-bearing proxy: only bounds/magnitudes
+            continue
+        resolved: list[dict[str, Any]] = []
+        all_non_robust = True
+        for cid in _cite_ids_in(ptext):
+            cands = resolve_citation(cid, claim_index)
+            if len(cands) != 1:                 # missing/ambiguous → the citation audit owns it
+                continue
+            claim = claim_index[cands[0]]
+            weaknesses = claim_robustness_weaknesses(claim)
+            resolved.append({"cite": _short_claim_id(cands[0]), "weaknesses": weaknesses})
+            if not weaknesses:                  # a robust backing clears the whole paragraph
+                all_non_robust = False
+        if not resolved or not all_non_robust:
+            continue
+        advisories.append({
+            "kind": "weak-load-bearing",
+            "line": start,
+            "value": sorted(quantities),
+            "cites": [r["cite"] for r in resolved],
+            "weaknesses": {r["cite"]: r["weaknesses"] for r in resolved},
+            "sentence": " ".join(ptext.split())[:240],
+        })
+    return advisories
+
+
+# --------------------------------------------------------------------------- #
 # audit
 # --------------------------------------------------------------------------- #
 def resolve_report_paths(cid: str, home: Path) -> list[Path]:
@@ -801,8 +945,11 @@ def audit(report_path: Path, home: Path | None = None,
                                  "detail": detail})
         lit_cites.append(rec)
 
-    # Non-blocking: recall aid for the §3 review subagent, NOT part of the GROUNDED gate.
-    advisories = prose_quantity_advisories(text, claim_index)
+    # Non-blocking: recall aids for the §3 review subagent, NOT part of the GROUNDED gate.
+    # unsupported-quantity catches a number no cited claim asserts; weak-load-bearing catches a
+    # bound backed only by non-robust claim(s) — incommensurate evidence the prose may not hedge.
+    advisories = (prose_quantity_advisories(text, claim_index)
+                  + incommensurate_evidence_advisories(text, claim_index))
 
     status = "GROUNDED" if not findings else "BROKEN"
     return {
