@@ -30,15 +30,45 @@ __all__ = ["Study", "Program", "program", "canonical", "root", "resolve"]
 _STUDY_RE = re.compile(r"^k1_\d{6}$", re.IGNORECASE)
 
 
+# A directory is recognized as a data-repo root if it carries this marker set: the
+# managed store dir (``.scientist/``), OR the layout doc + program dir that every
+# checkout has (``LAYOUT.md`` + ``program/``). These are intrinsic to the repo, so the
+# walk-up never mistakes an ordinary parent dir for the root.
+def _is_data_root(p: Path) -> bool:
+    return (p / ".scientist").is_dir() or (
+        (p / "LAYOUT.md").is_file() and (p / "program").is_dir())
+
+
+def _infer_root(start: Path | None = None) -> Path | None:
+    """Walk up from ``start`` (default cwd) looking for the data-repo root by a robust
+    marker (see :func:`_is_data_root`). Returns the first match, or ``None`` if none is
+    found — so this is a pure fallback that never raises."""
+    try:
+        here = (start or Path.cwd()).resolve()
+    except OSError:
+        return None
+    for cand in (here, *here.parents):
+        if _is_data_root(cand):
+            return cand
+    return None
+
+
 def root() -> Path:
     r = os.environ.get("SCIENTIST_HOME")
-    if not r:
-        raise RuntimeError(
-            "SCIENTIST_HOME is not set — point it at the '05 - Scientific Data' checkout.")
-    p = Path(r)
-    if not p.is_dir():
-        raise RuntimeError(f"SCIENTIST_HOME does not exist: {p}")
-    return p
+    if r:
+        p = Path(r)
+        if not p.is_dir():
+            raise RuntimeError(f"SCIENTIST_HOME does not exist: {p}")
+        return p
+    # Fallback only (explicit SCIENTIST_HOME always wins): infer the data-repo root by
+    # walking up from cwd, so running from inside the checkout just works.
+    inferred = _infer_root()
+    if inferred is not None:
+        return inferred
+    raise RuntimeError(
+        "SCIENTIST_HOME is not set and no data-repo root was found by walking up from the "
+        "working directory — point SCIENTIST_HOME at the '05 - Scientific Data' checkout, "
+        "or run from inside it.")
 
 
 def resolve(exp_id: str) -> Path:

@@ -44,10 +44,21 @@ from _store import BiblioStore, EmbedderConfigError  # noqa: E402
 
 INGESTIBLE_EXTS = {".pdf", ".md", ".markdown", ".docx", ".doc", ".pptx", ".ppt", ".odt"}
 
-DEFAULT_HOME = Path(os.environ.get("BIBLIOGRAPHER_HOME", Path.home() / ".bibliographer"))
+# Where to look when neither --home nor $BIBLIOGRAPHER_HOME is set. Resolved lazily
+# (in dispatch, AFTER _load_dotenv) — NOT at import — because $BIBLIOGRAPHER_HOME is
+# commonly set in ~/.env, which is only loaded once the CLI starts. Reading it here at
+# import time (the old behavior) missed that .env and silently used ~/.bibliographer.
+FALLBACK_HOME = Path.home() / ".bibliographer"
 
 
-def _load_dotenv(home: Path) -> None:
+def _default_home() -> Path:
+    """The library dir when --home was not given: $BIBLIOGRAPHER_HOME if set (now that
+    _load_dotenv has run, an .env value counts), else ~/.bibliographer."""
+    h = os.environ.get("BIBLIOGRAPHER_HOME")
+    return Path(h).expanduser() if h else FALLBACK_HOME
+
+
+def _load_dotenv(home: Path | None = None) -> None:
     """Load KEY=VALUE pairs from .env files into the environment (stdlib only).
 
     Search order: the library ``home``, the current directory, every parent of
@@ -57,7 +68,7 @@ def _load_dotenv(home: Path) -> None:
     """
     here = Path(__file__).resolve()
     candidates = [
-        home / ".env",
+        *([home / ".env"] if home is not None else []),
         Path.cwd() / ".env",
         *[p / ".env" for p in here.parents],
         Path.home() / ".env",
@@ -1270,8 +1281,9 @@ async def cmd_check(args: argparse.Namespace, store: BiblioStore) -> None:
 # --------------------------------------------------------------------------- #
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="bib", description="Manage a collection of academic articles.")
-    p.add_argument("--home", type=Path, default=DEFAULT_HOME,
-                   help=f"library directory (default: {DEFAULT_HOME})")
+    p.add_argument("--home", type=Path, default=None,
+                   help="library directory (default: $BIBLIOGRAPHER_HOME, "
+                        f"else {FALLBACK_HOME})")
     sub = p.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init", help="create the library directory, catalog, and viewer").set_defaults(func=cmd_init)
@@ -1402,8 +1414,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def dispatch(args: argparse.Namespace) -> None:
-    home = Path(args.home).expanduser()
-    _load_dotenv(home)
+    # Load .env BEFORE resolving the default home: $BIBLIOGRAPHER_HOME often lives in
+    # ~/.env, so it must be in the environment before _default_home() reads it. An
+    # explicit --home always wins and skips this inference.
+    _load_dotenv(Path(args.home).expanduser() if args.home else None)
+    home = Path(args.home).expanduser() if args.home else _default_home()
     try:
         store = BiblioStore.open(home)
     except EmbedderConfigError as e:
