@@ -56,9 +56,10 @@ off-Drive worktree: `eval "$(skills/scientist/scripts/new-unit.sh k1-000000)"`.
   claims/test_*.py     # grounding specs: each test IS a claim
 ```
 
-`extract.py` stays under `data/` and is **faithful only**. If a derived value (mean/SEM/KD%/fit)
-crept into it, **de-overload**: move that computation to `derive.py`, delete the computed `data/`
-file + its provenance, re-run `audit.py` + `cellcov.py` to confirm CLEAN.
+`extract.py` stays under `data/` and is **faithful only** (SKILL.md §Core invariants — *Faithful
+vs. derived*). If a derived value (mean/SEM/KD%/fit) crept into it, **de-overload**: move that
+computation to `derive.py`, delete the computed `data/` file + its provenance, re-run `audit.py` +
+`cellcov.py` to confirm CLEAN.
 
 ### derive.py — re-derivable products
 

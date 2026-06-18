@@ -48,7 +48,9 @@ Each phase's detail lives in `references/` and is loaded only when you need it. 
 | Re-derive analysis (fits/stats/figures) and author grounded scientific **claims** | [references/derive-claims.md](references/derive-claims.md) |
 | Index / search / catalog the tree, file a delivery, scaffold a new experiment | [references/search-index.md](references/search-index.md) |
 | Review provenance, audit staleness, structural check, **trace** a result raw→claims, **enforce** prose↔claims | [references/review-audit.md](references/review-audit.md) |
-| Author a human-facing **report** from grounded claims (cite `[claim:<id>]`, embed grounded figures), audit + render it | [references/report.md](references/report.md) |
+| &nbsp;&nbsp;↳ deep reference for the structural / staleness / semantic audit passes (`sci check` / `sci audit` / parallel-agent) | [references/auditing.md](references/auditing.md) |
+| Author a human-facing **report** from grounded claims — `sci report` mechanics (cite `[claim:<id>]`, embed grounded figures, audit + render) | [references/report.md](references/report.md) |
+| &nbsp;&nbsp;↳ when **drafting the report prose**: voice/structure, literature-sweep & disconfirming-evidence discipline, the generation brief, the fresh-context §3 + voice/tone reviews | [references/report-authoring.md](references/report-authoring.md) |
 
 `data/` naming convention + assay vocabulary: [references/naming.md](references/naming.md).
 Private CRO vocabulary (your real vendor names): [references/vocab.example.yml](references/vocab.example.yml).
