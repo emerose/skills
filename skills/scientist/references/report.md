@@ -317,7 +317,9 @@ standing part is the same for every report: `sci report <report.md>` audits **GR
 (including any recursively-GROUNDED supporting reports it cites), every load-bearing third-party
 fact is a quote-pinned `@reviewed` `[lit:]` claim (no load-bearing bare references),
 abstract/title-only gaps are surfaced (and the user was asked about any that are load-bearing),
-and the assumptions section names every weak step.
+the assumptions section names every weak step, and the report has cleared the fresh-context
+**§3 prose↔claims pass** and the **voice/tone review** (no blocking findings in either) — see
+"Required: a voice/tone review".
 
 ### Regenerating a report from its prompt — delete first, then write fresh
 
@@ -709,6 +711,42 @@ that none does), and the claim's value where relevant. **Blocking** (must clear 
 contradicted backing. **Surfaced** (address or explicitly waive in the assumptions section):
 unbacked *qualitative* conclusions and missing disconfirmers. An empty blocking list is the
 objective stop condition — *not* the author's satisfaction.
+
+### Required: a voice/tone review (fresh-context)
+
+Grounding is necessary but not sufficient: a report can be fully GROUNDED and still read like an
+LLM essay rather than peer prose. So **before a report is final, run a voice/tone review against the
+"Writing style & structure" rules above — alongside the §3 prose↔claims pass and the
+unsupported-quantity advisory, not after.** Delegate it to a **fresh-context subagent**, for the same
+reason as §3: an author is blind to their own tics (the tidy scaffold reads "clear" to the writer who
+chose it), so self-review reliably misses them.
+
+Hand the subagent the report Markdown and the "Writing style & structure" section of this file (the
+voice rules ARE the rubric — do not paraphrase them), and have it flag every violation:
+
+- **structural LLM-tells** (the most-missed): an enumerated "Correction/Step/Reason/Factor N" or
+  rule-of-three scaffold; tidy tripartite summaries; a section whose first sentence restates its
+  heading; "studies drawn on here"-style scaffolding used as filler.
+- **announcing / signposting**: sentences that announce structure instead of saying the thing —
+  "Two qualifications keep this honest", "The second finding is about…", "This report derives…",
+  "In this section we…".
+- **throat-clearing & hedging clichés**: "It is important to note", "plays a crucial role", "delve
+  into", "it is worth noting".
+- **hype / editorializing**: "strikingly", "remarkably", "a game-changer".
+- **boilerplate**: any sentence that could open any report on any topic; restating what is true of
+  every report (that results are grounded/cited).
+- **plumbing in the prose**: claim ids, file names, column names, "joined on…", grounding machinery.
+- **process / diff narration**: "now grounded in…", "newly added", "this revision", "previously we
+  assumed" — each report stands on its own.
+- **density**: em-dash/parenthetical pile-ups and robotic list-prose that defeat "crisp, concrete,
+  short".
+
+It must return, per finding: the line, the offending text, which rule it breaks, and a concrete
+rewrite. **Blocking** (fix before final): any structural LLM-tell, announcing/throat-clearing
+sentence, hype, or process-narration. **Advisory**: density/word-choice nitpicks. Empty blocking
+list — judged by the fresh-context reviewer, not the author — is the bar. (A correct fix rewrites the
+prose, not just deletes the flagged words: replacing "Correction 1/2/3" headings means letting the
+argument flow as peer prose, not renaming the scaffold.)
 
 ### Render toolchain
 
