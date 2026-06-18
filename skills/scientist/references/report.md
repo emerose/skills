@@ -319,6 +319,38 @@ fact is a quote-pinned `@reviewed` `[lit:]` claim (no load-bearing bare referenc
 abstract/title-only gaps are surfaced (and the user was asked about any that are load-bearing),
 and the assumptions section names every weak step.
 
+### Regenerating a report from its prompt — delete first, then write fresh
+
+When asked to **regenerate a report from its prompt**, the deliverable is a *fully new* report, not
+an edit of the existing one. The single most common failure is to open the current `report.md` and
+revise it — the old prose then anchors the new one (same structure, same sentences, the same blind
+spots), which defeats the entire point of having a conclusion-free brief: a regeneration that rides
+on the prior draft cannot reveal that the evidence moved or that a conclusion was steered. So:
+
+1. **Delete the report file outright first** (`rm <report-dir>/report.md`). This is not bookkeeping —
+   it removes the source of pollution. Do not read it back while writing; treat the prior draft as
+   if it never existed. (The PDF and grounding cache are regenerated later; the claims modules are
+   re-derived, not preserved verbatim.)
+2. **Re-run the brief's method from scratch.** Do the broad parallel literature sweep the brief
+   names (sweep *before* writing — see "Research and composition"), bank what it surfaces, and
+   author the claims with the discipline above (`source(quote=, paraphrase=)`, paraphrase hugging a
+   self-contained quote, the caller-records judge, `sci coverage` to catch banked-but-unclaimed
+   load-bearing papers).
+3. **Write a genuinely new body** from the brief + the freshly-grounded claims — fresh structure and
+   voice, not a paraphrase of the old one. Re-derive every number from the evidence; do not carry a
+   value over because you remember it.
+4. **Finalize on the standard path.** `sci report` audit to GROUNDED, the §3 prose↔claims pass in a
+   fresh-context subagent (hand it the cited claims' *source quotes*), clear the unsupported-quantity
+   advisories, render.
+5. **Then diff against the committed version and report material divergence.** Per the brief, a
+   *materially* different regeneration is a signal to investigate (the evidence moved, or the prior
+   draft was steered), not an error to hide — call it out. Near-identical conclusions in genuinely
+   fresh prose is the expected good outcome; near-identical *prose* means step 1 was skipped.
+
+The tell that it was done right: the new draft is a real rewrite (large line turnover, different
+section shape), the conclusions are re-derived rather than carried, and any divergence from the old
+draft is surfaced rather than smoothed.
+
 ## Authoring model
 
 Reports are **git-diffable Markdown** with inline `[claim:<id>]` citations and Markdown

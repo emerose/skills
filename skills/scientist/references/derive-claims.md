@@ -148,12 +148,31 @@ def test_target_knockdown_in_humans(experiment):
     "Antisense knockdown of the target is well tolerated in humans."
     converge(
         source("noor2015q", quote="53% knockdown at the top dose",
-               paraphrase="the antisense oligo roughly halves target expression"),
+               paraphrase="knockdown reached 53% at the top dose"),  # hugs the quote; synthesis goes in the docstring
         source("smith2019",  chunk=14,                 # tier 2: a paragraph-spanning fact
                paraphrase="no dose-limiting toxicity was reported"),
     )
 ```
 
+- **Write the paraphrase as a faithful compression of a SELF-CONTAINED quote — not a summary of
+  the paper's finding.** The judge sees only the quote and the paraphrase, never the paper, and asks
+  the narrow question "does *this span* entail *this paraphrase*?". So the quote must itself contain
+  the subject + the number + the scope the paraphrase asserts, and the paraphrase must say *only*
+  what the span says. Two failure modes, both authoring errors (not the judge being too strict),
+  that together reject ~half of first-pass paraphrases when ignored:
+  - **Quote too short to carry the paraphrase** — e.g. a bare `"172.5%"`, or `"biallelically
+    express Ube3a"` with no subject. Fix: pick a full clause containing subject + figure + scope
+    (use `bib text <key> --all` to find one); `"53% knockdown at the top dose"` supports
+    `"knockdown reached 53% at the top dose"`, not `"the ASO halves target expression"` (which adds
+    the agent and the target the span never names).
+  - **Paraphrase imports outside context** — adding entities, arithmetic, or interpretation not in
+    the span (`"idic15"`, `"four alleles total"`, `"a patient family"`, `"below the additive 200%"`).
+    Put cross-source **synthesis** in the claim *docstring* (which is judged as a whole, not
+    per-source), and keep each paraphrase a near-restatement of its own quote.
+  When no single sentence carries the fact, prefer the tier-2 `chunk=` locator (the judge reads the
+  whole chunk) over stretching a thin quote. And when you run the §3 prose↔claims pass, hand the
+  reviewer each claim's **source quotes**, not just its statement — otherwise it false-positives on
+  numbers that a source quote in fact carries.
 - **Locator ladder caps strength.** tier 1 `quote=`+`paraphrase=` → up to `strong`; tier 2
   `chunk=`+`paraphrase=` (a libkit chunk id from `bib query`) → up to `moderate`; tier 3
   `paraphrase=` only (judge reads the whole doc) → `weak`. Exceeding the ceiling is a blocking
