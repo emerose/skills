@@ -62,6 +62,13 @@ def pytest_addoption(parser):
     g = parser.getgroup("grounding")
     g.addoption("--grounding-out", action="store", default=None,
                 help="directory for grounding_report.{md,json} (default: rootdir)")
+    g.addoption("--grounding-fresh", "--no-merge", action="store_true", default=False,
+                dest="grounding_fresh",
+                help="ignore any existing grounding_report.json and write ONLY this run's "
+                     "records (clean slate). Default is to MERGE this run's claims into the "
+                     "existing report at test-file granularity, so a partial run "
+                     "(e.g. one claims file) updates just its own files and leaves every "
+                     "other module's claims intact — avoiding spurious cross-report BROKEN.")
     g.addoption("--check-drift", action="store_true", default=False,
                 help="flag claims whose captured inputs changed since the commit that "
                      "last set their @strength marker (git-based; needs SCIENTIST_HOME "
@@ -290,6 +297,49 @@ _OUTCOME_LABEL = {
 }
 
 
+def _test_file_of(record: dict) -> str:
+    """The test-file component of a claim record's id, used as the merge grain.
+
+    A claim ``id`` is a pytest nodeid: ``<path/to/test_file.py>::<node>`` (possibly with
+    parametrization brackets on the node). The path may carry an experiment prefix —
+    ``program/claims/test_x.py::test_y`` or ``K1-230102 .../analysis/claims/test_x.py::test_y``
+    — but the **file** is always everything before the first ``::``. We normalize on the
+    path's basename (``test_x.py``) so the grain is "which test module produced this claim",
+    independent of where the run was invoked from (the same file can appear under different
+    leading paths depending on rootdir). Records with no resolvable file fall back to the
+    whole id, so they merge only with themselves (never silently colliding)."""
+    cid = record.get("id") or ""
+    head = cid.split("::", 1)[0]
+    name = Path(head).name
+    return name or cid
+
+
+def _merge_records(prior: list[dict], current: list[dict]) -> list[dict]:
+    """Union prior and current claim records at **test-file granularity**, sorted by id.
+
+    Drop every prior record whose test-file is among the files this run produced (so an
+    add/edit/delete *within* a file we ran is reflected exactly), then add all of this
+    run's records, and **preserve** prior records from files this run did not touch. A
+    whole-suite run produces every file → replaces everything → identical to a plain
+    overwrite. A test file deleted and never re-run leaves harmless orphans here; a fresh
+    full run (or ``--grounding-fresh``) clears them."""
+    current_files = {_test_file_of(r) for r in current}
+    kept = [r for r in prior if _test_file_of(r) not in current_files]
+    merged = kept + list(current)
+    return sorted(merged, key=lambda r: r.get("id") or "")
+
+
+def _load_prior_records(path: Path) -> list[dict]:
+    """Prior ``claims`` records from an existing grounding_report.json, or ``[]`` if the file
+    is absent or corrupt. Never raises — a partial run must not be blocked by a bad report."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        claims = data.get("claims", [])
+        return [c for c in claims if isinstance(c, dict)]
+    except (OSError, ValueError, AttributeError, TypeError):
+        return []
+
+
 def pytest_sessionfinish(session):
     config = session.config
     records = getattr(config, "_grounding_records", [])
@@ -297,10 +347,18 @@ def pytest_sessionfinish(session):
         return
     out_dir = Path(config.getoption("--grounding-out") or config.rootpath)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "grounding_report.json").write_text(
-        json.dumps({"claims": records}, indent=2, ensure_ascii=False, default=_json_default),
+    json_path = out_dir / "grounding_report.json"
+
+    fresh = config.getoption("grounding_fresh", default=False)
+    if fresh:
+        merged = sorted(records, key=lambda r: r.get("id") or "")
+    else:
+        merged = _merge_records(_load_prior_records(json_path), records)
+
+    json_path.write_text(
+        json.dumps({"claims": merged}, indent=2, ensure_ascii=False, default=_json_default),
         encoding="utf-8")
-    (out_dir / "grounding_report.md").write_text(_render_md(records), encoding="utf-8")
+    (out_dir / "grounding_report.md").write_text(_render_md(merged), encoding="utf-8")
     config._grounding_report_path = out_dir / "grounding_report.md"
 
 
