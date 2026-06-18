@@ -58,6 +58,7 @@ class Store:
         *,
         embedding: str | None = None,
         model: str | None = None,
+        read_only: bool = False,
     ) -> "Store":
         """Open (creating if needed) the libkit library under ``home/.scientist``.
 
@@ -66,6 +67,15 @@ class Store:
         reopen with a different one. Defaults come from ``SCIENTIST_EMBEDDING``
         (default ``remote`` — DeepInfra, no local model download) and
         ``SCIENTIST_EMBED_MODEL`` (default ``qwen3_600m``, dim 1024).
+
+        With ``read_only=True`` (libkit >=0.4.0) the store is opened without the
+        exclusive write lock, so many read-only processes run concurrently
+        instead of serialising — e.g. parallel grounding + judge subagents that
+        only read paper text, and read-only ``sci`` commands (search/query/show/
+        read/catalog). A read-only open never creates the store and raises
+        ``libkit.errors.ReadOnlyStore`` on any write method, so it must be
+        reserved for commands that only read. A missing catalog is surfaced up
+        front (rather than as a lower-level libkit failure).
         """
         from libkit import Library
         from libkit.errors import EmbedderMismatch
@@ -76,12 +86,21 @@ class Store:
         model = model or os.environ.get("SCIENTIST_EMBED_MODEL", "qwen3_600m")
         allow_mismatch = (os.environ.get("SCIENTIST_ALLOW_EMBEDDER_MISMATCH", "").lower()
                           in ("1", "true", "yes"))
+        db_path = store_dir / DB_FILENAME
+        if read_only and not db_path.exists():
+            # A read-only open never creates the store, so libkit would fail
+            # opening a missing catalog. Report it as "no store yet" with a hint.
+            raise FileNotFoundError(
+                f"no scientist store at {home} ({STORE_DIRNAME}/{DB_FILENAME} missing) — "
+                "run `sci init` to create one first."
+            )
         try:
             lib = Library.open(
-                store_dir / DB_FILENAME,
+                db_path,
                 embedding=embedding,
                 model=model,
                 allow_embedder_mismatch=allow_mismatch,
+                read_only=read_only,
             )
         except EmbedderMismatch as e:
             raise EmbedderConfigError(

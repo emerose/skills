@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["libkit>=0.2.2", "pypdf>=4.0", "httpx>=0.27", "diskcache>=5.6", "platformdirs>=4.0"]
+# dependencies = ["libkit>=0.4.0", "pypdf>=4.0", "httpx>=0.27", "diskcache>=5.6", "platformdirs>=4.0"]
 # ///
 """bib - a libkit-backed bibliographer for a collection of academic articles.
 
@@ -13,7 +13,7 @@ override with --home or BIBLIOGRAPHER_HOME) containing:
       papers/            the organized files, one per article
       index.html         a self-contained, searchable HTML viewer (auto-regenerated)
 
-libkit (>=0.2.2) IS the store: there is no separate bibliographer database.
+libkit (>=0.4.0) IS the store: there is no separate bibliographer database.
 Each paper is one libkit document; every bibliographic field — DOI, arXiv id,
 authors, venue, year, abstract, tags, citekey, file path — lives in the
 document's free-form ``metadata`` JSON. Paper-level identity (citekeys, dedup
@@ -1413,15 +1413,38 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# Subcommands that only READ the store open it ``read_only=True`` (libkit >=0.4.0):
+# a read-only open takes no exclusive write lock, so many of them run concurrently
+# (parallel grounding / literature-research subagents, `bib query`/`text`) instead
+# of serialising on the write lock. Everything not listed here opens read-write —
+# the safe default, since a *write* command opened read-only would crash with
+# ``ReadOnlyStore`` while a read command opened read-write merely keeps today's
+# lock behaviour. Verified each below performs no store writes:
+#   search/list/show/text/query/export — pure metadata/chunk reads.
+#   dedupe — only *reports* duplicate groups (the user removes extras via `bib rm`).
+#   check  — reads records + hashes on-disk files; never repairs.
+#   audit  — reads records + leading chunk text; emits a worklist, never repairs.
+# Deliberately NOT here (they write the store or a managed file): init, add, import,
+# fetch, backfill, enrich, discover, tag, rm — and `viewer`, which regenerates
+# index.html in the library.
+_READ_ONLY_COMMANDS = frozenset({
+    "search", "list", "show", "text", "query", "export", "dedupe", "check", "audit",
+})
+
+
 async def dispatch(args: argparse.Namespace) -> None:
     # Load .env BEFORE resolving the default home: $BIBLIOGRAPHER_HOME often lives in
     # ~/.env, so it must be in the environment before _default_home() reads it. An
     # explicit --home always wins and skips this inference.
     _load_dotenv(Path(args.home).expanduser() if args.home else None)
     home = Path(args.home).expanduser() if args.home else _default_home()
+    read_only = args.command in _READ_ONLY_COMMANDS
     try:
-        store = BiblioStore.open(home)
+        store = BiblioStore.open(home, read_only=read_only)
     except EmbedderConfigError as e:
+        die(str(e))
+    except FileNotFoundError as e:
+        # A read-only open never creates the store; a first-run read lands here.
         die(str(e))
     try:
         await args.func(args, store)

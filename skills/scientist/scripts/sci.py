@@ -7,7 +7,7 @@
 #   "xlrd>=2.0",
 #   "python-docx>=1.1",
 #   "pdfplumber>=0.11",
-#   "libkit>=0.2.3",
+#   "libkit>=0.4.0",
 #   "platformdirs>=4.0",
 # ]
 # ///

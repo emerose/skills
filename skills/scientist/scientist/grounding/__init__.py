@@ -461,7 +461,9 @@ class PaperRef:
         home = _bib_home()
 
         async def _go():
-            store = BiblioStore.open(home)
+            # Pure read of stored chunk text — open read-only so parallel grounding
+            # + judge subagents don't serialise on the library's write lock.
+            store = BiblioStore.open(home, read_only=True)
             try:
                 parts = [await store.chunk_text(self.document_id, int(i)) for i in idxs]
             finally:
@@ -509,7 +511,9 @@ def _load_paper(citekey: str) -> PaperRef:
     home = _bib_home()
 
     async def _go():
-        store = BiblioStore.open(home)
+        # Pure read of paper metadata + stored text — open read-only so parallel
+        # grounding + judge subagents don't serialise on the library's write lock.
+        store = BiblioStore.open(home, read_only=True)
         try:
             rec = await store.get_by_citekey(citekey)
             if rec is None:
@@ -526,7 +530,13 @@ def _load_paper(citekey: str) -> PaperRef:
         finally:
             await store.close()
 
-    res = asyncio.run(_go())
+    try:
+        res = asyncio.run(_go())
+    except FileNotFoundError:
+        # A read-only open never creates the store, so a not-yet-initialised
+        # library raises here rather than returning an empty result. Surface the
+        # same "paper not in library" guidance a missing citekey gives.
+        res = None
     if res is None:
         raise LiteratureError(
             f"paper({citekey!r}) is not in the bibliographer library — add it "

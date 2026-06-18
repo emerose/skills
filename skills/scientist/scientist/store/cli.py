@@ -915,6 +915,26 @@ COMMANDS = {
     "pr": cmd_pr,
 }
 
+# Store subcommands that only READ the libkit store open it ``read_only=True``
+# (libkit >=0.4.0): a read-only open takes no exclusive write lock, so many of
+# them run concurrently instead of serialising. Everything not listed opens
+# read-write — the safe default (a *write* command opened read-only crashes with
+# ``ReadOnlyStore``; a read command opened read-write just keeps today's locking).
+# Verified each reads only (no upsert/merge/delete/ingest of store documents):
+#   list/show/search/query/file/entity — pure metadata/chunk reads.
+#   read     — dumps a tabular file from disk; only opens the store for its home.
+#   catalog  — reads experiments; the CATALOG.md/json it writes are plain files,
+#              not store documents.
+#   check    — structural report; "reports only; never mutates".
+#   audit    — provenance-staleness report + worklist; never mutates the store.
+#   meta/fingerprint — read the experiment.yml sidecar; no store writes.
+# Deliberately read-write (they write the store): init, index, reindex,
+# index-claims, new, intake, review. (`pr` is pure git and never opens the store.)
+_READ_ONLY_COMMANDS = frozenset({
+    "list", "show", "search", "query", "file", "read", "entity",
+    "catalog", "check", "audit", "meta", "fingerprint",
+})
+
 
 def register(sub: argparse._SubParsersAction) -> None:
     """Register the store subcommands on an existing ``sci`` subparser action.
@@ -1017,9 +1037,14 @@ async def _run(args: argparse.Namespace) -> None:
     if args.cmd == "pr":            # pure git; no libkit store needed
         await handler(_HomeOnly(home), args)  # type: ignore[arg-type]
         return
+    read_only = args.cmd in _READ_ONLY_COMMANDS
     try:
-        store = Store.open(home)
+        store = Store.open(home, read_only=read_only)
     except EmbedderConfigError as e:
+        die(str(e))
+    except FileNotFoundError as e:
+        # A read-only open never creates the store; a first-run read lands here.
+        # (`_require_initialized` already guards most cases, but keep the message clear.)
         die(str(e))
     try:
         await handler(store, args)
