@@ -128,17 +128,11 @@ def _author_year(src: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 # parsing
 # --------------------------------------------------------------------------- #
-def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
-    """Pull ``[claim:<id>]`` citations and ``![..](target)`` embeds out of report
-    Markdown, each with its 1-based line number. Citations/embeds inside fenced code
-    blocks (```` ``` ````) are skipped so an example in a code block isn't audited.
-
-    Returns ``{"citations": [{id, line}], "embeds": [{target, line}]}``.
-    """
-    citations: list[dict[str, Any]] = []
-    embeds: list[dict[str, Any]] = []
-    report_cites: list[dict[str, Any]] = []
-    lit_cites: list[dict[str, Any]] = []
+def _iter_lines_outside_fences(text: str):
+    """Yield ``(lineno, line)`` for every 1-based line *outside* a fenced code block
+    (```` ``` ```` or ``~~~``), so an example inside a code block isn't parsed/audited.
+    The fence delimiter lines themselves are not yielded. Shared by :func:`parse_report`
+    and :func:`_paragraphs` so the skip-inside-fences rule lives in one place."""
     in_fence = False
     fence_marker = ""
     for n, line in enumerate(text.splitlines(), start=1):
@@ -152,6 +146,21 @@ def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
             continue
         if in_fence:
             continue
+        yield n, line
+
+
+def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
+    """Pull ``[claim:<id>]`` citations and ``![..](target)`` embeds out of report
+    Markdown, each with its 1-based line number. Citations/embeds inside fenced code
+    blocks (```` ``` ````) are skipped so an example in a code block isn't audited.
+
+    Returns ``{"citations": [{id, line}], "embeds": [{target, line}]}``.
+    """
+    citations: list[dict[str, Any]] = []
+    embeds: list[dict[str, Any]] = []
+    report_cites: list[dict[str, Any]] = []
+    lit_cites: list[dict[str, Any]] = []
+    for n, line in _iter_lines_outside_fences(text):
         for m in _CITE_RE.finditer(line):
             citations.append({"id": m.group(1).strip(), "line": n})
         for m in _REPORT_RE.finditer(line):
@@ -524,6 +533,17 @@ def _cite_ids_in(s: str) -> list[str]:
             + [m.group(1).strip() for m in _LIT_RE.finditer(s)])
 
 
+def _resolved_single_cites(ptext: str, claim_index: dict[str, dict[str, Any]]):
+    """Yield ``(claim_id, claim)`` for each ``[claim:]`` / ``[lit:]`` citation in ``ptext``
+    that resolves to *exactly one* claim. Multi-/zero-candidate cites (missing/ambiguous)
+    are skipped — the per-citation audit owns those. Shared by the paragraph-scoped
+    advisories, which both walk only the unambiguously-resolved cites of a paragraph."""
+    for cid in _cite_ids_in(ptext):
+        cands = resolve_citation(cid, claim_index)
+        if len(cands) == 1:
+            yield cands[0], claim_index[cands[0]]
+
+
 def _paragraphs(text: str) -> list[tuple[int, str]]:
     """Split into blank-line-separated paragraphs (``(start_line, text)``), skipping
     fenced code blocks. Hard-wrapped lines are joined so a sentence's number and its
@@ -532,8 +552,7 @@ def _paragraphs(text: str) -> list[tuple[int, str]]:
     paras: list[tuple[int, str]] = []
     cur: list[str] = []
     start: int | None = None
-    in_fence = False
-    fence_marker = ""
+    prev_lineno: int | None = None
 
     def flush() -> None:
         nonlocal cur, start
@@ -541,18 +560,13 @@ def _paragraphs(text: str) -> list[tuple[int, str]]:
             paras.append((start or 1, "\n".join(cur)))
         cur, start = [], None
 
-    for n, line in enumerate(text.splitlines(), start=1):
+    for n, line in _iter_lines_outside_fences(text):
+        # A gap in line numbers means a fenced code block was skipped between this line
+        # and the last — a fence opening ends the current paragraph just as a blank line does.
+        if prev_lineno is not None and n > prev_lineno + 1:
+            flush()
+        prev_lineno = n
         stripped = line.lstrip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
-            marker = stripped[:3]
-            if not in_fence:
-                in_fence, fence_marker = True, marker
-                flush()
-            elif stripped.startswith(fence_marker):
-                in_fence, fence_marker = False, ""
-            continue
-        if in_fence:
-            continue
         if not stripped:
             flush()
             continue
@@ -584,10 +598,8 @@ def prose_quantity_advisories(
     paras = _paragraphs(text)
     global_pool: set[float] = set()
     for _, ptext in paras:
-        for cid in _cite_ids_in(ptext):
-            cands = resolve_citation(cid, claim_index)
-            if len(cands) == 1:
-                global_pool |= _claim_quantities(claim_index[cands[0]])
+        for _cid, claim in _resolved_single_cites(ptext, claim_index):
+            global_pool |= _claim_quantities(claim)
 
     advisories: list[dict[str, Any]] = []
     for start, ptext in paras:
@@ -595,11 +607,9 @@ def prose_quantity_advisories(
             continue
         local_pool: set[float] = set()
         resolved: list[str] = []
-        for cid in _cite_ids_in(ptext):
-            cands = resolve_citation(cid, claim_index)
-            if len(cands) == 1:
-                local_pool |= _claim_quantities(claim_index[cands[0]])
-                resolved.append(_short_claim_id(cands[0]))
+        for cands0, claim in _resolved_single_cites(ptext, claim_index):
+            local_pool |= _claim_quantities(claim)
+            resolved.append(_short_claim_id(cands0))
         if not resolved:
             continue
         for q in sorted(_quantities(ptext)):
@@ -764,13 +774,9 @@ def incommensurate_evidence_advisories(
             continue
         resolved: list[dict[str, Any]] = []
         all_non_robust = True
-        for cid in _cite_ids_in(ptext):
-            cands = resolve_citation(cid, claim_index)
-            if len(cands) != 1:                 # missing/ambiguous → the citation audit owns it
-                continue
-            claim = claim_index[cands[0]]
+        for cands0, claim in _resolved_single_cites(ptext, claim_index):
             weaknesses = claim_robustness_weaknesses(claim)
-            short = _short_claim_id(cands[0])
+            short = _short_claim_id(cands0)
             # Surface the evidence the author had: strength + the review note ("all one lab" etc.)
             # when present, so the §3 reviewer can weigh centrality vs. robustness, not just see a
             # bare tag. note is None for machine-judged claims (they carry no review note).
@@ -825,7 +831,7 @@ def audit(report_path: Path, home: Path | None = None,
     with the authoring agent — see the module docstring).
     """
     rp = Path(report_path).resolve()
-    home = Path(home).resolve() if home is not None else _infer_home(rp)
+    home = _resolve_home(home, rp)
     seen = (_seen or frozenset()) | {str(rp)}
     text = rp.read_text(encoding="utf-8")
     parsed = parse_report(text)
@@ -1012,6 +1018,13 @@ def _infer_home(report_path: Path) -> Path:
     return report_path.parent.parent if len(report_path.parents) >= 2 else report_path.parent
 
 
+def _resolve_home(home: Path | None, report_path: Path) -> Path:
+    """The data-root for a report: the caller's ``home`` (resolved) when given, else
+    inferred from the report path via :func:`_infer_home`. Local to this module — distinct
+    from the argparse-based ``cli_utils.resolve_home``, which infers from the CWD/flags."""
+    return Path(home).resolve() if home is not None else _infer_home(report_path)
+
+
 def _repo_rel(report_dir: Path, target: str, home: Path) -> str:
     """Resolve an embed ``target`` (relative to the report's directory, or absolute) to a
     home-relative POSIX path."""
@@ -1046,7 +1059,7 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     PDF, native footnotes for HTML / docx) — locality over a relocated endnotes section.
     The result is what the render is produced from."""
     rp = Path(report_path).resolve()
-    home = Path(home).resolve() if home is not None else _infer_home(rp)
+    home = _resolve_home(home, rp)
     text = rp.read_text(encoding="utf-8")
     claim_index = index_claims(home)
 
@@ -1057,26 +1070,22 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     lorder: list[str] = []
     lnum: dict[str, int] = {}          # lit-cite id -> 1-based index
 
-    def _cite_sub(m: re.Match) -> str:
-        cid = m.group(1).strip()
-        if cid not in num:
-            order.append(cid)
-            num[cid] = len(order)
-        return f"[^claim-{num[cid]}]"
+    def _make_footnote_sub(order_list: list[str], num_dict: dict[str, int], prefix: str):
+        """A footnote-marker substitution: assign each distinct cited id a 1-based,
+        first-seen number (tracked in ``order_list`` / ``num_dict``) and emit the pandoc
+        footnote marker ``[^<prefix>-<n>]``. Identical numbering/order for all three
+        citation families — only the order/num stores and the marker prefix differ."""
+        def _sub(m: re.Match) -> str:
+            cid = m.group(1).strip()
+            if cid not in num_dict:
+                order_list.append(cid)
+                num_dict[cid] = len(order_list)
+            return f"[^{prefix}-{num_dict[cid]}]"
+        return _sub
 
-    def _report_sub(m: re.Match) -> str:
-        cid = m.group(1).strip()
-        if cid not in rnum:
-            rorder.append(cid)
-            rnum[cid] = len(rorder)
-        return f"[^report-{rnum[cid]}]"
-
-    def _lit_sub(m: re.Match) -> str:
-        cid = m.group(1).strip()
-        if cid not in lnum:
-            lorder.append(cid)
-            lnum[cid] = len(lorder)
-        return f"[^lit-{lnum[cid]}]"
+    _cite_sub = _make_footnote_sub(order, num, "claim")
+    _report_sub = _make_footnote_sub(rorder, rnum, "report")
+    _lit_sub = _make_footnote_sub(lorder, lnum, "lit")
 
     def _embed_sub(m: re.Match) -> str:
         path = m.group(1).strip()
@@ -1350,7 +1359,7 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
     import tempfile
 
     rp = Path(report_path).resolve()
-    home = Path(home).resolve() if home is not None else _infer_home(rp)
+    home = _resolve_home(home, rp)
     out = Path(out_path)
 
     pandoc = shutil.which("pandoc")
