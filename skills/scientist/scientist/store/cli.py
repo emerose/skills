@@ -21,9 +21,11 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any
 
 from .. import provenance
+from .. import cli_utils
+from ..cli_utils import die, emit_json  # re-exported for existing call sites
 
 from . import _audit, _files, _generate, _intake, _meta, _pr
 from ._store import STORE_DIRNAME, Store, EmbedderConfigError
@@ -61,26 +63,10 @@ def _load_dotenv(home: Path) -> None:
                 os.environ[key] = value
 
 
-def die(msg: str, code: int = 1) -> NoReturn:
-    print(f"error: {msg}", file=sys.stderr)
-    raise SystemExit(code)
-
-
-def emit_json(obj: Any) -> None:
-    import json
-    print(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
-
-
 def _home(args: argparse.Namespace) -> Path:
-    # Precedence: --home, then $SCIENTIST_HOME, then the data-repo root inferred by
-    # walking up from cwd (so commands run from inside a checkout just work), then cwd.
-    if args.home:
-        return Path(args.home).resolve()
-    if os.environ.get("SCIENTIST_HOME"):
-        return Path(os.environ["SCIENTIST_HOME"]).resolve()
-    from ..experiments import _infer_root
-    inferred = _infer_root()
-    return (inferred or Path.cwd()).resolve()
+    # Shared precedence (--home → $SCIENTIST_HOME → inferred checkout root); the store
+    # additionally falls back to cwd when nothing else resolves.
+    return cli_utils.resolve_home(args) or Path.cwd()
 
 
 def _require_initialized(home: Path) -> None:
