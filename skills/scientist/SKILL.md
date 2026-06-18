@@ -71,6 +71,25 @@ Private CRO vocabulary (your real vendor names): [references/vocab.example.yml](
   (carrying its outcome + strength, so a contradicted or weak claim is never surfaced as fact).
 - **Don't trust a filename for what a file contains** — verify against indexed content.
 
+## Running the tool
+
+The CLI is `scripts/sci.py`, a self-contained PEP-723 `uv` script (it declares its own
+deps), so it runs with no install. The always-works form — **use this in scripts and as
+an agent** — is `uv run /path/to/skills/scientist/scripts/sci.py <command> [args]`. To
+get a real `sci` on your PATH instead of typing that absolute form, the skill ships a
+launcher shim at [`bin/sci`](bin/sci) — add its `bin/` to PATH (`export
+PATH="/path/to/skills/scientist/bin:$PATH"`) or symlink it once (`ln -s
+/path/to/skills/scientist/bin/sci ~/.local/bin/sci`). The shim execs the script, whose
+shebang resolves deps each run.
+
+**Data-tree root** (`--home` / `$SCIENTIST_HOME`): you no longer have to export
+`SCIENTIST_HOME` when running from inside the data checkout. When it is unset, `sci` (and
+the grounding `experiments` accessor) infer the data-repo root by walking up from the
+working directory to a checkout marker (`.scientist/`, or `LAYOUT.md` + `program/`). An
+explicit `--home` or a set `$SCIENTIST_HOME` always wins; if no root is found the clear
+"set SCIENTIST_HOME" error still fires. Literature-claim grounding likewise loads `~/.env`
+to find `$BIBLIOGRAPHER_HOME` if it isn't already set, so no `source ~/.env` is needed.
+
 ## Maintaining this skill (for agents working ON scientist)
 
 Read the repo-wide [AGENTS.md](../../AGENTS.md) first: improve-as-you-go, push rote work into code,

@@ -365,12 +365,53 @@ def _import_bibliostore():
         "bibliographer skill alongside scientist, or put its scripts/ on PYTHONPATH.")
 
 
+def _load_dotenv_for(key: str) -> None:
+    """Populate ``os.environ[key]`` from a .env file if it is not already set (stdlib only).
+
+    Search: cwd, every parent of this module (a repo-root .env), then ``~/.env`` (the
+    consolidated location). Real env vars and earlier files win — a later file never
+    overrides a value already present. Mirrors the CLIs' ``_load_dotenv`` so a claim run
+    under pytest (which never sources a shell profile) still finds BIBLIOGRAPHER_HOME."""
+    if os.environ.get(key):
+        return
+    here = Path(__file__).resolve()
+    candidates = [Path.cwd() / ".env", *[p / ".env" for p in here.parents],
+                  Path.home() / ".env"]
+    seen: set[Path] = set()
+    for env_path in candidates:
+        if env_path in seen or not env_path.is_file():
+            continue
+        seen.add(env_path)
+        try:
+            lines = env_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k, v = k.strip(), v.strip().strip('"').strip("'")
+            if k and k not in os.environ:
+                os.environ[k] = v
+        if os.environ.get(key):     # found it — stop scanning
+            return
+
+
 def _bib_home() -> Path:
+    # Lazy + graceful: read the env var, and if unset, fall back to loading ~/.env (or a
+    # repo/cwd .env) before erroring — a claim run under pytest never sources a shell
+    # profile, so the var would otherwise be missing even though ~/.env defines it. An
+    # already-set BIBLIOGRAPHER_HOME always wins (the loader never overrides it).
     h = os.environ.get("BIBLIOGRAPHER_HOME")
     if not h:
+        _load_dotenv_for("BIBLIOGRAPHER_HOME")
+        h = os.environ.get("BIBLIOGRAPHER_HOME")
+    if not h:
         raise LiteratureError(
-            "BIBLIOGRAPHER_HOME is not set — literature claims read the bibliographer library "
-            "(source ~/.env, which sets it, before running).")
+            "BIBLIOGRAPHER_HOME is not set and no .env defining it was found — literature "
+            "claims read the bibliographer library; set BIBLIOGRAPHER_HOME (or put it in "
+            "~/.env) before running.")
     return Path(h).expanduser()
 
 

@@ -107,18 +107,26 @@ always-works form — **use this in scripts and as an agent** — is:
 uv run /path/to/skills/bibliographer/scripts/bib.py <command> [args]
 ```
 
-The examples below write `bib` for brevity. To get a real `bib` on your PATH for
-interactive use, symlink the script — its `#!/usr/bin/env -S uv run --script`
-shebang resolves dependencies on each run:
+The examples below write `bib` for brevity. To get a real `bib` on your PATH so you
+never type the absolute `uv run …` form, the skill ships a launcher shim at
+[`bin/bib`](bin/bib) — add its `bin/` to PATH, or symlink the shim once:
 
 ```bash
-chmod +x /path/to/skills/bibliographer/scripts/bib.py
-ln -s /path/to/skills/bibliographer/scripts/bib.py ~/.local/bin/bib   # then: bib add 10.1038/nphys1170
+export PATH="/path/to/skills/bibliographer/bin:$PATH"        # then: bib add 10.1038/nphys1170
+# …or, to put just the one command on an existing PATH dir:
+ln -s /path/to/skills/bibliographer/bin/bib ~/.local/bin/bib
 ```
 
-(The symlink needs no packaging. A future option, once the repo is published, is
-packaging it for `uv tool install` / `uvx`.) Run `bib init` once per library
-before first use.
+The shim resolves the real script relative to itself and execs it; the script's
+`#!/usr/bin/env -S uv run --script` shebang resolves dependencies on each run, so no
+packaging is needed. (Symlinking the script directly still works too.) Run `bib init`
+once per library before first use.
+
+**Library home** (`--home` / `$BIBLIOGRAPHER_HOME`, default `~/.bibliographer`): you no
+longer need to `source ~/.env` first. When neither `--home` nor `$BIBLIOGRAPHER_HOME` is
+set, the CLI loads `~/.env` (and a cwd/repo `.env`) *before* picking the default home, so
+a `BIBLIOGRAPHER_HOME=` line in `~/.env` is honoured. An explicit `--home` or an
+already-set env var always wins.
 
 ## Workflow
 

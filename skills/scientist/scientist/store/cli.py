@@ -72,8 +72,15 @@ def emit_json(obj: Any) -> None:
 
 
 def _home(args: argparse.Namespace) -> Path:
-    return Path(args.home or os.environ.get("SCIENTIST_HOME")
-                or Path.cwd()).resolve()
+    # Precedence: --home, then $SCIENTIST_HOME, then the data-repo root inferred by
+    # walking up from cwd (so commands run from inside a checkout just work), then cwd.
+    if args.home:
+        return Path(args.home).resolve()
+    if os.environ.get("SCIENTIST_HOME"):
+        return Path(os.environ["SCIENTIST_HOME"]).resolve()
+    from ..experiments import _infer_root
+    inferred = _infer_root()
+    return (inferred or Path.cwd()).resolve()
 
 
 def _require_initialized(home: Path) -> None:
