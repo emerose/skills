@@ -51,17 +51,48 @@ def _import_bibliostore():
         "bibliographer skill alongside scientist, or put its scripts/ on PYTHONPATH.")
 
 
+# A directory carrying one of these marks the root of the checkout the module lives in.
+# The parent walk stops there so it can resolve a *repo-root* .env without climbing past
+# the repo into an unrelated parent (e.g. the real ``$HOME``). ``.git`` is the repo root
+# (a worktree's ``.git`` is a file, hence ``.exists()`` not ``.is_dir()``).
+_REPO_ROOT_MARKERS = (".git",)
+
+
+def _parent_env_candidates(start: Path) -> list[Path]:
+    """``.env`` paths from ``start``'s ancestors up to — and including — the nearest repo
+    root, identified by a :data:`_REPO_ROOT_MARKERS` mark *or* by reaching ``$HOME``.
+
+    The bound is what keeps the search hermetic: without it a module installed deep under
+    ``$HOME`` (the normal case) would always pull in ``$HOME/.env`` through the parent walk,
+    so a HOME sandbox could never produce a "no .env found" state. Stopping at the repo root
+    (or, as a backstop, at ``$HOME`` itself — never climbing *into* it) means the walk only
+    ever sees ``.env`` files inside the module's own checkout, exactly the "repo-root .env"
+    this is meant to find. cwd/.env and ``~/.env`` remain separate candidates handled by the
+    caller, so a real claims run still finds them."""
+    home = Path.home().resolve()
+    envs: list[Path] = []
+    for anc in start.resolve().parents:
+        if anc == home:
+            break              # backstop: never walk into or above the real home dir
+        envs.append(anc / ".env")
+        if any((anc / m).exists() for m in _REPO_ROOT_MARKERS):
+            break              # reached the repo root — stop before climbing out of it
+    return envs
+
+
 def _load_dotenv_for(key: str) -> None:
     """Populate ``os.environ[key]`` from a .env file if it is not already set (stdlib only).
 
-    Search: cwd, every parent of this module (a repo-root .env), then ``~/.env`` (the
-    consolidated location). Real env vars and earlier files win — a later file never
-    overrides a value already present. Mirrors the CLIs' ``_load_dotenv`` so a claim run
-    under pytest (which never sources a shell profile) still finds BIBLIOGRAPHER_HOME."""
+    Search: cwd, every parent of this module up to its repo root (a repo-root .env), then
+    ``~/.env`` (the consolidated location). Real env vars and earlier files win — a later
+    file never overrides a value already present. Mirrors the CLIs' ``_load_dotenv`` so a
+    claim run under pytest (which never sources a shell profile) still finds BIBLIOGRAPHER_HOME.
+    The parent walk is bounded at the repo root (see :func:`_parent_env_candidates`) so it
+    cannot escape the checkout into the real ``$HOME`` and read an unrelated ``~/.env``."""
     if os.environ.get(key):
         return
     here = Path(__file__).resolve()
-    candidates = [Path.cwd() / ".env", *[p / ".env" for p in here.parents],
+    candidates = [Path.cwd() / ".env", *_parent_env_candidates(here),
                   Path.home() / ".env"]
     seen: set[Path] = set()
     for env_path in candidates:
