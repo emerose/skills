@@ -1,6 +1,6 @@
 --[[
 layout.lua — fit a report's exhibits to the Tufte page (used by `sci report`, ROADMAP §5,
-alongside endnotes.lua). Structural AST tweaks; pandoc's writers still typeset.
+alongside references.lua). Structural AST tweaks; pandoc's writers still typeset.
 
   * Tables — equal column widths summing to the full measure, so the LaTeX writer emits
     `p{...}` columns that fill `\linewidth` (a bare pipe table otherwise renders narrow).
@@ -9,7 +9,7 @@ alongside endnotes.lua). Structural AST tweaks; pandoc's writers still typeset.
   * Figures (PDF/LaTeX only) — replace the floating figure with an in-place, full-text-width
     block (so it stays where written and centred, rather than floating off to its own page),
     keeping `\captionof{figure}` numbering. The caption inlines are written back to LaTeX so
-    their formatting / endnote markers survive.
+    their formatting / footnote markers survive.
 --]]
 
 function Table(t)

@@ -859,10 +859,10 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     * ``![cap](*.csv)`` → the CSV inlined as a Markdown table (the derived table, embedded);
     * ``![cap](fig)`` → the same image with its path absolutised so pandoc resolves it.
 
-    Citations are footnotes (hyperlinked, auto-numbered); :func:`render` runs the bundled
-    ``endnotes.lua`` pandoc filter so they are relocated to a single "Grounding notes"
-    endnotes section at the document end — uniformly across PDF / HTML / docx, with no
-    LaTeX-package dependency. The result is what the render is produced from."""
+    Citations are native footnotes (hyperlinked, auto-numbered): :func:`render` lets the
+    writer typeset them as true bottom-of-page footnotes (native LaTeX ``\\footnote`` for
+    PDF, native footnotes for HTML / docx) — locality over a relocated endnotes section.
+    The result is what the render is produced from."""
     rp = Path(report_path).resolve()
     home = Path(home).resolve() if home is not None else _infer_home(rp)
     text = rp.read_text(encoding="utf-8")
@@ -960,7 +960,7 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     defs += [f"[^report-{rnum[cid]}]: {_report_note_text(cid)}" for cid in rorder]
     defs += [f"[^lit-{lnum[cid]}]: {_lit_note_text(cid)}" for cid in lorder]
     if defs:
-        # pandoc footnote definitions; endnotes.lua relocates them to the end on render
+        # pandoc footnote definitions; the writer typesets them as per-page footnotes
         body = body.rstrip() + "\n\n" + "\n".join(defs) + "\n"
     return body
 
@@ -994,6 +994,11 @@ def _csv_to_md_table(path: Path) -> str:
 # empty wide margin is wasted space unless it holds sidenotes, which a citation-dense
 # report can't use well). Title block, headings, and the running header/footer all come
 # out sans-serif; the body is serif. Margins set via -V geometry:margin in render().
+#
+# The title block carries the TITLE only: the author byline and the date are blanked
+# (`\author{}\date{}`) — the author/date front-matter keys are stripped before pandoc, so
+# `\maketitle` would otherwise fall back to `\today`. The date instead rides in the footer
+# next to the revision sha (see render()).
 _PDF_HEADER_TEX = r"""
 % --- modern report style (injected by `sci report`) ---
 \usepackage{graphicx}   % layout.lua emits raw \includegraphics, so load it unconditionally
@@ -1001,8 +1006,7 @@ _PDF_HEADER_TEX = r"""
 \usepackage{fancyhdr}
 \usepackage{caption}
 \captionsetup{font=small,labelfont=bf,justification=raggedright,singlelinecheck=false}
-\setkomafont{author}{\normalfont\sffamily}   % subtitle/byline + date in sans, like the title
-\setkomafont{date}{\normalfont\sffamily}
+\author{}\date{}        % no byline / no title-block date (date moves to the footer)
 \pagestyle{fancy}
 \fancyhf{}
 \renewcommand{\headrulewidth}{0.4pt}
@@ -1031,6 +1035,19 @@ def _front_field(text: str, key: str) -> str:
 def _report_title(text: str) -> str:
     """The report's YAML front-matter ``title`` — used for the running header."""
     return _front_field(text, "title")
+
+
+def _strip_front_matter_keys(md: str, keys: tuple[str, ...]) -> str:
+    """Drop ``keys`` (scalar, single-line) from a leading ``---``-fenced YAML block so
+    pandoc never puts them in the title block — used to suppress the ``author`` byline and
+    the title-block ``date`` (the source report keeps the keys on disk; only the rendered
+    Markdown sees them removed). A no-op when there is no front matter."""
+    m = re.match(r"^---\n(.*?)\n---\n", md, re.DOTALL)
+    if not m:
+        return md
+    kept = [ln for ln in m.group(1).splitlines()
+            if not any(re.match(rf"\s*{re.escape(k)}\s*:", ln) for k in keys)]
+    return "---\n" + "\n".join(kept) + "\n---\n" + md[m.end():]
 
 
 def _git_revision(folder: Path, ignore: Path | None = None) -> tuple[str, bool]:
@@ -1127,9 +1144,11 @@ def _pick_font(candidates: list[str], available: set[str]) -> str | None:
     return next((c for c in candidates if c in available), None)
 
 
-# Bundled pandoc filters: relocate footnotes → endnotes, and widen exhibits (all formats).
-_ENDNOTES_LUA = Path(__file__).with_name("endnotes.lua")
+# Bundled pandoc filters (all formats): widen exhibits, and unnumber the References list.
+# (endnotes.lua — which relocated footnotes into an endnotes section — is kept in-tree but
+# no longer wired in: citations now render as true per-page footnotes.)
 _LAYOUT_LUA = Path(__file__).with_name("layout.lua")
+_REFERENCES_LUA = Path(__file__).with_name("references.lua")
 
 
 class RenderError(RuntimeError):
@@ -1161,6 +1180,10 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             "(`--to html`).")
 
     md = render_markdown(rp, home)        # citations as native footnotes
+    # Drop the author byline + the title-block date: pandoc would otherwise render both in
+    # the title block. The keys stay on disk (the source report is untouched); only the
+    # Markdown handed to pandoc has them removed. The date re-appears in the PDF footer.
+    md = _strip_front_matter_keys(md, ("author", "date"))
 
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp_md = tmp_header = None
@@ -1168,11 +1191,11 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
         tf.write(md)
         tmp_md = Path(tf.name)
     try:
-        # endnotes.lua relocates footnotes → a "Grounding notes" endnotes section;
-        # layout.lua widens tables/figures. Both are structural AST transforms (every
-        # target, no LaTeX package).
+        # layout.lua widens tables/figures; references.lua unnumbers the References list.
+        # Both are structural AST transforms (every target, no LaTeX package). Citations
+        # are left as native footnotes for the writer to typeset per-page.
         cmd = [pandoc, str(tmp_md), "-o", str(out), "--standalone",
-               f"--lua-filter={_ENDNOTES_LUA}", f"--lua-filter={_LAYOUT_LUA}",
+               f"--lua-filter={_LAYOUT_LUA}", f"--lua-filter={_REFERENCES_LUA}",
                f"--resource-path={rp.parent}", f"--resource-path={home}"]
         if to == "pdf":
             # modern house style: KOMA `scrartcl` (sans headings), serif body + modern
@@ -1184,12 +1207,17 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
             classification = _front_field(src, "classification")
             head_right = (rf"\textcolor{{red!60!black}}{{\textbf{{{_latex_escape(classification)}}}}}"
                           if classification else "")
-            # footer-left: the source revision, so the rendered PDF is traceable to a
-            # commit. A trailing asterisk (rather than "-dirty") marks an uncommitted tree
-            # — unobtrusive and legible to a non-technical reader.
+            # footer-left: the date (front-matter `date:`, else the render date) next to
+            # the source revision, so the rendered PDF is traceable to a commit. A trailing
+            # asterisk (rather than "-dirty") marks an uncommitted tree — unobtrusive and
+            # legible to a non-technical reader.
+            import datetime
             sha, dirty = _git_revision(rp.parent, ignore=out)
-            foot_left = (rf"rev~\texttt{{{_latex_escape(sha)}}}{'*' if dirty else ''}"
-                         if sha else "")
+            date = _front_field(src, "date") or datetime.date.today().isoformat()
+            foot_bits = [_latex_escape(date)] if date else []
+            if sha:
+                foot_bits.append(rf"rev~\texttt{{{_latex_escape(sha)}}}{'*' if dirty else ''}")
+            foot_left = r"~~\textperiodcentered~~".join(foot_bits)
             header_tex = (_PDF_HEADER_TEX
                           .replace("@@RUNNING_TITLE@@", running)
                           .replace("@@HEAD_RIGHT@@", head_right)
