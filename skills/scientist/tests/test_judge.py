@@ -35,6 +35,11 @@ class FakePaper:
         self._chunks = chunks or {}
 
     def contains(self, phrase, *, normalize_ws=True):
+        # mirror the real PaperRef.contains: fold both sides so a markdown / whitespace /
+        # dash variant of a quote matches the stored (Markdown) text.
+        if normalize_ws:
+            from scientist.grounding.normalize import fold_match
+            return fold_match(phrase) in fold_match(self.text)
         return phrase in self.text
 
     def chunk_text(self, chunk):
@@ -397,6 +402,107 @@ def test_audit_backward_compat_legacy_reviewed(tmp_path):
 # --------------------------------------------------------------------------- #
 # end-to-end: list → judge (caller) → record → source() asserts on the fresh verdict
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# folded cache identity — markdown / whitespace / dash variants share one verdict
+# --------------------------------------------------------------------------- #
+def test_evidence_sha_folds_markdown_whitespace_dash():
+    # the cache identity hashes the FOLDED span (same normalization as quote-matching), so
+    # markdown / whitespace / Unicode-dash variants of one sentence map to ONE identity.
+    base = J.evidence_sha("Ube3a gene dosage drives the phenotype")
+    assert J.evidence_sha("*Ube3a* gene dosage drives the phenotype") == base   # markdown
+    assert J.evidence_sha("Ube3a   gene   dosage drives the phenotype") == base  # whitespace
+    assert J.evidence_sha("Ube3a gene dosage\ndrives the phenotype") == base     # newline
+    assert J.evidence_sha("Ube3a gene dosage–drives the phenotype") != base  # en-dash IS content here
+    # ...but the fold is deterministic and still distinguishes genuinely different text
+    assert J.evidence_sha("a totally different sentence") != base
+    assert J.evidence_sha("x") == J.evidence_sha("x")
+
+
+def test_markdown_edit_does_not_stale_a_verdict(tmp_path):
+    # a markdown- or whitespace-only edit to the quote must NOT stale a good verdict: the
+    # folded form is unchanged, so the cache key is unchanged → still fresh.
+    c = J.JudgmentCache(path=tmp_path / "x.json")
+    para = "the gene dosage drives it"
+    c.put(citekey="k", evidence_sha_=J.evidence_sha("*Ube3a* gene dosage"),
+          paraphrase=para, judge_id="agent", supported=True, rationale="", timestamp="t", tier=1)
+    # re-cite the same sentence without markdown / with extra whitespace → still fresh
+    assert c.lookup("k", J.evidence_sha("Ube3a gene dosage"), para)[0] == "fresh"
+    assert c.lookup("k", J.evidence_sha("Ube3a   gene  dosage"), para)[0] == "fresh"
+
+
+def test_two_modules_same_sentence_share_one_verdict(tmp_path, fake_paper, capture):
+    # the real bug: module A cites `*Ube3a* gene dosage`, module B cites `Ube3a gene dosage`
+    # for the SAME paraphrase. They must resolve to ONE shared, fresh verdict — no stale
+    # ping-pong where recording B stales A.
+    fake_paper.text = "Background: *Ube3a* gene dosage is tightly controlled in neurons."
+    para = "Ube3a dosage is tightly regulated"
+    cache = J.JudgmentCache()
+    cache.put(citekey="noor2015q", evidence_sha_=J.evidence_sha("*Ube3a* gene dosage"),
+              paraphrase=para, judge_id="subagent", supported=True,
+              rationale="states tight control", timestamp="t", tier=1)
+    grounding.set_judgment_cache(cache)
+    # module A (markdown quote) — fresh
+    recA = grounding.source("noor2015q", quote="*Ube3a* gene dosage", paraphrase=para)
+    assert recA["judge_status"] == "fresh" and recA["supported"] is True
+    # module B (plain quote, same sentence) — ALSO fresh off the same cached verdict
+    recB = grounding.source("noor2015q", quote="Ube3a gene dosage", paraphrase=para)
+    assert recB["judge_status"] == "fresh" and recB["supported"] is True
+    assert recA["evidence_sha"] == recB["evidence_sha"]            # one identity
+
+
+# --------------------------------------------------------------------------- #
+# divergence lint — genuinely different spans for one (citekey, paraphrase) are flagged
+# --------------------------------------------------------------------------- #
+def _report_at(dirpath: Path, sources, *, node="test_lit") -> Path:
+    dirpath.mkdir(parents=True, exist_ok=True)
+    claim = {"id": f"claims/test_literature.py::{node}", "statement": "A fact.",
+             "outcome": "passed", "kind": "literature", "strength": "moderate",
+             "caveats": None, "reviewed": None,
+             "evidence": {"lit_sources": sources}, "inputs": [], "reconcile": []}
+    p = dirpath / "grounding_report.json"
+    p.write_text(json.dumps({"claims": [claim]}), encoding="utf-8")
+    return p
+
+
+def test_divergence_lint_flags_different_spans(tmp_path):
+    # two modules, same (citekey, paraphrase), GENUINELY different sentences → flagged
+    para = "Ube3a dosage matters"
+    a = _report_at(tmp_path / "K1-A" / "analysis",
+                   [{"citekey": "noor2015q", "paraphrase": para, "tier": 1,
+                     "quote": "Ube3a dosage is tightly controlled.",
+                     "span": "Ube3a dosage is tightly controlled."}], node="claim_a")
+    b = _report_at(tmp_path / "K1-B" / "analysis",
+                   [{"citekey": "noor2015q", "paraphrase": para, "tier": 1,
+                     "quote": "Overexpression of Ube3a is deleterious.",
+                     "span": "Overexpression of Ube3a is deleterious."}], node="claim_b")
+    warnings = REFRESH.divergence_lint([a, b])
+    assert len(warnings) == 1
+    w = warnings[0]
+    assert w["citekey"] == "noor2015q" and w["paraphrase"] == para
+    assert len(w["spans"]) == 2
+    assert len(w["where"]) == 2
+
+
+def test_divergence_lint_ignores_markdown_only_variants(tmp_path):
+    # the SAME sentence cited with/without markdown is NOT a divergence (folds equal)
+    para = "Ube3a dosage matters"
+    a = _report_at(tmp_path / "K1-A" / "analysis",
+                   [{"citekey": "noor2015q", "paraphrase": para, "tier": 1,
+                     "quote": "*Ube3a* dosage is tightly controlled.",
+                     "span": "*Ube3a* dosage is tightly controlled."}], node="claim_a")
+    b = _report_at(tmp_path / "K1-B" / "analysis",
+                   [{"citekey": "noor2015q", "paraphrase": para, "tier": 1,
+                     "quote": "Ube3a dosage is tightly controlled.",
+                     "span": "Ube3a dosage is tightly controlled."}], node="claim_b")
+    assert REFRESH.divergence_lint([a, b]) == []
+
+
+def test_divergence_lint_clean_when_single_span(tmp_path):
+    a = _report_at(tmp_path / "K1-A" / "analysis", [_tier1_src()])
+    assert REFRESH.divergence_lint([a]) == []
+    assert "no divergent" in REFRESH.render_divergence([])
+
+
 def test_end_to_end_list_record_then_source(tmp_path, fake_paper, capture):
     rp = _report_json(tmp_path, [_tier1_src()])
     work = REFRESH.worklist(rp)

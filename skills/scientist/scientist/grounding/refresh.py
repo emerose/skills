@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .judgments import (JudgmentCache, JUDGMENT_CACHE_NAME, DEFAULT_JUDGE_ID, evidence_sha)
+from .normalize import fold_match
 
 
 def _now_iso() -> str:
@@ -202,6 +203,74 @@ def record_verdicts(report_path: Path | str, records: list[dict[str, Any]],
         cache.save(cp)
     return {"report": str(Path(report_path)), "cache": str(cp), "judge_id": jid,
             "recorded": recorded, "rejected": rejected, "details": details}
+
+
+# --------------------------------------------------------------------------- #
+# Divergence lint — cross-module hygiene for the residual the fold-key fix leaves.
+# --------------------------------------------------------------------------- #
+# Folding the cache key (sha of fold_match(span)) collapses markdown/whitespace/dash
+# variants of the SAME sentence to one shared verdict. The residual it can't collapse:
+# two GENUINELY different sentences from the same paper, each backing the same paraphrase
+# in different modules — they fold differently, so they stay distinct cache identities
+# (correct, by design: a different span is a different question). That's usually an
+# authoring slip — the same fact should cite one canonical quote everywhere — so this lint
+# surfaces it. It is advisory: a warning, never a failure (the verdicts are still each
+# valid for their own span).
+def divergence_lint(report_paths) -> list[dict[str, Any]]:
+    """Scan grounding reports for a ``(citekey, paraphrase)`` cited with quotes that fold to
+    DIFFERENT spans across modules, and return one warning per such pair.
+
+    ``report_paths`` is an iterable of grounding_report.json paths (the program's literature
+    modules). For every machine-judged source, group its (folded) span by ``(citekey,
+    paraphrase)``; a pair backed by more than one distinct folded span is a divergence —
+    the same claimed reading of the same paper is grounded on different sentences, which the
+    folded cache key keeps as separate verdicts. Reconcile to ONE canonical quote.
+
+    Each warning: ``{citekey, paraphrase, spans: [span_text…], where: [claim_id…]}`` (the
+    spans + the claims that carry them, so the author can find and unify them)."""
+    # (citekey, paraphrase) -> {folded_span -> {"span_text": raw, "where": {claim_id…}}}
+    seen: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for rp in report_paths:
+        for claim, src in _iter_machine_sources(rp):
+            if src is None:
+                continue                       # unreadable report → skip (check reports it elsewhere)
+            span = src.get("span")
+            if not span:
+                continue                       # tier-3 whole-doc spans aren't carried; nothing to compare
+            citekey = str(src.get("citekey") or "")
+            paraphrase = str(src.get("paraphrase") or "")
+            folded = fold_match(span)
+            bucket = seen.setdefault((citekey, paraphrase), {})
+            slot = bucket.setdefault(folded, {"span_text": span, "where": set()})
+            slot["where"].add(str(claim.get("id") or ""))
+    out: list[dict[str, Any]] = []
+    for (citekey, paraphrase), by_span in sorted(seen.items()):
+        if len(by_span) < 2:
+            continue                           # one canonical span → no divergence
+        spans = sorted(by_span.values(), key=lambda s: s["span_text"])
+        where: set[str] = set()
+        for s in spans:
+            where |= s["where"]
+        out.append({
+            "citekey": citekey, "paraphrase": paraphrase,
+            "spans": [s["span_text"] for s in spans],
+            "where": sorted(where),
+        })
+    return out
+
+
+def render_divergence(warnings: list[dict[str, Any]]) -> str:
+    """Human-readable summary of a :func:`divergence_lint` run (empty → a clean line)."""
+    if not warnings:
+        return "✓ no divergent literature quotes (every (citekey, paraphrase) cites one span)"
+    lines = [f"⚠ {len(warnings)} divergent literature quote(s) — same (citekey, paraphrase) "
+             "backed by different spans across modules; reconcile to one canonical quote:"]
+    for w in warnings:
+        lines.append(f"  {w['citekey']}: {w['paraphrase']!r}")
+        for sp in w["spans"]:
+            lines.append(f"      span: {sp!r}")
+        lines.append(f"      cited by: {', '.join(w['where'])}")
+    return "\n".join(lines)
 
 
 def render_worklist(result: dict[str, Any]) -> str:

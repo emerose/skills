@@ -546,10 +546,24 @@ it. A `sci report` audit and a normal grounding run stay free and deterministic.
 **The cache + its key.** Each verdict answers one entailment question, keyed by the pair
 `(evidence_sha, paraphrase)` and stored in `lit_judgments.json` next to the grounding report (a
 machine-owned artifact, like `grounding_report.json` — never hand-edited): `{supported, judge_id,
-timestamp, rationale, …}`. The verdict is **inspectable** — a green claim is "judged Q⊢P, by this
-judge, on this date, with this rationale", not an opaque "the LLM said yes". `judge_id` is
-**metadata, not part of the key**: a verdict produced by a different judge subagent is still valid,
-so swapping who judges does not mass-invalidate the cache.
+timestamp, rationale, …}`. `evidence_sha` is the sha of the **folded** span (the same
+normalization quote-matching uses — NFKC, Unicode-dash fold, strip Markdown `*`/`_`, collapse
+whitespace), so markdown / whitespace / dash variants of one sentence map to ONE identity → ONE
+shared verdict; the same paper sentence cited from two modules can't stale itself. The verdict is
+**inspectable** — a green claim is "judged Q⊢P, by this judge, on this date, with this rationale",
+not an opaque "the LLM said yes". `judge_id` is **metadata, not part of the key**: a verdict
+produced by a different judge subagent is still valid, so swapping who judges does not
+mass-invalidate the cache. `sci check` runs a cross-module **divergence lint** that warns (never
+fails) when one `(citekey, paraphrase)` is grounded on *genuinely different* spans across modules —
+reconcile those to a single canonical quote.
+
+> **Upgrade note (one-time re-judge).** The cache identity changed from the *raw* span sha to the
+> *folded* span sha. Existing `lit_judgments.json` entries keyed by the old raw sha show as
+> `stale`/`needs-judgment` once and must be re-run: `sci judge --list` → judge → `sci judge
+> --record`. The verdicts themselves are unchanged (same span ⊢ paraphrase support) — only the key
+> moved — so the re-judge is mechanical. There is no in-place migration: the cache stores only the
+> sha, not the raw span preimage, so the old key can't be re-folded; a clean re-judge is the
+> pragmatic path.
 
 **The locator ladder → strength.** *How precisely* a source locates its supporting text caps the
 claim's strength (the audit enforces the ceiling), so a paragraph-spanning gloss can't be sold as

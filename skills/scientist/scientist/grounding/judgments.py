@@ -26,8 +26,12 @@ Each verdict answers one entailment question, keyed by the pair ``(evidence_sha,
 (decision: a quote/paraphrase edit must invalidate the verdict, never silently carry it forward;
 *who* judged is metadata, not part of the key — a verdict by a different judge is still valid):
 
-  * ``evidence_sha`` — sha256 of the exact text span the judge read (the verbatim quote for a
-    tier-1 source, a chunk's text for tier-2, the whole-document text for tier-3).
+  * ``evidence_sha`` — sha256 of the *folded* text span the judge read (the verbatim quote for a
+    tier-1 source, a chunk's text for tier-2, the whole-document text for tier-3). The span is
+    folded with the SAME normalization quote-matching uses (NFKC, Unicode-dash fold, strip Markdown
+    ``*``/``_``, collapse whitespace) BEFORE hashing, so two quotes the matcher treats as the same
+    evidence (e.g. ``*Ube3a*…`` vs ``Ube3a…``) share one cache identity → one verdict (see
+    :func:`evidence_sha` and ``grounding.normalize``).
   * ``paraphrase``  — the claim's paraphrase of that span (the human-authored anchor).
 
 The stored entry is machine-pinned and inspectable, so a green claim is never an opaque "the LLM
@@ -57,6 +61,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .normalize import fold_match as _fold_match
+
 # The sidecar the record step writes and the pytest/audit paths read. Lives next to the
 # grounding report it serves (e.g. ``program/analysis/lit_judgments.json``) — a machine-owned
 # artifact, like ``grounding_report.json``, NOT a hand-edited decorator value.
@@ -69,9 +75,18 @@ DEFAULT_JUDGE_ID = "agent"
 
 
 def evidence_sha(span: str) -> str:
-    """sha256 of the exact text span the judge reads — the stable identity of the *evidence*
-    side of one entailment question (quote / chunk / whole-doc text)."""
-    return hashlib.sha256(span.encode("utf-8")).hexdigest()
+    """sha256 of the *folded* text span — the stable identity of the *evidence* side of one
+    entailment question (quote / chunk / whole-doc text).
+
+    The hash is taken over ``fold_match(span)``, the SAME normalization quote-matching uses
+    (NFKC, fold Unicode dashes, strip Markdown ``*``/``_``, collapse whitespace), NOT the raw
+    bytes. This is deliberate and load-bearing: two quotes the matcher treats as the same
+    evidence (e.g. ``*Ube3a* gene dosage…`` vs ``Ube3a gene dosage…``) must map to ONE cache
+    identity → ONE shared verdict. If we hashed the raw span instead, the cache's
+    one-canonical-verdict pruning (``JudgmentCache.put``) would see the markdown/whitespace
+    variant as a drift and stale a good verdict cited from another module. A judge still READS
+    the raw span (``span_text`` in the worklist); only the cache *identity* is folded."""
+    return hashlib.sha256(_fold_match(span).encode("utf-8")).hexdigest()
 
 
 def _key(evidence_sha_: str, paraphrase: str) -> str:

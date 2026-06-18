@@ -20,7 +20,17 @@ Deterministic, instant, no embeddings. Flags, per experiment:
   folder (the `raw.zip` pattern). Verify, then delete the zip (the originals also
   live in `Attic/`).
 
-Run `sci check --json` to get a worklist you can drive fixes from.
+Run `sci check --json` to get a worklist you can drive fixes from. The JSON is
+`{"structural": [...per-experiment flags...], "literature_divergence": [...]}`.
+
+`sci check` also runs a **cross-module literature-divergence lint** (advisory, never
+fails): it warns when the same `(citekey, paraphrase)` is grounded on quotes that
+*fold to different spans* across the program's grounding reports — i.e. one claimed
+reading of a paper cites two genuinely different sentences in two modules. The verdict
+cache keys evidence by the *folded* span, so those stay separate verdicts by design;
+the lint nudges you to reconcile to **one canonical quote** for the fact. Each warning
+lists the `citekey`, the `paraphrase`, the divergent `spans`, and the claims (`where`)
+that carry them.
 
 ## 2. Staleness — `sci review` + `sci audit`
 
