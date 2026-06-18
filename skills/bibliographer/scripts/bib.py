@@ -281,46 +281,79 @@ async def ingest_record(
 
 
 async def cmd_add(args: argparse.Namespace, store: BiblioStore) -> None:
-    rec, src = await resolve_target(
-        args.identifier,
-        pdf_override=Path(args.pdf).expanduser().resolve() if args.pdf else None,
-        no_network=args.no_network,
-    )
-    if args.tags:
-        rec["tags"] = sorted(set(rec.get("tags") or []) | {
-            t.strip() for t in args.tags.split(",") if t.strip()
-        })
+    """Bank one or more papers by identifier (DOI/arXiv/PMID/PMCID/S2) or PDF path.
 
-    # An explicit duplicate without --force should stop before any file work.
-    if not args.force:
-        dup = await store.find_duplicate(rec)
-        if dup is not None:
-            if args.json:
-                emit_json({"status": "duplicate", "record": dup})
-            else:
-                die(
-                    f"duplicate of [{dup.get('citekey')}] ({dup.get('title')}). "
-                    "Use --force to add anyway."
-                )
-            return
-
-    result = await ingest_record(
-        store, rec, src=src, move=args.move, fetch=not args.no_fetch,
-        force=args.force, on_duplicate="report", enrich_meta=not args.no_network,
+    Banking the keepers from a `discover` sweep is the main batch use: pass the
+    judged identifiers in one call. A duplicate is *skipped and reported* (not an
+    error) — sweep overlap is expected — so one already-present paper never aborts
+    the rest of the batch.
+    """
+    ids = args.identifiers
+    if args.pdf and len(ids) != 1:
+        die("--pdf attaches a single file; pass exactly one identifier with --pdf")
+    extra_tags = (
+        {t.strip() for t in args.tags.split(",") if t.strip()} if args.tags else set()
     )
+
+    results: list[dict[str, Any]] = []
+    for ident in ids:
+        try:
+            rec, src = await resolve_target(
+                ident,
+                pdf_override=Path(args.pdf).expanduser().resolve() if args.pdf else None,
+                no_network=args.no_network,
+            )
+        except Exception as e:  # noqa: BLE001 — one bad identifier must not sink the batch
+            if len(ids) == 1:
+                raise
+            print(f"  ! {ident}: {e}", file=sys.stderr)
+            results.append({"status": "error", "identifier": ident, "error": str(e)})
+            continue
+        if extra_tags:
+            rec["tags"] = sorted(set(rec.get("tags") or []) | extra_tags)
+
+        # A duplicate without --force is skipped (reported), not fatal.
+        if not args.force:
+            dup = await store.find_duplicate(rec)
+            if dup is not None:
+                results.append({"status": "duplicate", "record": dup})
+                if not args.json:
+                    print(
+                        f"= already present [{dup.get('citekey')}] {dup.get('title')}"
+                        " (--force to add anyway)"
+                    )
+                continue
+
+        result = await ingest_record(
+            store, rec, src=src, move=args.move, fetch=not args.no_fetch,
+            force=args.force, on_duplicate="report", enrich_meta=not args.no_network,
+        )
+        results.append(result)
+        if not args.json:
+            rec_out = result["record"]
+            verb = "Merged into" if result["status"].startswith("merged") else "Added"
+            print(f"{verb} [{rec_out.get('citekey')}] {rec_out.get('title')}")
+            if rec_out.get("sniffed_from"):
+                print(f"  note: identifier recovered from the PDF ({rec_out['sniffed_from']})")
+            if rec_out.get("source") in ("pdf", "file"):
+                print("  note: metadata from the file only — unverified; add a DOI/arXiv id to enrich")
+            if rec_out.get("content_state") == "stub" and rec_out.get("oa_pdf_url"):
+                print("  note: open-access PDF available; re-run without --no-fetch to attach it")
+
     await write_index(store)
-    rec_out = result["record"]
+
     if args.json:
-        emit_json(result)
+        emit_json(results[0] if len(ids) == 1 else results)
         return
-    verb = "Merged into" if result["status"].startswith("merged") else "Added"
-    print(f"{verb} [{rec_out.get('citekey')}] {rec_out.get('title')}")
-    if rec_out.get("sniffed_from"):
-        print(f"  note: identifier recovered from the PDF ({rec_out['sniffed_from']})")
-    if rec_out.get("source") in ("pdf", "file"):
-        print("  note: metadata from the file only — unverified; add a DOI/arXiv id to enrich")
-    if rec_out.get("content_state") == "stub" and rec_out.get("oa_pdf_url"):
-        print(f"  note: open-access PDF available; re-run without --no-fetch to attach it")
+    if len(ids) > 1:
+        added = sum(1 for r in results if r.get("status") == "added")
+        merged = sum(1 for r in results if str(r.get("status")).startswith("merged"))
+        dups = sum(1 for r in results if r.get("status") == "duplicate")
+        errs = sum(1 for r in results if r.get("status") == "error")
+        print(
+            f"\nBanked {added} added, {merged} merged, {dups} already present"
+            + (f", {errs} failed" if errs else "")
+        )
 
 
 def topic_tag(root: Path, f: Path) -> str | None:
@@ -1011,24 +1044,41 @@ def print_discoveries(results: list[dict[str, Any]]) -> None:
         title = r.get("title") or "(untitled)"
         mark = " ✓in-library" if r.get("in_library") else ""
         print(f"  {i:>3}. {_disc_authors(r)} ({year}) — {title}{mark}")
-        bits = [f"sources: {', '.join(r.get('found_in') or [])}"]
+        if r.get("venue"):
+            print(f"       {r['venue']}")
+        # Rank signals for the "highly ranked" banking bar: corroboration
+        # (how many sources surfaced it), raw citations, and — from OpenAlex —
+        # field-normalized impact (percentile, FWCI where 1.0 = field-average).
+        srcs = r.get("found_in") or []
+        rank = [f"sources: {', '.join(srcs)} ({len(srcs)})"]
+        if r.get("citation_percentile") is not None:
+            rank.append(f"pctile: {round(r['citation_percentile'] * 100)}%")
+        if r.get("fwci") is not None:
+            rank.append(f"FWCI: {r['fwci']:.2f}")
         if r.get("cited_by_count") is not None:
-            bits.append(f"cited-by: {r['cited_by_count']}")
+            rank.append(f"cited-by: {r['cited_by_count']}")
+        print(f"       {' · '.join(rank)}")
         if r.get("doi"):
-            bits.append(f"doi: {r['doi']}")
+            ident = f"doi: {r['doi']}"
         elif r.get("arxiv_id"):
-            bits.append(f"arXiv: {r['arxiv_id']}")
+            ident = f"arXiv: {r['arxiv_id']}"
         elif r.get("pmid"):
-            bits.append(f"PMID: {r['pmid']}")
-        print(f"       {' · '.join(bits)}")
+            ident = f"PMID: {r['pmid']}"
+        else:
+            ident = ""
+        if ident:
+            print(f"       {ident}")
 
 
 async def cmd_discover(args: argparse.Namespace, store: BiblioStore) -> None:
-    """Find candidate papers across scholarly search APIs (not yet in the library).
+    """Find candidate papers across scholarly search APIs (a *recall pass*).
 
     Fans out the query over the selected providers, merges/de-dupes the results,
-    flags which are already in the library, and (with --add) banks the net-new
-    ones — the "bank everything on-topic" discipline a literature sweep needs.
+    and flags which are already in the library. It banks **nothing**: the caller
+    judges the candidates against the banking bar (responsive to the task, or
+    germane-and-highly-ranked — see references/literature-search.md) and banks the
+    keepers with `bib add <id> <id> …`. `discover` has no model of the task or the
+    program, only keyword relevance and the rank signals it reports here.
     """
     import httpx
 
@@ -1058,36 +1108,8 @@ async def cmd_discover(args: argparse.Namespace, store: BiblioStore) -> None:
             r["in_library"] = dup is not None
             if dup is not None:
                 r["library_citekey"] = dup.get("citekey")
-
-        added = merged = dup_count = failed = 0
-        if args.add:
-            for r in results:
-                if r.get("in_library"):
-                    dup_count += 1
-                    continue
-                try:
-                    res = await ingest_record(
-                        store, r, src=None, move=False, fetch=args.fetch_pdfs,
-                        force=False, on_duplicate="report", client=client,
-                    )
-                except Exception as e:  # noqa: BLE001 — one bad record must not abort the bank
-                    failed += 1
-                    if not args.json:
-                        print(f"  ! failed to add {r.get('title') or r.get('doi')}: {e}", file=sys.stderr)
-                    continue
-                status = res["status"]
-                r["added_as"] = res["record"].get("citekey")
-                if status == "added":
-                    added += 1
-                elif status.startswith("merged"):
-                    merged += 1
-                else:
-                    dup_count += 1
-            await write_index(store)
     finally:
         await client.aclose()
-
-    out["added"] = {"added": added, "merged": merged, "duplicate": dup_count, "failed": failed} if args.add else None
 
     if args.json:
         emit_json(out)
@@ -1097,15 +1119,12 @@ async def cmd_discover(args: argparse.Namespace, store: BiblioStore) -> None:
     print(f"Sources — {rep}")
     print(f"{len(results)} merged candidate(s):\n")
     print_discoveries(results)
-    if args.add:
-        print(
-            f"\nBanked: {added} added, {merged} merged, {dup_count} already present"
-            + (f", {failed} failed" if failed else "")
-            + (" (citation-only stubs; --fetch-pdfs to also pull OA PDFs)" if not args.fetch_pdfs else "")
-        )
-    else:
-        net_new = sum(1 for r in results if not r.get("in_library"))
-        print(f"\n{net_new} not yet in the library. Re-run with --add to bank them.")
+    net_new = sum(1 for r in results if not r.get("in_library"))
+    print(
+        f"\n{net_new} not yet in the library. Judge each against the banking bar "
+        "(responsive, or germane-and-highly-ranked), then bank the keepers: "
+        "`bib add <id> <id> …`."
+    )
 
 
 async def cmd_dedupe(args: argparse.Namespace, store: BiblioStore) -> None:
@@ -1259,9 +1278,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("viewer", help="(re)generate the self-contained HTML viewer (index.html)").set_defaults(func=cmd_viewer)
 
-    sp = sub.add_parser("add", help="add an article by DOI, arXiv/PMID/PMCID/S2 id, or PDF path")
-    sp.add_argument("identifier", help="DOI, arXiv id, PMID, PMCID, Semantic Scholar id, or a .pdf path")
-    sp.add_argument("--pdf", help="attach this PDF file (for metadata-only identifiers)")
+    sp = sub.add_parser("add", help="add one or more articles by DOI, arXiv/PMID/PMCID/S2 id, or PDF path")
+    sp.add_argument("identifiers", nargs="+", metavar="identifier",
+                    help="one or more: DOI, arXiv id, PMID, PMCID, Semantic Scholar id, or .pdf path "
+                         "(pass several to bank a sweep's keepers in one call)")
+    sp.add_argument("--pdf", help="attach this PDF file (for a single metadata-only identifier)")
     sp.add_argument("--tags", help="comma-separated tags")
     sp.add_argument("--move", action="store_true", help="move the file into the library instead of copying")
     sp.add_argument("--no-fetch", action="store_true", help="do not auto-download an open-access PDF")
@@ -1311,8 +1332,6 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--year-min", type=int, help="earliest publication year")
     sp.add_argument("--year-max", type=int, help="latest publication year")
     sp.add_argument("--open-access", action="store_true", help="restrict to open-access papers (where the source supports it)")
-    sp.add_argument("--add", action="store_true", help="bank every net-new candidate into the library (citation-only stubs)")
-    sp.add_argument("--fetch-pdfs", action="store_true", help="with --add, also try to download an OA PDF for each")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_discover)
 

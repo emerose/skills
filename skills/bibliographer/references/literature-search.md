@@ -2,18 +2,19 @@
 
 `bib discover` turns a research question into ranked, de-duplicated candidate
 papers across six scholarly search APIs (OpenAlex, Semantic Scholar, Europe PMC,
-PubMed, Crossref, arXiv) and — with `--add` — banks them into the library. This
-is the front half of any serious literature review. The command is in
-[SKILL.md](../SKILL.md); this doc is the **method**: how to run a sweep that is
-broad, intentional, and re-runnable rather than a thin one-shot search.
+PubMed, Crossref, arXiv). Those candidates are a **recall pass** — what you bank
+from them is a separate, narrower, deliberate choice (step 3). This is the front
+half of any serious literature review. The command is in [SKILL.md](../SKILL.md);
+this doc is the **method**: how to run a sweep that is broad in what it surfaces,
+selective in what it keeps, and re-runnable rather than a thin one-shot search.
 
 The aim is not byte-for-byte reproducibility — relevance engines drift and new
 papers appear, so two runs will differ. The aim is a **minimum standard**: a
-sweep that is *broad* (not just the headline question), *banked* (not just what
-you'll cite), *recorded* (so it can be re-run as a diff), and *grounded* (full
-text read before a finding is relied on). A sweep that clears that bar leaves the
-library meaningfully smarter; one that doesn't is citation-gathering wearing a
-literature review's clothes.
+sweep that is *broad in recall* (not just the headline question), *selectively
+banked* (the keepers, not the whole sweep — see step 3), *recorded* (so it can be
+re-run as a diff), and *grounded* (full text read before a finding is relied on).
+A sweep that clears that bar leaves the library meaningfully smarter; one that
+doesn't is citation-gathering wearing a literature review's clothes.
 
 ## The standard pattern
 
@@ -41,12 +42,31 @@ literature review's clothes.
    *queries*, not just of sources, is how keyword search matches a semantic
    engine's recall.
 
-3. **Bank everything on-topic, not just what you'll cite.** `bib discover --add`
-   banks every net-new candidate as a fast citation-only **stub** (the abstract
-   stays searchable; `--fetch-pdfs` also pulls an OA PDF). The banked set should
-   be a superset of your eventual citations — the next review reuses it and can
-   `bib query` inside the full text. A library that contains only one report's
-   footnotes is the symptom of citation-driven research.
+3. **Bank selectively — don't bank the whole sweep.** The candidate list is a
+   recall pass; banking is a separate judgment. A keyword sweep is wide on
+   purpose, but most of what it surfaces is on-topic-by-coincidence, and every
+   marginal paper you bank dilutes search for every future review. Bank a
+   candidate **only if** one of these holds:
+   - **It's responsive to the task at hand** — a real chance you'll read or cite
+     it for *this* report/question. This is the working set, and it's most of
+     what a focused sweep banks.
+   - **It's further afield but germane to the program overall *and* carries a
+     strong quality signal** — squarely within the program's subject area (its
+     targets, modality, assays, indications), *and* from a top-tier venue, highly
+     cited / high citation percentile, or a leading group whose work bears on the
+     program. This is the durable-asset set: worth keeping for the next review
+     even if this one never cites it — but it must clear the *quality* bar, not
+     just the topic bar.
+
+   On-topic-by-keyword but neither responsive nor germane-and-strong → leave it as
+   a discovery result; don't bank it. **You** make this call, not `discover`: the
+   command has no model of the task or the program — only keyword relevance and
+   the rank signals (venue, citation percentile, cross-source corroboration) it
+   reports per candidate. Bank the keepers explicitly with `bib add <DOI|PMID>`
+   once you've judged them against the two bars; each lands as a citation-only
+   **stub** (abstract stays searchable; `bib fetch` pulls the PDF when you need
+   the full text). Citations remain a subset of what you bank — but what you bank
+   is a subset of the sweep.
 
 4. **Let the merge do the dedup; let the re-run be a diff.** Cross-source
    duplicates collapse automatically (DOI → PMID → arXiv → title+year), and a
@@ -107,7 +127,8 @@ fine; relying on it without going primary is not.
 ## What good looks like
 
 A sweep meets the minimum standard when: it covered the sub-topics, not just the
-headline; the banked set is broader than the citation list; the queries/sources/
-date are recorded; corroboration and gaps were noted; and every load-bearing
-paper was read in full, from its primary source. Short of that, widen the sweep
-before calling the topic done.
+headline; the banked set is the responsive papers plus the germane-and-strong
+ones — broader than the citation list, but not the whole sweep; the queries/
+sources/date are recorded; corroboration and gaps were noted; and every load-
+bearing paper was read in full, from its primary source. Short of that, widen the
+sweep — or tighten what you bank — before calling the topic done.
