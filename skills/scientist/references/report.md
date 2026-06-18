@@ -151,7 +151,8 @@ smarter*, not just answer one question:
   Each subagent **starts with `bib discover`**, following the bibliographer skill's
   [literature-search protocol](../../bibliographer/references/literature-search.md) — that
   protocol is the **first step** of every sweep, not one source among many: it sweeps the
-  sub-topic across all six sources and banks what it finds (`--add`). Only when the protocol
+  sub-topic across all six sources and surfaces candidates — the subagent then banks the
+  keepers selectively (see the banking bullet below), not the whole sweep. Only when the protocol
   leaves a gap does the subagent supplement with other sources (Consensus or Elicit for a
   semantic cross-check, ClinicalTrials.gov, web). It then reads the load-bearing hits in full and
   returns a structured digest: papers with **DOI + PMID**, the quantitative findings attributed
@@ -165,13 +166,19 @@ smarter*, not just answer one question:
   these load-bearing in the prose (and the assumptions section), not bury them. The generation
   brief names the *specific* contrary findings to hunt for (see "Keep the generation brief in
   git"); without that demand a literature review quietly becomes a confirmation exercise.
-- **Bank every relevant paper, not just the ones you cite.** The point of the research phase is
-  to grow the program's durable knowledge: the bibliographer library is the asset that outlives
-  any single report. Add **everything on-topic** the sweep surfaces (`bib discover --add` banks a
-  whole sweep in one step; `bib add <DOI|PMID>` for a one-off paper), even
-  papers this report won't cite — the next report reuses them and can search inside their full
-  text. Citations are a small subset of what you bank. A library that only contains this
-  report's footnotes is a symptom of citation-driven research, not a literature review.
+- **Bank selectively — responsive, or germane-and-strong — not the whole sweep.** The research
+  phase grows the program's durable knowledge, and the bibliographer library is the asset that
+  outlives any single report — but "durable" is not "everything on-topic." Every marginal paper
+  banked dilutes the library's search for every future report, so what you *keep* is a narrower,
+  deliberate choice than what the sweep *surfaces*. Bank a candidate only if either (a) it's
+  **responsive** — a real chance this report reads or cites it — or (b) it's further afield but
+  **germane to the Kicho program overall *and* highly ranked** (top-tier venue, highly cited, or
+  a leading group whose work bears on the program): the durable-asset set, worth keeping for the
+  next report even if this one doesn't cite it, but it must clear the *quality* bar, not just the
+  topic bar. On-topic-by-keyword but neither → leave it in the discovery results; don't bank it.
+  `discover` can't make this call (it has no model of the report or the program); the subagent
+  judges each candidate against the two bars and banks the keepers with `bib add <DOI|PMID>`.
+  Citations remain a subset of what you bank — and what you bank is a subset of the sweep.
   - **After a sweep, check what you banked but never grounded.** Banking papers without turning
     the load-bearing ones into claims is the silent stagnation case (the library grows, the
     grounding doesn't). `sci coverage --since <sweep date>` lists the papers you just added that no

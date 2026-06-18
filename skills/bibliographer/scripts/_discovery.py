@@ -131,6 +131,7 @@ def _from_openalex(w: dict[str, Any]) -> dict[str, Any]:
     oa_url = (w.get("best_oa_location") or {}).get("pdf_url") or (
         (w.get("primary_location") or {}).get("pdf_url")
     )
+    cnp = (w.get("citation_normalized_percentile") or {}).get("value")
     return _drop_empty({
         "title": _strip_jats(w.get("title")),
         "authors": authors,
@@ -142,6 +143,10 @@ def _from_openalex(w: dict[str, Any]) -> dict[str, Any]:
         "source_url": w.get("doi") or ids.get("openalex") or w.get("id"),
         "openalex_id": (w.get("id") or "").replace("https://openalex.org/", "") or None,
         "cited_by_count": w.get("cited_by_count"),
+        # Field-normalized rank signals for the "highly ranked" banking bar:
+        # FWCI (1.0 = field-average citations) and citation percentile (0–1).
+        "fwci": round(w["fwci"], 3) if w.get("fwci") is not None else None,
+        "citation_percentile": round(cnp, 4) if cnp is not None else None,
         "oa_pdf_url": oa_url,
         "bibtex_type": "article",
         "source": "openalex",
@@ -170,7 +175,8 @@ async def search_openalex(
         "mailto": mailto(),
         "select": (
             "id,ids,doi,title,publication_year,authorships,primary_location,"
-            "best_oa_location,abstract_inverted_index,cited_by_count,type"
+            "best_oa_location,abstract_inverted_index,cited_by_count,"
+            "fwci,citation_normalized_percentile,type"
         ),
     }
     if parts:

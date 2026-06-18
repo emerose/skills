@@ -48,7 +48,7 @@ in a free-form `metadata` JSON column (see libkit's own schema, v2):
 | `added_at`, `updated_at` | ISO timestamps |
 
 The **`metrics`** sub-dict (best-effort from OpenAlex when the record has a
-DOI/PMID, stamped at `add`/`import`/`discover --add`) carries impact and
+DOI/PMID, stamped at `add`/`import`) carries impact and
 journal-trust signals no bibliographic resolver provides:
 
 | field | notes |

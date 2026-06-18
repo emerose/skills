@@ -12,8 +12,8 @@ bib fetch <citekey> --pdf path/to.pdf    # attach a PDF you obtained manually
 
 ## Backfilling many stubs at once — `bib backfill`
 
-A library grown with `discover --add` accumulates **citation-only stubs**
-(abstract searchable, no full text). `bib backfill` is the bulk entry point: it
+A library grown by banking sweep keepers (`bib add` without a PDF) accumulates
+**citation-only stubs** (abstract searchable, no full text). `bib backfill` is the bulk entry point: it
 finds every stub, runs the Tier-1 open-access ladder below over each, attaches
 each PDF it finds, and **prints a worklist of the stubs that have no OA copy** —
 each with its identifiers and a resolvable URL. Those remaining ones are the

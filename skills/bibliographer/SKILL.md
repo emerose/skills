@@ -151,25 +151,30 @@ Notes that matter when adding:
   instead) and tries to recover an identifier from the PDF; if nothing resolves
   it falls back to the PDF's embedded metadata and marks the record unverified —
   tell the user, and consider supplying the DOI/arXiv id to enrich it.
-- When a record has a DOI/PMID, `add`/`import`/`discover --add` also stamp a
+- When a record has a DOI/PMID, `add`/`import` also stamp a
   **`metrics`** sub-dict from OpenAlex (best-effort): field-weighted citation
   impact + percentile, a Retraction-Watch `is_retracted` flag, OA status, and
   journal-trust signals (DOAJ membership, Scopus indexing, impact, h-index).
   `bib show` surfaces them; `--no-network` skips them. See
   [references/schema.md](references/schema.md).
+- `add` takes **several identifiers in one call** — `bib add <DOI> <PMID> …` —
+  which is how you bank the keepers from a `discover` sweep. An already-present
+  paper is skipped and reported, not an error, so sweep overlap never aborts the
+  batch.
 
 **Discovering papers on a topic.** `add` needs an identifier you already have;
 `discover` is the other direction — give it a research question and it finds
 candidate papers across many scholarly search APIs, merges and de-duplicates
-them, flags which are already in your library, and (with `--add`) banks the
-net-new ones:
+them, and flags which are already in your library. It is a **recall pass** and
+banks **nothing**: you judge the candidates (it prints each one's venue, citation
+percentile, FWCI, and cross-source corroboration) and bank the keepers with
+`bib add`:
 
 ```bash
-bib discover "UBE3A antisense oligonucleotide Angelman syndrome"     # ranked candidates, nothing banked
+bib discover "UBE3A antisense oligonucleotide Angelman syndrome"     # ranked candidates (nothing banked)
 bib discover "ASO CNS biodistribution" --year-min 2018 --open-access # filter by year / OA
 bib discover "transferrin receptor ASO delivery" --sources openalex,pubmed,europepmc
-bib discover "ASO CNS biodistribution" --add                         # bank every net-new candidate (citation-only stubs)
-bib discover "ASO CNS biodistribution" --add --fetch-pdfs            # also try to pull an OA PDF for each
+bib add 10.1038/s41586-020-2649-2 33301246                           # bank the keepers you judged (one call, many ids)
 bib discover "ASO CNS biodistribution" --json                        # structured candidates + per-source report
 ```
 
@@ -189,10 +194,15 @@ Semantic Scholar 429s when keyless and busy; set `S2_API_KEY` to avoid it).
 Discovery is *not* byte-reproducible (relevance engines drift, new papers appear)
 — the point is a uniform, source-broad, **re-runnable** sweep: re-running shows
 what's now `✓in-library` vs. still net-new, so a later run is a diff, not a fresh
-guess. The "bank everything on-topic" habit (`--add`) is what grows the library
-into an asset that outlives any one question — citations are a small subset of
-what you bank. `--add` creates fast citation-only **stubs** (abstract still
-searchable); add `--fetch-pdfs` only when you want the full text now.
+guess. Discovery is wide for *recall*; **what you bank is a narrower, deliberate
+choice** — a candidate earns a place only if it's *responsive* to the task at hand
+or *germane to the program overall and highly ranked* (top venue / highly cited /
+leading group), never just on-topic-by-keyword, because every marginal paper
+banked dilutes future search. `discover` can't make that call (it has only keyword
+relevance and the rank signals it prints); you judge the candidates and bank the
+keepers with `bib add`. See [references/literature-search.md](references/literature-search.md)
+step 3. Banking creates fast citation-only **stubs** (abstract still searchable);
+`bib fetch` pulls the full text when you need it.
 
 For a *thorough* review — decomposing a question into sub-topics, sweeping each
 broadly, reaching for other sources when the six-source backbone misses, and
@@ -291,8 +301,9 @@ The library's `index.html` viewer is regenerated automatically on every change;
 `bib viewer` just forces a rebuild (and is run by `init`). Open it in a browser to
 search by title/author/venue/tag/year and click straight through to each PDF.
 
-**Backfilling full text for citation-only stubs.** A library grown with
-`discover --add` accumulates **stubs** — abstract searchable, no full text. `bib
+**Backfilling full text for citation-only stubs.** A library grown by banking
+sweep keepers (`bib add` without a PDF) accumulates **stubs** — abstract
+searchable, no full text. `bib
 backfill` is the bulk counterpart to `fetch`: it finds every stub, runs the
 keyless open-access ladder over each, attaches each PDF it finds, and prints a
 **worklist** of the stubs that have no OA copy (citekey, identifiers, a resolvable
