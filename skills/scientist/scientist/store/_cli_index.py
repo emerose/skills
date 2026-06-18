@@ -151,28 +151,23 @@ def _load_grounding_report(exp_dir: Path, override: str | None) -> tuple[Path, l
     """Locate + parse the grounding_report.json for an experiment.
 
     Search order: ``--report PATH`` if given, else ``<exp>/analysis/grounding_report.json``
-    then ``<exp>/grounding_report.json``. Returns the resolved path + the claims list.
-    Dies with a clear, actionable error if no report is found or it's malformed.
+    then ``<exp>/grounding_report.json`` (the shared :mod:`provenance` locate ladder).
+    Returns the resolved path + the claims list. Dies with a clear, actionable error if no
+    report is found or it's malformed.
     """
-    import json
-
-    if override:
-        candidates = [Path(override)]
-    else:
-        candidates = [exp_dir / "analysis" / "grounding_report.json",
-                      exp_dir / "grounding_report.json"]
-    report_path = next((p for p in candidates if p.is_file()), None)
+    report_path = provenance.find_report(exp_dir, override or None)
     if report_path is None:
+        candidates = [Path(override)] if override else provenance.report_candidates(exp_dir)
         looked = ", ".join(str(p) for p in candidates)
         die(f"no grounding report found (looked: {looked}). Run the claims first, e.g.\n"
             f"  uv run --with-editable skills/scientist pytest "
             f"\"{exp_dir / 'analysis' / 'claims'}\"")
     try:
-        data = json.loads(report_path.read_text(encoding="utf-8"))
+        data = provenance.load_report(report_path)
     except (OSError, ValueError) as e:
         die(f"could not read grounding report {report_path}: {e}")
-    claims = data.get("claims") if isinstance(data, dict) else data
-    if not isinstance(claims, list):
+    claims = provenance.claims_of(data)
+    if claims is None:
         die(f"grounding report {report_path} has no 'claims' list")
     return report_path, claims
 

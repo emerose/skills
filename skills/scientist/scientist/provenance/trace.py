@@ -37,13 +37,16 @@ Stdlib + PyYAML only; pure, no keys, no network.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from . import _load_raw, edges, staleness
-
-GROUNDING_REPORT_NAME = "grounding_report.json"
+from ._grounding_io import (  # canonical locate+load (find_report re-exported here)
+    GROUNDING_REPORT_NAME,
+    claims_of,
+    find_report,
+    load_report,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -91,24 +94,10 @@ def _kind_of(artifact: str) -> str:
 # --------------------------------------------------------------------------- #
 # grounding report
 # --------------------------------------------------------------------------- #
-def find_report(exp_dir: Path, override: Path | str | None = None) -> Path | None:
-    """Locate the grounding report: ``override`` if given, else
-    ``<exp>/analysis/grounding_report.json`` then ``<exp>/grounding_report.json``."""
-    if override is not None:
-        p = Path(override)
-        return p if p.is_file() else None
-    exp = Path(exp_dir)
-    for cand in (exp / "analysis" / GROUNDING_REPORT_NAME, exp / GROUNDING_REPORT_NAME):
-        if cand.is_file():
-            return cand
-    return None
-
-
 def _load_claims(report_path: Path | None) -> list[dict[str, Any]]:
     if report_path is None:
         return []
-    data = json.loads(Path(report_path).read_text(encoding="utf-8"))
-    return list(data.get("claims") or [])
+    return list(claims_of(load_report(report_path)) or [])
 
 
 # --------------------------------------------------------------------------- #

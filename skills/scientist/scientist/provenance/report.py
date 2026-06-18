@@ -48,15 +48,18 @@ Stdlib + PyYAML (pandas only for ``*.csv`` table inlining); pure, store-free —
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from . import _load_raw, edges, sha256_file
-
-GROUNDING_REPORT_NAME = "grounding_report.json"
+from ._grounding_io import (  # canonical locate+load; GROUNDING_REPORT_NAME re-exported
+    GROUNDING_REPORT_NAME,
+    claims_of,
+    iter_reports,
+    load_report,
+)
 
 # A claim is *grounded* (a valid backing) only when its outcome is a clean pass AND its
 # strength is at least moderate — the identical rule §3 / index-claims / sci trace apply.
@@ -244,17 +247,8 @@ def parse_sections(text: str) -> dict[str, Any]:
 def _grounding_reports(home: Path) -> list[tuple[str, Path]]:
     """``(exp_id, grounding_report.json path)`` for every experiment under ``home`` that
     has one (``<child>/analysis/grounding_report.json`` then ``<child>/…``)."""
-    out: list[tuple[str, Path]] = []
-    if not home.is_dir():
-        return out
-    for child in sorted(home.iterdir()):
-        if not child.is_dir():
-            continue
-        for cand in (child / "analysis" / GROUNDING_REPORT_NAME, child / GROUNDING_REPORT_NAME):
-            if cand.is_file():
-                out.append((_exp_id_for_dir(child), cand))
-                break
-    return out
+    return [(_exp_id_for_dir(exp_dir), report_path)
+            for exp_dir, report_path in iter_reports(home)]
 
 
 def index_claims(home: Path) -> dict[str, dict[str, Any]]:
@@ -265,11 +259,11 @@ def index_claims(home: Path) -> dict[str, dict[str, Any]]:
     index: dict[str, dict[str, Any]] = {}
     for exp_id, report_path in _grounding_reports(home):
         try:
-            data = json.loads(report_path.read_text(encoding="utf-8"))
+            data = load_report(report_path)
         except (OSError, ValueError):
             continue
-        claims = data.get("claims") if isinstance(data, dict) else data
-        if not isinstance(claims, list):
+        claims = claims_of(data)
+        if claims is None:
             continue
         exp_dir = report_path.parent.parent if report_path.parent.name == "analysis" else report_path.parent
         for c in claims:
