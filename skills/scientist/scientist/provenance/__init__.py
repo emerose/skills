@@ -45,6 +45,19 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+# Canonical locate+load for grounding_report.json, re-exported on the package so callers
+# (store, grounding) reach it as ``provenance.find_report`` / ``provenance.load_report`` /
+# ``provenance.claims_of`` / ``provenance.report_candidates`` / ``provenance.iter_reports``.
+# Pure stdlib leaf module — no import cycle with the rest of the package.
+from ._grounding_io import (  # noqa: F401  (re-exported)
+    GROUNDING_REPORT_NAME,
+    claims_of,
+    find_report,
+    iter_reports,
+    load_report,
+    report_candidates,
+)
+
 SIDECAR_NAME = "experiment.yml"
 
 

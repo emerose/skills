@@ -20,11 +20,11 @@ WRITES it. There is no model client to import.
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from ..provenance import claims_of, load_report
 from .judgments import (JudgmentCache, JUDGMENT_CACHE_NAME, DEFAULT_JUDGE_ID, evidence_sha)
 from .normalize import fold_match
 
@@ -59,12 +59,11 @@ def _iter_machine_sources(report_path: Path | str):
     Returns ``(error_dict, None)`` as a single yield if the report is unreadable."""
     rp = Path(report_path)
     try:
-        data = json.loads(rp.read_text(encoding="utf-8"))
+        data = load_report(rp)
     except (OSError, ValueError) as exc:
         yield ({"_error": f"unreadable grounding report: {exc}"}, None)
         return
-    claims = data.get("claims") if isinstance(data, dict) else data
-    for claim in (claims if isinstance(claims, list) else []):
+    for claim in (claims_of(data) or []):
         if not isinstance(claim, dict):
             continue
         for src in _machine_sources(claim):

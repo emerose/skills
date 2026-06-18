@@ -26,19 +26,8 @@ from ._cli_common import _experiment_dirs, _find_experiment_dir
 def _grounding_report_paths(home: Path) -> list[Path]:
     """Every experiment's grounding_report.json under ``home`` (``analysis/`` first, then
     the experiment root). Pure folder walk — no store needed; used by the cross-module
-    literature-divergence lint."""
-    out: list[Path] = []
-    if not home.is_dir():
-        return out
-    for child in sorted(home.iterdir()):
-        if not child.is_dir():
-            continue
-        for cand in (child / "analysis" / "grounding_report.json",
-                     child / "grounding_report.json"):
-            if cand.is_file():
-                out.append(cand)
-                break
-    return out
+    literature-divergence lint. Wraps the shared :func:`provenance.iter_reports` walk."""
+    return [report_path for _exp_dir, report_path in provenance.iter_reports(home)]
 
 
 async def cmd_check(store: Store, args: argparse.Namespace) -> None:
