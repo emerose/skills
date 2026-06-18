@@ -156,6 +156,12 @@ def main() -> int:
                       help="render even if the audit is BROKEN (default: refuse)")
     p_lr.add_argument("--trace", action="store_true",
                       help="also print the provenance trace (litreview -> each [lit:] claim -> paper)")
+    p_lr.add_argument("--delta", metavar="BASELINE",
+                      help="claim-set delta of this litreview's module vs a baseline "
+                           "grounding_report.json (e.g. `git show <ref>:program/analysis/"
+                           "grounding_report.json > base.json`) — the cheap-update filter")
+    p_lr.add_argument("--index", action="store_true",
+                      help="index the litreview into the store as kind=litreview (needs the store)")
 
     # ---- judge: list the literature-support work + record caller-supplied verdicts.
     #      NO model lives in the tool — the orchestrating agent (ideally a fresh-context judge
@@ -306,6 +312,14 @@ def _litreview(args: argparse.Namespace) -> int:
     path = Path(args.path)
     home = resolve_home(args)
 
+    if args.delta:
+        d = LITREVIEW.delta(path, Path(args.delta), home=home)
+        if args.json:
+            print(json.dumps(d, indent=2, ensure_ascii=False, default=str))
+        else:
+            print(LITREVIEW.render_delta(d))
+        return 0
+
     if args.must_confront:
         listing = LITREVIEW.must_confront_listing(path, home=home)
         if args.json:
@@ -343,6 +357,19 @@ def _litreview(args: argparse.Namespace) -> int:
             except REPORT.RenderError as e:
                 print(f"render failed: {e}", file=sys.stderr)
                 rc = 1
+
+    if args.index:
+        sc = REPORT.report_scope(path, home or REPORT._infer_home(path.resolve()))
+        sec = REPORT.parse_sections(path.read_text(encoding="utf-8"))
+        cited = sorted({lc.get("claim_id") or lc["id"] for lc in result.get("lit_cites", [])})
+        card = {
+            "litreview_id": STORE_META.report_id_for(sc["scope"], sc["exp_id"], sc["slug"]),
+            "scope": sc["scope"], "slug": sc["slug"],
+            "title": sec["title"], "abstract": sec["abstract"], "sections": sec["sections"],
+            "cited_claims": cited, "must_confront": result.get("must_confront", []),
+            "audit_status": result["status"], "path": result["report"],
+        }
+        STORE_CLI.index_litreview(args, card)
 
     return rc
 

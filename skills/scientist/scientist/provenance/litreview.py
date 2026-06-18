@@ -22,6 +22,7 @@ Markdown, so citation parsing and the ``[lit:]`` verdict are not re-implemented 
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -99,6 +100,58 @@ def must_confront_listing(review_path: Path, home: Path | None = None) -> list[d
     return [{"claim_id": cid, "statement": c.get("statement"), "strength": c.get("strength"),
              "outcome": c.get("outcome"), "reason": c.get("must_confront")}
             for cid, c in sorted(mc.items())]
+
+
+def delta(review_path: Path, baseline: Path, home: Path | None = None) -> dict[str, Any]:
+    """The claim-set delta of a litreview's module — current vs a ``baseline``
+    grounding_report.json — for the cheap-update delta-judge. ``baseline`` is just an older copy of
+    the grounding report (the git part stays the caller's: ``git show <ref>:program/analysis/
+    grounding_report.json > baseline.json``), so this is a pure function of two files.
+
+    Returns ``{added, removed, must_confront_added, must_confront_removed, drifted}`` — claim ids
+    that appeared, disappeared, entered/left the must-confront set, or whose drift signature
+    (outcome/strength/quote/paraphrase/retraction) changed. A delta touching the must-confront set
+    or a claim the citing report relies on is what escalates to the fresh-context judge; an empty
+    delta means nothing for a citing report to re-examine."""
+    rp = Path(review_path).resolve()
+    home = REPORT._resolve_home(home, rp)
+    prefix = REPORT.litreview_module_prefix(rp, home)
+    scope_id = prefix.split("::", 1)[0]
+    cur = {cid: c for cid, c in REPORT.index_claims(home).items() if cid.startswith(prefix)}
+
+    base: dict[str, dict[str, Any]] = {}
+    data = json.loads(Path(baseline).read_text(encoding="utf-8"))
+    for c in data.get("claims", []) if isinstance(data, dict) else []:
+        if not isinstance(c, dict):
+            continue
+        fid = REPORT.claim_id_for(scope_id, c.get("id") or "")
+        if fid.startswith(prefix):
+            base[fid] = c
+
+    cur_ids, base_ids = set(cur), set(base)
+    mc = lambda d: {cid for cid, c in d.items() if c.get("must_confront")}  # noqa: E731
+    return {
+        "added": sorted(cur_ids - base_ids),
+        "removed": sorted(base_ids - cur_ids),
+        "must_confront_added": sorted(mc(cur) - mc(base)),
+        "must_confront_removed": sorted(mc(base) - mc(cur)),
+        "drifted": sorted(cid for cid in (cur_ids & base_ids)
+                          if REPORT._claim_drift_sig(cur[cid]) != REPORT._claim_drift_sig(base[cid])),
+    }
+
+
+def render_delta(d: dict[str, Any]) -> str:
+    rows = [("added", d["added"]), ("removed", d["removed"]),
+            ("must-confront +", d["must_confront_added"]),
+            ("must-confront -", d["must_confront_removed"]), ("drifted", d["drifted"])]
+    out = []
+    for label, ids in rows:
+        if ids:
+            out.append(f"  {label}: " + ", ".join(REPORT._short_claim_id(c) for c in ids))
+    if not out:
+        return "no change (nothing for a citing report to re-examine)"
+    head = "litreview delta — escalate to the delta-judge if any cited/must-confront claim moved:"
+    return head + "\n" + "\n".join(out)
 
 
 def render_audit(result: dict[str, Any]) -> str:

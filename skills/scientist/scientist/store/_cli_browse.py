@@ -25,10 +25,13 @@ async def cmd_list(store: Store, args: argparse.Namespace) -> None:
         recs = await store.claims(args.experiment)
     elif args.kind == "report":
         recs = await store.reports(args.experiment)
+    elif args.kind == "litreview":
+        recs = await store.litreviews()
     else:
         recs = await store.experiments()
     recs.sort(key=lambda r: r.get("exp_id") or r.get("path")
-              or r.get("entity_id") or r.get("claim_id") or r.get("report_id") or "")
+              or r.get("entity_id") or r.get("claim_id") or r.get("report_id")
+              or r.get("litreview_id") or "")
     if args.json:
         emit_json(recs)
         return
@@ -48,6 +51,10 @@ async def cmd_list(store: Store, args: argparse.Namespace) -> None:
         elif args.kind == "report":
             title = (r.get("title") or r.get("slug") or "").strip().replace("\n", " ")[:80]
             print(f"  [{r.get('scope','?')}] {r.get('report_id')}  {title}")
+        elif args.kind == "litreview":
+            title = (r.get("title") or r.get("slug") or "").strip().replace("\n", " ")[:80]
+            n = len(r.get("must_confront") or [])
+            print(f"  [{r.get('scope','?')}] {r.get('litreview_id')}  {title}  ({n} must-confront)")
         else:
             fc = r.get("file_counts") or {}
             print(f"  {r.get('exp_id')}  {r.get('name') or r.get('title') or ''}"
@@ -128,6 +135,10 @@ async def cmd_query(store: Store, args: argparse.Namespace) -> None:
             hit["report_id"] = meta.get("report_id")
             hit["scope"] = meta.get("scope")
             hit["report_title"] = meta.get("title")
+        elif meta.get("kind") == "litreview":
+            hit["litreview_id"] = meta.get("litreview_id")
+            hit["scope"] = meta.get("scope")
+            hit["litreview_title"] = meta.get("title")
         out.append(hit)
     if args.json:
         emit_json(out)
@@ -147,6 +158,11 @@ async def cmd_query(store: Store, args: argparse.Namespace) -> None:
             snippet = (h.get("text") or "").strip().replace("\n", " ")[:200]
             print(f"  [report · {h.get('scope','?')}] {h.get('report_id')}"
                   f"  {h.get('report_title') or ''}\n      {snippet}")
+            continue
+        if h.get("kind") == "litreview":
+            snippet = (h.get("text") or "").strip().replace("\n", " ")[:200]
+            print(f"  [litreview · {h.get('scope','?')}] {h.get('litreview_id')}"
+                  f"  {h.get('litreview_title') or ''}\n      {snippet}")
             continue
         loc = h.get("path") or h.get("exp_id") or "?"
         snippet = (h.get("text") or "").strip().replace("\n", " ")[:200]

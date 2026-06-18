@@ -251,15 +251,14 @@ sci litreview <review.md> [--home H] [--json]      # AUDIT: every [lit:] claim b
 sci litreview <review.md> --must-confront [--json] # list the must-confront obligation set
 sci litreview <review.md> --render out.pdf [--to pdf|html|docx]
 sci litreview <review.md> --trace                  # litreview -> each [lit:] claim -> paper
-sci litreview <review.md> --delta <since> [--json] # [planned] claim-set delta (the cheap-update filter)
-sci litreview <review.md> --index                  # [planned] upsert into the store as kind=litreview
+sci litreview <review.md> --delta base.json [--json]  # claim-set delta vs a baseline (the cheap-update filter)
+sci litreview <review.md> --index                  # upsert into the store as kind=litreview
 ```
 
-> **Build status.** Live: the `@must_confront` marker, the `[litreview:]` omissions audit +
-> `[litreview-waive:]` and the `stale-litreview` staleness pin (`litreview_pins` front matter) in
-> `sci report`, and `sci litreview` audit / `--must-confront` / `--render` / `--trace`. **Planned**
-> (designed here, not yet wired): the `--delta` cheap-update filter and the `kind=litreview` store
-> card (`--index`). The discipline below is the target spec.
+The `--delta` baseline is just an older copy of the grounding report — the git part stays yours:
+`git show <ref>:program/analysis/grounding_report.json > base.json`, then
+`sci litreview <review.md> --delta base.json`. It reports what entered/left the must-confront set or
+drifted, the worklist the cheap-update delta-judge weighs (see *Keeping a citing report current*).
 
 The **audit** validates mechanically (a failure → `BROKEN`, exit 1): every `[lit:]` claim resolves
 and is `backed` by the `lit_verdict` rule in [report.md](report.md); the structure carries a gaps

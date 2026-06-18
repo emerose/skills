@@ -334,6 +334,68 @@ def test_noncited_nonmustconfront_change_does_not_stale(tmp_path):
     assert not any(f["kind"] == "stale-litreview" for f in res["findings"])
 
 
+# --------------------------------------------------------------------------- #
+# --delta (cheap-update claim-set diff)
+# --------------------------------------------------------------------------- #
+def test_delta(tmp_path):
+    prog = _program(tmp_path)
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    gr = prog / "analysis" / "grounding_report.json"
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(gr.read_text(encoding="utf-8"), encoding="utf-8")
+    # Mutate current: add a new must-confront claim, drift floor's strength, un-tag ceiling.
+    data = json.loads(gr.read_text(encoding="utf-8"))
+    data["claims"].append(_lit_claim("test_new", slug_mod="it_biodist",
+                                     statement="a new pivotal finding", must_confront="new pivotal"))
+    for c in data["claims"]:
+        if c["id"].endswith("::test_floor"):
+            c["strength"] = "weak"
+        if c["id"].endswith("::test_ceiling"):
+            c["must_confront"] = None
+    gr.write_text(json.dumps(data), encoding="utf-8")
+
+    d = LR.delta(review, baseline, home=tmp_path)
+    short = lambda ids: {R._short_claim_id(i) for i in ids}  # noqa: E731
+    assert short(d["added"]) == {"program::new"}
+    assert d["removed"] == []
+    assert short(d["drifted"]) == {"program::floor"}
+    assert short(d["must_confront_added"]) == {"program::new"}
+    assert short(d["must_confront_removed"]) == {"program::ceiling"}
+
+
+def test_delta_no_change_is_empty(tmp_path):
+    prog = _program(tmp_path)
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    gr = prog / "analysis" / "grounding_report.json"
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(gr.read_text(encoding="utf-8"), encoding="utf-8")
+    d = LR.delta(review, baseline, home=tmp_path)
+    assert all(not v for v in d.values())
+    assert "no change" in LR.render_delta(d)
+
+
+# --------------------------------------------------------------------------- #
+# kind=litreview store card (store-free determinism)
+# --------------------------------------------------------------------------- #
+def test_litreview_card_markdown_deterministic():
+    from scientist.store import _meta as M
+    card = {
+        "litreview_id": "program::it-biodist", "scope": "program", "slug": "it-biodist",
+        "title": "IT ASO biodistribution", "abstract": "How a lumbar ASO distributes the CNS.",
+        "sections": [{"heading": "Exposure", "summary": "cord highest"}],
+        "must_confront": ["program::test_litreview_it_biodist.py::test_floor"],
+        "cited_claims": ["program::test_litreview_it_biodist.py::test_floor"],
+        "audit_status": "GROUNDED", "path": "program/litreviews/it-biodist/review.md",
+    }
+    md1 = M.litreview_card_markdown(card)
+    md2 = M.litreview_card_markdown(card)
+    assert md1 == md2                                          # deterministic → stable document_id
+    assert md1.startswith("# Literature review: IT ASO biodistribution")
+    assert "## Abstract" in md1
+    assert "## Must-confront" in md1
+    assert "## Cites" in md1
+
+
 def test_litreview_cite_renders_as_footnote(tmp_path):
     prog = _program(tmp_path)
     _review_md(prog, "it-biodist", _GOOD_REVIEW)
