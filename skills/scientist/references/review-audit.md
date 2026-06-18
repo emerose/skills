@@ -82,6 +82,30 @@ backing it**. As part of the semantic pass, for each prose doc (the root `README
      a derived quantity must be produced by a grounded `analysis/`/`program` **derivation** (then cited
      as the claim that wraps it), not computed inline in prose. This is the one category the per-citation
      audit structurally cannot see, so it is the §3 pass's job specifically.
+   - **incommensurate-evidence** — the citation resolves and is grounded, but the conclusion *leans on it
+     out of proportion to how robust it is*, and the prose doesn't say so. **For each load-bearing claim
+     or bound, weigh evidentiary robustness against how much the conclusion depends on it**, and check
+     that the cited evidence's *measured scope actually transfers to the use*. Grounding certifies that a
+     quote backs its paraphrase — not that a single, indirect, out-of-scope, or one-lab result is *enough*
+     for the weight a central conclusion puts on it. "Not robust" is broader than weak strength: a single
+     group (`independent_groups<=1` / "all one lab"), an indirect (`suggestive`) or secondary/relayed
+     source, an abstract-/title-only source, a contested or unreplicated result, a result used **outside
+     the scope it was measured in** (a prenatal-model datum bounding a postnatal therapy), a tidy
+     quantitative bound resting on one study, or an analogy doing load-bearing work — any of these, *when
+     a central conclusion leans on it*, should be acknowledged in the prose **where the claim does its work**
+     (the sentence that derives the ceiling), not only in an assumptions list. Flag a load-bearing
+     conclusion on non-robust evidence that the prose does not visibly hedge. The `weak-load-bearing`
+     audit advisory (report.md §5) mechanically raises candidates from the strength/independence/source
+     fields and %/×/fold bounds — and now hands the §3 reviewer each flagged claim's `strength` and its
+     review **note** (the "all one lab" caveat the author already wrote), plus the per-source robustness
+     signals — but it cannot judge *which* claim is load-bearing or whether the scope transfers — that
+     judgment is this pass's, specifically. This finding is **surfaced, not blocking** (see grading below):
+     the reviewer must EITHER ensure the prose discusses the evidence's strength where the claim does its
+     work — hedging the claim in the sentence that uses it and marking the bound provisional (or
+     strengthening the evidence), **not** deleting the assumptions note — OR explicitly waive it with a
+     one-line note in the assumptions/weak-support section. The point is that the text ends up
+     acknowledging the weakness, not that the audit refuses; a hard block on a genuine judgment call only
+     trains reflexive waive-throughs.
 
 4. **Grade severity, then report.** Three tiers:
    - **blocking** — an `unbacked` numeric result, a `weak-backing`, an `off-topic` citation, a `derived`
@@ -89,7 +113,13 @@ backing it**. As part of the semantic pass, for each prose doc (the root `README
    - **finding (clear it)** — an `artifact-only` result: the number is real but uncovered by a claim →
      author the claim citing the cell. Not blocking (the evidence exists), but not a pass either — it
      stays on the worklist until a claim covers it.
-   - **advisory** — an *unbacked qualitative* conclusion (soft prose with no number; note it, not a failure).
+   - **advisory (address or explicitly waive)** — an *unbacked qualitative* conclusion (soft prose with no
+     number; note it, not a failure), and an `incommensurate-evidence` finding (a load-bearing claim/bound
+     on non-robust evidence the prose doesn't hedge). Like `missing-disconfirmer`, this is not a hard
+     auto-fail gate: either ensure the prose discusses the claim's evidentiary strength where it does its
+     work, or waive it with a one-line note in the assumptions/weak-support section. A hard block on a
+     genuine judgment call trains reflexive waive-throughs; the goal is that the text acknowledges the
+     weakness, not that the audit refuses.
 
    Don't rewrite silently; report each finding with its doc, line, the sentence, the claim it maps to (or
    that it's missing, plus the artifact cell when `artifact-only`), and the claim's outcome/strength.
@@ -109,11 +139,14 @@ so it reads "75% [cites claims saying 48% and ≤50%]" cold. Fresh context defea
 so prompt it **adversarially and specifically** ("list every number whose cited claim does not itself
 contain that value; list every quantitative sentence that combines two or more claims"), and **hand it the
 claim contents** (the grounding report for everything cited), not just the prose — without the claims'
-actual numbers it can only re-check citation presence, the part that already passed. Make the mechanical
-findings (`unbacked`, `off-topic`, `weak-backing`, `derived`, claim-number ≠ sentence-number) **blocking**
-so "empty list" is an objective stop condition rather than "the author is satisfied"; the soft `advisory`
-items are surfaced for the author to address or explicitly waive. For the report phase this subagent pass
-is **required** — see [report.md](report.md).
+actual numbers *and their evidence's robustness signals* (per-source `group`/`primary`/`test`/`mode`/
+`tier`, the claim's `strength`, and the review **note** the `weak-load-bearing` advisory now surfaces) it
+can only re-check citation presence, the part that already passed, and can't weigh whether a load-bearing
+claim's support is commensurate with its centrality. Make the mechanical findings (`unbacked`, `off-topic`,
+`weak-backing`, `derived`, claim-number ≠ sentence-number) **blocking** so "empty list" is an objective
+stop condition rather than "the author is satisfied"; the soft `advisory` items — including
+`incommensurate-evidence` — are surfaced for the author to address or explicitly waive. For the report
+phase this subagent pass is **required** — see [report.md](report.md).
 
 ## Structural check
 
