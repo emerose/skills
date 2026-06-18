@@ -145,6 +145,8 @@ class PaperRef:
     title: str = ""
     year: str = ""
     doi: str = ""
+    authors_text: str = ""     # "Family, Given; Family, Given" — for the report bibliography
+    venue: str = ""            # journal / venue name — for the report bibliography
     is_retracted: bool = False
     credibility: dict = field(default_factory=dict, repr=False, compare=False)
     text: str = field(default="", repr=False, compare=False)
@@ -240,6 +242,7 @@ def _load_paper(citekey: str) -> PaperRef:
                 txt, mode = (rec.get("abstract") or ""), "abstract"
             return {"text": txt, "mode": mode, "title": rec.get("title") or "",
                     "year": str(rec.get("year") or ""), "doi": rec.get("doi") or "",
+                    "authors_text": rec.get("authors_text") or "", "venue": rec.get("venue") or "",
                     "document_id": str(doc_id or ""),
                     "credibility": _credibility_from_rec(rec)}
         finally:
@@ -263,6 +266,7 @@ def _load_paper(citekey: str) -> PaperRef:
     cred = res["credibility"]
     ref = PaperRef(citekey=citekey, sha256=_sha256(res["text"].encode("utf-8")),
                    mode=res["mode"], title=res["title"], year=res["year"], doi=res["doi"],
+                   authors_text=res["authors_text"], venue=res["venue"],
                    is_retracted=bool(cred.get("is_retracted")), credibility=cred,
                    text=res["text"], document_id=res.get("document_id", ""))
     _PAPER_CACHE[citekey] = ref
@@ -347,6 +351,7 @@ def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = N
     rec = {"citekey": citekey, "test": test, "system": system,
            "primary": bool(primary), "group": group or citekey, "mode": ref.mode,
            "title": ref.title, "year": ref.year, "doi": ref.doi,
+           "authors_text": ref.authors_text, "venue": ref.venue,
            # Display-only credibility markers (venue legitimacy + citation impact); these
            # surface on the claim/report but never feed strength/outcome — see _credibility_from_rec.
            "credibility": ref.credibility}

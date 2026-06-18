@@ -77,14 +77,21 @@ Two more citation forms, same audit:
   `@reviewed` (see *The machine support judge* below); a *weak* but supported claim still backs
   (single/suggestive evidence is legitimately weak). It is **second-class to `[claim:]`** — rendered as a distinct
   "Literature" footnote and reported on its own audit line — and must never read as data-grounded.
-- **Bare references** (no `[lit:]`) remain fine for *background*: cite the paper in a
-  **References** section by DOI as a clickable link, e.g.
-  `1. Author et al. *Journal* (Year). doi:[10.x/y](https://doi.org/10.x/y)`, and refer to it
-  inline by author-year ("(Monine et al. 2021)"). Author the entries as an ordinary Markdown
-  list (the `1.`/`2.` markers are convenient and fine — the renderer drops the numbers so the
-  list renders unnumbered, since reference numbers aren't cross-referenced in the prose and
-  would clash with the per-page footnote numbers). Promote a citation to `[lit:]` when the fact
-  is **load-bearing** — when the argument leans on it, make it quote-pinned and auditable.
+  The papers a report cites `[lit:]` are **auto-collected into a `# References` section** the
+  renderer appends at the end — one entry per paper (`Authors (Year). *Title*. Venue. <DOI>`),
+  built from the bibliographic fields each source snapshotted at grounding time, sorted by
+  author. Nothing to hand-author; the per-page footnote is the inline pointer, the References
+  list is the works-cited. (A source predating the `authors_text`/`venue` snapshot falls back to
+  the citekey-derived surname; re-running the literature claims regenerates it with the full
+  fields, since `source(...)` snapshots them from the library at grounding time.)
+- **Bare references** (no `[lit:]`) remain fine for *background*: refer to the paper inline by
+  author-year ("(Monine et al. 2021)"). If you need background papers *listed*, author your own
+  **References** (or **Bibliography** / **Works cited**) heading — that **takes over the whole
+  list** (the auto-generation defers to it, so include the `[lit:]` papers there too). Author
+  the entries as an ordinary Markdown list; the `1.`/`2.` markers are fine — the renderer drops
+  the numbers so it renders unnumbered (reference numbers aren't cross-referenced in the prose
+  and would clash with the per-page footnote numbers). Promote a citation to `[lit:]` when the
+  fact is **load-bearing** — when the argument leans on it, make it quote-pinned and auditable.
 
 #### Authoring and reviewing a literature claim
 
@@ -434,8 +441,9 @@ Render is via **pandoc** (`brew install pandoc`; a PDF target also needs a LaTeX
 Markdown: each `[claim:<id>]` becomes a native pandoc **footnote** (the cited claim's *statement* +
 a compact monospace `claim_id`), left as a true **bottom-of-page footnote** so a reader checks a
 grounding without paging to the end; `.csv` embeds inline as full-width Markdown tables; figures are
-absolutised and placed in-line full-text-width (not floated); the **References** section renders
-unnumbered. The PDF applies a restrained house style (KOMA `scrartcl`, sans headings + serif body
+absolutised and placed in-line full-text-width (not floated); the `[lit:]`-cited papers are
+collected into an auto-generated **References** section (deferring to a hand-authored one), which
+renders unnumbered. The PDF applies a restrained house style (KOMA `scrartcl`, sans headings + serif body
 via fontspec probed through `fc-list`, modern monospace for ids, 1-inch margins, a classification
 stamp + date + source-revision sha in the header/footer). All of this is implementation detail —
 the exact font probing, the `references.lua`/`layout.lua`/`endnotes.lua` AST filters, and the
