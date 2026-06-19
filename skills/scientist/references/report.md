@@ -84,6 +84,14 @@ Two more citation forms, same audit:
   list is the works-cited. (A source predating the `authors_text`/`venue` snapshot falls back to
   the citekey-derived surname; re-running the literature claims regenerates it with the full
   fields, since `source(...)` snapshots them from the library at grounding time.)
+  - **`[lit:<citekey>::<slug>]` may instead resolve to a pre-extracted *paper-claim*** (a 2-part
+    id, vs a literature claim's 3-part `<exp>::<file>::<node>`). When no internal literature claim
+    matches, the audit looks the id up in the per-paper JSONL store (`<home>/paper-claims/`,
+    `sci paper-claims`). A paper-claim is **attributed, not grounded** — pinned to what the paper
+    *says* — so it backs the cite (verdict `attributed`, rendered "Author year report: …") iff it
+    exists, is `kind="attributed"`, and carries an `evidence_sha`; the quote-integrity re-check is
+    `sci paper-claims verify`. See [references/paper-claims.md](paper-claims.md). This front-loads
+    the per-citation re-read: extract a paper's claim set once, cite it from many reports.
 - **Bare references** (no `[lit:]`) remain fine for *background*: refer to the paper inline by
   author-year ("(Monine et al. 2021)"). If you need background papers *listed*, author your own
   **References** (or **Bibliography** / **Works cited**) heading — that **takes over the whole

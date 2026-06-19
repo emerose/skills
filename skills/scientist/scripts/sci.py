@@ -76,6 +76,7 @@ from scientist.provenance import trace as TRACE  # noqa: E402
 from scientist.provenance import reproduce as REPRODUCE  # noqa: E402
 from scientist.provenance import report as REPORT  # noqa: E402
 from scientist.provenance import litreview as LITREVIEW  # noqa: E402
+from scientist.provenance import paperclaims as PAPERCLAIMS  # noqa: E402
 from scientist.provenance import coverage as COVERAGE  # noqa: E402
 from scientist.store import cli as STORE_CLI  # noqa: E402
 from scientist.store import _meta as STORE_META  # noqa: E402
@@ -207,6 +208,25 @@ def main() -> int:
                       help="with --list, include sources whose cached verdict is still fresh")
     p_jd.add_argument("--json", action="store_true", help="machine-readable output")
 
+    # ---- paper-claims: a paper's pre-extracted ATTRIBUTED claim set (Phase 2). ----
+    #      scaffold/validate/verify a per-paper JSONL, or (no action) load + emit for the
+    #      `--json | python3 -c` pattern. Scientist-side, scientist's own store; bib read-only.
+    p_pc = sub.add_parser("paper-claims",
+                          help="a paper's pre-extracted attributed claim set: `scaffold <citekey>` "
+                               "(open the JSONL + emit the extraction brief), `validate <citekey>` "
+                               "(schema), `verify <citekey>` (quote-integrity), or no action to "
+                               "load + emit (--json, filter with --query/--paper)")
+    p_pc.add_argument("action", nargs="?", default="list",
+                      choices=["scaffold", "validate", "verify", "list"],
+                      help="scaffold | validate | verify | list (default: list/emit)")
+    p_pc.add_argument("citekey", nargs="?",
+                      help="bibliographer citekey (required for scaffold/validate/verify)")
+    p_pc.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
+    p_pc.add_argument("--paper", help="with `list`: scope to one paper's citekey")
+    p_pc.add_argument("--query", help="with `list`: substring/regex filter over `paraphrase` "
+                      "(the grep path — no semantic ranking)")
+    p_pc.add_argument("--json", action="store_true", help="machine-readable output")
+
     # ---- coverage: is the grounding keeping up with the library? ----
     p_cov = sub.add_parser("coverage",
                            help="library papers cited by NO grounded claim — the completeness "
@@ -252,6 +272,8 @@ def main() -> int:
         return _new_litreview(args)
     if args.cmd == "judge":
         return _judge(args)
+    if args.cmd == "paper-claims":
+        return _paper_claims(args)
     if args.cmd == "coverage":
         return _coverage(args)
     if args.cmd == "audit":
@@ -521,6 +543,54 @@ def _read_verdict_records(src: str) -> list:
               "{citekey, paraphrase, supported, rationale}", file=sys.stderr)
         raise SystemExit(1)
     return data
+
+
+def _paper_claims(args: argparse.Namespace) -> int:
+    """`sci paper-claims …`: scaffold / validate / verify a paper's pre-extracted ATTRIBUTED
+    claim set, or (no action) load + emit it. All offline + store-local — the extractor reads
+    bibliographer's PDFs read-only and writes scientist's OWN per-paper JSONL; bib's DB is never
+    touched. Exit 0 unless a validate/verify finds a blocking problem."""
+    import json
+
+    home = resolve_home(args)
+    if home is None:
+        print("no data-tree root: pass --home or set $SCIENTIST_HOME", file=sys.stderr)
+        return 1
+
+    action = args.action
+    if action in ("scaffold", "validate", "verify"):
+        if not args.citekey:
+            print(f"sci paper-claims {action} needs a <citekey>", file=sys.stderr)
+            return 1
+        if action == "scaffold":
+            try:
+                res = PAPERCLAIMS.scaffold(home, args.citekey)
+            except Exception as e:                       # LiteratureError etc. — paper not resolvable
+                print(f"could not resolve {args.citekey} in the bibliographer library: {e}",
+                      file=sys.stderr)
+                return 1
+            emit(res, args.json, PAPERCLAIMS.render_scaffold)
+            return 0
+        if action == "validate":
+            res = PAPERCLAIMS.validate(home, args.citekey)
+            emit(res, args.json, PAPERCLAIMS.render_validate)
+            return 0 if res["status"] == "VALID" else 1
+        # verify
+        try:
+            res = PAPERCLAIMS.verify(home, args.citekey)
+        except Exception as e:
+            print(f"could not read {args.citekey}'s text to verify quotes: {e}", file=sys.stderr)
+            return 1
+        emit(res, args.json, PAPERCLAIMS.render_verify)
+        return 0 if res["status"] == "VERIFIED" else 1
+
+    # list / emit
+    claims = PAPERCLAIMS.query(home, paper=args.paper, query=args.query)
+    if args.json:
+        print(json.dumps(claims, indent=2, ensure_ascii=False, default=str))
+    else:
+        print(PAPERCLAIMS.render_query(claims))
+    return 0
 
 
 def _coverage(args: argparse.Namespace) -> int:

@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any
 
 from . import _load_raw, edges, sha256_file
+from . import paperclaims as _paperclaims
 from ._grounding_io import (  # canonical locate+load; GROUNDING_REPORT_NAME re-exported
     GROUNDING_REPORT_NAME,
     claims_of,
@@ -497,6 +498,23 @@ def metric_review_sha(claim: dict[str, Any]) -> str | None:
     for r in rows:
         h.update(("|".join(r) + "\n").encode())
     return h.hexdigest()
+
+
+def paper_claim_verdict(pc: dict[str, Any]) -> tuple[str, str | None]:
+    """Verdict for an ``[lit:<id>]`` that resolves to a pre-extracted **paper-claim** (Phase 2)
+    rather than an internal literature claim. A paper-claim is ATTRIBUTED — pinned to what the
+    paper says — so its audit is structural, not a re-run: it must be ``kind="attributed"`` and
+    carry a non-empty ``evidence_sha`` (the integrity pin). The full quote-integrity re-check (the
+    quote still located in the retained PDF) is ``sci paper-claims verify`` — offline here, the
+    audit only confirms the record exists and is well-formed enough to cite. Returns
+    ``("attributed", None)`` when it backs the cite, else a blocking ``(verdict, detail)``."""
+    if str(pc.get("kind")) != _paperclaims.KIND:
+        return ("not-attributed", f"paper-claim is kind={pc.get('kind')!r}, not "
+                                  f"'{_paperclaims.KIND}' — re-extract; never launder attribution")
+    if not str(pc.get("evidence_sha") or "").strip():
+        return ("no-evidence-sha", "paper-claim has no evidence_sha (the integrity pin) — "
+                                   "re-run the extractor / `sci paper-claims validate`")
+    return ("attributed", None)
 
 
 def bibliometric_verdict(claim: dict[str, Any]) -> tuple[str, str | None]:
@@ -1202,6 +1220,9 @@ def audit(report_path: Path, home: Path | None = None,
 
     claim_index = index_claims(home)
     artifact_index = index_analysis_artifacts(home)
+    # Pre-extracted external claims (Phase 2): an [lit:<id>] that names no internal claim resolves
+    # here, against the per-paper paper-claims/*.jsonl store. Loaded once, in memory; no DB.
+    paper_claim_index = _paperclaims.load_paper_claims(home)
 
     findings: list[dict[str, Any]] = []
 
@@ -1313,10 +1334,30 @@ def audit(report_path: Path, home: Path | None = None,
         cid, line = lc["id"], lc["line"]
         rec = {"id": cid, "line": line}
         cands = resolve_citation(cid, claim_index)
+        if not cands and cid in paper_claim_index:
+            # Pre-extracted external claim (Phase 2): resolves to a paper-claim in the store, not
+            # an internal literature claim. ATTRIBUTED — kept visually distinct from a grounded
+            # cite (rec["attributed"] flags the render path).
+            pc = paper_claim_index[cid]
+            rec["attributed"] = True
+            rec["claim_id"] = cid
+            rec["citekey"] = pc.get("citekey")
+            rec["strength"] = pc.get("strength")
+            rec["paraphrase"] = pc.get("paraphrase")
+            rec["statement"] = pc.get("paraphrase")
+            verdict, detail = paper_claim_verdict(pc)
+            rec["verdict"] = verdict
+            if verdict != "attributed":
+                findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cid,
+                                 "detail": detail})
+            lit_cites.append(rec)
+            continue
         if not cands:
             rec["verdict"] = "missing"
             findings.append({"kind": "missing-lit", "line": line, "cite": cid,
-                             "detail": "no literature claim has this id; write the [lit:] claim first"})
+                             "detail": "no literature claim or paper-claim has this id; write the "
+                                       "[lit:] claim or extract the paper "
+                                       "(`sci paper-claims scaffold <citekey>`)"})
         elif len(cands) > 1:
             rec["verdict"] = "ambiguous"
             rec["candidates"] = cands
@@ -1505,6 +1546,7 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     home = _resolve_home(home, rp)
     text = rp.read_text(encoding="utf-8")
     claim_index = index_claims(home)
+    paper_claim_index = _paperclaims.load_paper_claims(home)
 
     order: list[str] = []
     num: dict[str, int] = {}           # cid -> 1-based index, first-seen order
@@ -1583,6 +1625,14 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
         # quote-pinning and the evidential assessment live in the spec and the audit, not here.
         cands = resolve_citation(cid, claim_index)
         if len(cands) != 1:
+            # A pre-extracted external claim (Phase 2): render it ATTRIBUTED — "Author year report:
+            # <paraphrase>" — visually distinct from a grounded "we measured" note, so a paper's
+            # assertion is never typeset as a program fact.
+            pc = _paperclaims.resolve_paper_claim(cid, paper_claim_index)
+            if pc is not None:
+                para = (pc.get("paraphrase") or "").strip().replace("\n", " ")
+                ay = _author_year(pc)
+                return f"{ay} report: {para} `{cid}`"
             return f"literature `{cid}` ({'unresolved' if not cands else 'ambiguous'})"
         c = claim_index[cands[0]]
         stmt = (c.get("statement") or "").strip().replace("\n", " ")
@@ -1627,6 +1677,10 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
         title = (s.get("title") or "").strip()
         venue = (s.get("venue") or "").strip()
         doi = (s.get("doi") or "").strip()
+        if not doi:                          # a paper-claim carries its id as `paper: "doi:…"`
+            paper_id = str(s.get("paper") or "").strip()
+            if paper_id.lower().startswith("doi:"):
+                doi = paper_id[4:].strip()
         bits = [f"{authors} ({year})." if year else f"{authors}."]
         if title:
             bits.append(f"*{title}*.")
@@ -1648,6 +1702,14 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
         for cid in lorder:
             cands = resolve_citation(cid, claim_index)
             if len(cands) != 1:
+                # A pre-extracted external claim contributes its own paper to the works-cited list
+                # (one entry per citekey; fields fall back to the citekey-derived surname+year).
+                pc = _paperclaims.resolve_paper_claim(cid, paper_claim_index)
+                if pc is not None:
+                    ck = str(pc.get("citekey") or "")
+                    if ck and ck not in seen:
+                        seen.add(ck)
+                        entries.append(_bib_entry(pc))
                 continue
             for s in (claim_index[cands[0]].get("evidence") or {}).get("lit_sources", []):
                 ck = str(s.get("citekey") or "")
@@ -1967,7 +2029,8 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
 # --------------------------------------------------------------------------- #
 _CITE_MARK = {"backed": "✅ backed", "weak-backing": "⚠️ weak-backing",
               "missing": "❌ missing", "ambiguous": "❌ ambiguous"}
-_LIT_MARK = {"backed": "✅ backed", "needs-review": "❌ needs-review",
+_LIT_MARK = {"backed": "✅ backed", "attributed": "📄 attributed",
+             "needs-review": "❌ needs-review",
              "needs-judgment": "❌ needs-judgment (run `sci judge`)",
              "stale-judgment": "❌ stale-judgment (re-run `sci judge`)",
              "over-strength": "❌ over-strength (exceeds locator ceiling)",
@@ -2006,7 +2069,10 @@ def render_audit(result: dict[str, Any]) -> str:
     for lc in lits:
         mark = _LIT_MARK.get(lc["verdict"], lc["verdict"])
         tail = ""
-        if lc["verdict"] == "backed":
+        if lc["verdict"] == "attributed":
+            # A pre-extracted external claim — "the paper reports", never "we measured".
+            tail = f"  (attributed → {lc.get('citekey')}, {lc.get('strength')})"
+        elif lc["verdict"] == "backed":
             srcs = lc.get("sources") or lc.get("metric_sources") or []
             label = "metric" if lc.get("metric_sources") else "source"
             nsrc = len(srcs)
@@ -2018,7 +2084,8 @@ def render_audit(result: dict[str, Any]) -> str:
         # A separate literature line so the green badge never launders attribution as
         # data-grounding: show the tier spread across all [lit:] citations.
         tally = Counter(
-            (lc.get("strength") if lc["verdict"] == "backed" else lc["verdict"]) for lc in lits)
+            (lc.get("strength") if lc["verdict"] in ("backed", "attributed") else lc["verdict"])
+            for lc in lits)
         spread = ", ".join(f"{n} {k}" for k, n in tally.items())
         lines.append(f"  literature: {len(lits)} cited — {spread}")
     for lr in result.get("litreview_cites", []):

@@ -237,15 +237,21 @@ def prisma_funnel(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "pending": pending, "excluded_by_reason": by_reason}
 
 
-def _cited_citekeys(text: str, claim_index: dict[str, dict[str, Any]]) -> set[str]:
-    """The set of paper citekeys the review's ``[lit:]`` citations resolve to (across each cited
-    claim's ``lit_sources``/``metric_sources``). The unit the coverage cross-check compares against
-    the ``included`` screening rows."""
+def _cited_citekeys(text: str, claim_index: dict[str, dict[str, Any]],
+                    paper_claim_index: dict[str, dict[str, Any]] | None = None) -> set[str]:
+    """The set of paper citekeys the review's ``[lit:]`` citations resolve to. For an internal
+    literature claim that is each cited claim's ``lit_sources``/``metric_sources`` citekeys; for a
+    pre-extracted **paper-claim** (Phase 2) it is the paper-claim's own ``citekey``. The unit the
+    coverage cross-check compares against the ``included`` screening rows."""
     cks: set[str] = set()
+    pci = paper_claim_index or {}
     parsed = REPORT.parse_report(text)
     for lc in parsed.get("lit_cites", []):
         cands = REPORT.resolve_citation(lc["id"], claim_index)
         if len(cands) != 1:
+            pc = pci.get(lc["id"].strip())
+            if pc is not None and str(pc.get("citekey") or "").strip():
+                cks.add(str(pc["citekey"]))
             continue
         ev = claim_index[cands[0]].get("evidence") or {}
         for field in ("lit_sources", "metric_sources"):
@@ -257,14 +263,16 @@ def _cited_citekeys(text: str, claim_index: dict[str, dict[str, Any]]) -> set[st
 
 def _coverage_crosscheck(
         text: str, claim_index: dict[str, dict[str, Any]],
-        rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        rows: list[dict[str, Any]],
+        paper_claim_index: dict[str, dict[str, Any]] | None = None,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """The integrity core. Returns ``(findings, advisories)``:
 
     * ``cited-paper-unscreened`` (blocking) — a ``[lit:]``-cited paper that is not an ``included``
       screening row: a citation that never passed (or was never recorded in) the funnel;
     * ``included-but-uncited`` (advisory) — an ``included`` paper no ``[lit:]`` claim cites: either
       screened-in-but-not-yet-written, or a candidate to drop."""
-    cited = _cited_citekeys(text, claim_index)
+    cited = _cited_citekeys(text, claim_index, paper_claim_index)
     included = {str(r.get("citekey")).strip() for r in rows
                 if r.get("decision") == "included" and str(r.get("citekey") or "").strip()}
     findings: list[dict[str, Any]] = []
@@ -330,7 +338,8 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
     rows, screen_findings = parse_screening(REPORT.litreview_screening_path(rp))
     findings.extend(screen_findings)
     funnel = prisma_funnel(rows)
-    cov_findings, cov_advisories = _coverage_crosscheck(text, claim_index, rows)
+    paper_claim_index = REPORT._paperclaims.load_paper_claims(home)
+    cov_findings, cov_advisories = _coverage_crosscheck(text, claim_index, rows, paper_claim_index)
     findings.extend(cov_findings)
     advisories.extend(cov_advisories)
 
