@@ -29,7 +29,7 @@ from .. import grounding
 _MARKERS = {
     "strength": "strength(level): how strongly the evidence supports the claim",
     "caveats": "caveats(text): scope/limits to keep in mind",
-    "kind": "kind(category): result|design|external|interpretive|literature",
+    "kind": "kind(category): result|design|external|interpretive|literature|bibliometric",
     "reviewed": "reviewed(**verdict): agent support-review of a literature claim",
     "must_confront": "must_confront(reason): a litreview's must-confront obligation claim",
 }

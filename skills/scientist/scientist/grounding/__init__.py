@@ -59,8 +59,9 @@ from ._text import (_sha256, _collapse_ws, _fold_match, _match_phrase,
 # none of them touches a core name at import time.
 from .bypass_guard import install_guard, _data_root, _under_root, _maybe_flag
 from .literature import (LiteratureError, PaperRef, paper, source, converge,
+                         metric, cited_by,
                          _load_paper, _credibility_from_rec, _import_bibliostore,
-                         _load_dotenv_for, _bib_home, _record_source,
+                         _load_dotenv_for, _bib_home, _record_source, _record_metric,
                          _PAPER_CACHE, _BIBLIOSTORE)
 from .derivation import (Derivation, derivation, DerivationAudit, audit_derivations,
                          current_audit)
@@ -69,7 +70,7 @@ __all__ = [
     "load", "data", "doc", "evidence", "uses", "cross", "record",
     "derivation", "Derivation", "DocRef", "UnsupportedDocFormat", "Capture",
     "strength", "caveats", "kind", "reviewed", "must_confront",
-    "paper", "source", "converge", "PaperRef", "LiteratureError",
+    "paper", "source", "converge", "metric", "cited_by", "PaperRef", "LiteratureError",
     "current_capture", "registry", "TRACKED_SUFFIXES",
     "DerivationAudit", "audit_derivations", "current_audit",
     "JudgmentCache", "JUDGMENT_CACHE_NAME",
@@ -366,9 +367,12 @@ def caveats(text: str):
 
 
 def kind(category: str):
-    """``@kind("result|design|external|interpretive|literature")`` — what sort of assertion
-    this is. ``literature`` marks a *third-party* claim grounded on a paper in the bibliographer
-    library (see :func:`source`/:func:`converge`), not on Kicho data."""
+    """``@kind("result|design|external|interpretive|literature|bibliometric")`` — what sort of
+    assertion this is. ``literature`` marks a *third-party* claim grounded on a quote in a paper in
+    the bibliographer library (see :func:`source`/:func:`converge`), not on Kicho data.
+    ``bibliometric`` marks a claim *about the literature itself* (e.g. "most-cited") grounded on a
+    stored OpenAlex metric via :func:`metric`/:func:`cited_by`, not on a quote — see
+    :func:`scientist.grounding.metric`."""
     return _marker("kind")(category)
 
 

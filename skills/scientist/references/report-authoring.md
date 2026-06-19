@@ -448,6 +448,26 @@ trains reflexive waive-throughs, and the goal is that the text ends up acknowled
 not that the audit refuses. An empty blocking list is the objective stop condition — *not* the
 author's satisfaction.
 
+**Check every proposition in a sentence, not just the cited one.** A citation indexes *one* claim,
+but a sentence often asserts several — and an unbacked clause riding on a cited sentence is the
+§3 blind spot the mechanical audit cannot see (the citation makes the sentence *look* covered).
+Decompose each sentence into its distinct assertions and require each to be one of: (a) backed by a
+citation to a grounded claim, (b) plainly non-load-bearing framing/connective/common-knowledge, or
+(c) flagged `unbacked`. Treat "this sentence has a citation" as covering only the clause that
+citation is attached to, never the whole sentence.
+
+**The meta-claim tripwire.** Watch specifically for **claims about the literature itself** rather
+than about the science — superlatives and frequency/consensus assertions: *"most/least-cited,"
+"most-studied," "seminal," "widely/rarely replicated," "the consensus is," "first to," "largest
+cohort," "underexplored."* These are *empirical* claims (about citation counts, study counts, the
+state of the field) that **quote-grounding can never catch** — no sentence in any paper asserts its
+own citation frequency — so they slip through `[lit:]` quote-checking by construction. When you see
+one, it must resolve to a **bibliometric claim** (`@kind("bibliometric")` grounded on a stored
+metric via `cited_by()`/`metric()` — see [report.md](report.md) → *Bibliometric claims*) or be
+flagged `meta-claim-unbacked` (blocking). Do not let a plausible-sounding "most-cited" stand on the
+author's say-so: it is either measured-and-pinned or removed. (This rule exists because exactly such
+a flourish — "the single most-quoted result" — once shipped past a GROUNDED audit while being false.)
+
 ## Required: a voice/tone review (fresh-context)
 
 Grounding is necessary but not sufficient: a report can be fully GROUNDED and still read like an

@@ -156,6 +156,15 @@ the locator ladder → strength ceiling, the caller-records `sci judge` support 
 claims now live (per-litreview, so parallel authors don't collide), instead of a per-report
 `test_literature_<slug>.py`.
 
+**Bibliometric claims belong here too.** A claim *about the literature* — "the most-cited result on
+this question is X," "Y is rarely replicated" — is third-party and litreview-legal, but it cannot be
+quote-grounded (no paper states its own citation count). Author it as a `@kind("bibliometric")`
+claim grounded on a stored OpenAlex metric via `cited_by()`/`metric()` (see [report.md](report.md) →
+*Bibliometric claims*), cite it `[lit:]` like any other, and `@must_confront` it when it is pivotal
+(e.g. *the field's most-cited result is the independent disconfirmer, not the single-lab datum* — a
+fact a downstream report should reckon with). These are precisely the meta-claims a litreview is
+tempted to assert as an ungrounded flourish; ground them or cut them.
+
 **The must-confront subset.** The litreview marks the claims that *any* honest report in this area
 must reckon with — the **pivotal, contested, or disconfirming** ones — with a `@must_confront`
 decorator on the claim:
@@ -370,10 +379,15 @@ unscoped tally is too noisy to hand a critic — see *Gathering*). Prompt it adv
 > *What sub-question relevant to the scope got no coverage? What claim is characterized as settled
 > that the field actually contests, or as fringe that is mainstream? What contradicting evidence to
 > the surveyed claims is absent? Which banked papers state a load-bearing fact no claim captures? Is
-> the must-confront set complete — is any disconfirmer or binding bound left untagged?*
+> the must-confront set complete — is any disconfirmer or binding bound left untagged? **Is any
+> claim about the literature itself** — "most-cited," "rarely replicated," "understudied," "the
+> consensus is" — **asserted as prose without a grounded `@kind("bibliometric")` claim behind it?**
+> Such meta-claims cannot be quote-grounded, so they slip past the §3 check; flag any unbacked one
+> (it must be measured via `cited_by()`/`metric()` or cut).*
 
 It returns, per finding: the gap, why it matters, and what to add. **Blocking**: a missing
-sub-question, a mischaracterized claim, an untagged disconfirmer that should be must-confront. The
+sub-question, a mischaracterized claim, an untagged disconfirmer that should be must-confront, an
+ungrounded meta-claim about the literature. The
 objective stop condition is an empty blocking list, judged by the reviewer. Run the §3 prose↔claims
 pass and a light voice check too (the report-authoring rules apply, at the lower polish bar).
 
