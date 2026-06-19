@@ -148,6 +148,13 @@ stop condition rather than "the author is satisfied"; the soft `advisory` items 
 `incommensurate-evidence` — are surfaced for the author to address or explicitly waive. For the report
 phase this subagent pass is **required** — see [report.md](report.md).
 
+**When a report cites a litreview, two litreview-specific passes sit alongside this one.** The cited
+litreview (`kind=litreview`) carries its own fresh-context **completeness/fairness critic** (did the
+survey miss a sub-question, mischaracterize a claim, or leave a disconfirmer untagged?), and `sci
+report` runs an **omissions audit** requiring the report to cite-or-`[litreview-waive:]` each
+must-confront claim the litreview marks. Both are distinct from this prose↔claims check — see
+[litreview.md](litreview.md) (and [report.md](report.md) → `[litreview:]`).
+
 ## Structural check
 
 ```bash

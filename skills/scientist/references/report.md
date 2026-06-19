@@ -277,6 +277,48 @@ If a cited paper's library text later changes, the recomputed sha no longer matc
 citation flips to `stale-review` (blocking) — re-read the paper and re-stamp. An un-pinned review
 still backs but the audit nudges you to pin it.
 
+#### `[litreview:]` — cite a neutral literature survey (omissions audit + staleness pin)
+
+A report can ground a whole topic on a **litreview** (`kind=litreview` — a thesis-independent,
+neutral survey of the third-party literature a report argues *from*; the full discipline is in
+[litreview.md](litreview.md)) with **`[litreview:<id>]`**, where `<id>` is `<exp-or-program>::<slug>`
+(almost always `program::<slug>`) or a bare `<slug>`. Unlike `[report:]` it rests on no conclusion —
+it points at the assessed evidence map, and a report carrying `[litreview:X]` cites X's `[lit:]` claims
+directly rather than re-authoring them. `sci report`'s audit adds two report-side checks for it (they
+live in the report audit because they are properties of the *consuming* report):
+
+- **Omissions audit — `unaddressed-must-confront` (blocking).** Each litreview marks a
+  **must-confront** subset: the pivotal/contested/disconfirming claims any honest report in the area
+  must reckon with. A report citing `[litreview:X]` must *address each* must-confront claim of X —
+  either cite it (`[lit:<id>]` anywhere in the report) **or** carry an explicit waiver. The waiver is
+  a one-liner in the assumptions/weak-support section naming the claim and why it does not bear on
+  this report's argument:
+
+  ```markdown
+  - [litreview-waive:test_route_specific_clearance] out of scope — this report addresses the
+    systemic route only, where route-specific clearance does not apply.
+  ```
+
+  A waiver is *address-or-account*, not a silencer (the §3 fresh-context pass adjudicates whether it
+  is honest). An unaddressed must-confront claim is a blocking `unaddressed-must-confront` finding.
+  The audit is scoped to the must-confront set **by design** — not every claim of a broad survey.
+- **`stale-litreview` (blocking) + the `litreview_pins` front matter.** A citing report pins to X's
+  must-confront set plus the X-claims it cites, recorded per litreview in YAML front matter:
+
+  ```yaml
+  litreview_pins:
+    program::target-biodistribution: "a1b2c3d4e5f6"
+  ```
+
+  `sci report` computes the *current* pin and surfaces it: an unrecorded pin is a non-blocking nudge
+  (it prints the value to paste in); a recorded pin that no longer matches is the blocking
+  `stale-litreview` — the must-confront set gained/lost a claim, or a cited claim drifted
+  (strength/paraphrase) or was retracted. Re-address, then re-pin. Cosmetic or irrelevant new claims
+  in X never touch the report, so a litreview can be re-swept often without a BROKEN cascade.
+
+See [litreview.md](litreview.md) → *Consumption* and *Staleness* for the discipline (the
+must-confront tag, the completeness critic) behind both.
+
 ### Figures & tables — embed a *grounded derivation*, never an ad-hoc graphic
 
 A cross-experiment report often needs a *new* comparison plot/table no single experiment

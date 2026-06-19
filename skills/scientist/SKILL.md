@@ -51,6 +51,7 @@ Each phase's detail lives in `references/` and is loaded only when you need it. 
 | &nbsp;&nbsp;↳ deep reference for the structural / staleness / semantic audit passes (`sci check` / `sci audit` / parallel-agent) | [references/auditing.md](references/auditing.md) |
 | Author a human-facing **report** from grounded claims — `sci report` mechanics (cite `[claim:<id>]`, embed grounded figures, audit + render) | [references/report.md](references/report.md) |
 | &nbsp;&nbsp;↳ when **drafting the report prose**: voice/structure, literature-sweep & disconfirming-evidence discipline, the generation brief, the fresh-context §3 + voice/tone reviews | [references/report-authoring.md](references/report-authoring.md) |
+| Author a neutral **literature survey** (`kind=litreview`) — an assessed map of the third-party literature a report argues *from*; reports cite it via `[litreview:]` and must address its must-confront claims | [references/litreview.md](references/litreview.md) |
 
 `data/` naming convention + assay vocabulary: [references/naming.md](references/naming.md).
 Private CRO vocabulary (your real vendor names): [references/vocab.example.yml](references/vocab.example.yml).
@@ -100,4 +101,7 @@ Read the repo-wide [AGENTS.md](../../AGENTS.md) first: improve-as-you-go, push r
 and verify changes on throwaway data. Per-phase maintenance notes live in each `references/` file;
 the open direction (finer-grained provenance, program-level traceability) is in
 [ROADMAP.md](ROADMAP.md) — claim↔prose enforcement, the reproduction audit, and the terminal
-**report** phase (`claims → report`, see [report.md](references/report.md)) are shipped.
+**report** phase (`claims → report`, see [report.md](references/report.md)) are shipped. A neutral
+**litreview** survey (`kind=litreview`, see [litreview.md](references/litreview.md)) sits alongside
+reports as a thesis-independent map of the third-party literature — reports cite it via `[litreview:]`
+and must address the must-confront claims it marks.
