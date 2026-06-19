@@ -31,6 +31,7 @@ import os
 import re
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -803,6 +804,142 @@ async def cmd_backfill(args: argparse.Namespace, store: BiblioStore) -> None:
         print("authorization, a peer source by DOI. Confirm the file is the right paper first.")
 
 
+def _metrics_stale(rec: dict[str, Any], days: int) -> bool:
+    """True if a record's OpenAlex ``metrics`` are missing an ``as_of`` stamp or
+    that stamp is older than ``days`` days. A record with no metrics at all is a
+    *backfill*, not a staleness case, so it returns False here."""
+    m = rec.get("metrics") or {}
+    if not m:
+        return False
+    as_of = m.get("as_of")
+    if not as_of:
+        return True  # metrics predate the as_of field — treat as stale
+    try:
+        stamped = datetime.strptime(as_of, "%Y-%m-%d").date()
+    except ValueError:
+        return True
+    return (datetime.now(timezone.utc).date() - stamped).days > days
+
+
+async def cmd_refresh(args: argparse.Namespace, store: BiblioStore) -> None:
+    """Backfill (or refresh) OpenAlex citation metrics on existing records.
+
+    The default scope is the *gap*: records that have a DOI/PMID but no `metrics`
+    block yet — papers added before enrichment existed, or where it failed on a
+    network blip. `--stale DAYS` additionally re-fetches records whose
+    `metrics.as_of` is older than DAYS, and `--all` re-fetches every eligible
+    record; both bypass the 30-day resolver cache so the numbers actually move.
+
+    OpenAlex is queried one record at a time behind a polite-pool throttle, so a
+    big sweep is slow but never abusive. `--limit` (default 500) caps a run;
+    re-runs are cheap because finished records are skipped and unchanged works
+    stay cached. Records with neither a DOI nor a PMID can't be enriched and are
+    reported, not attempted.
+    """
+    import httpx
+
+    from bibliographer import resolvers as _resolvers
+
+    recs = await store.all_records()
+    if args.tag:
+        recs = [r for r in recs if args.tag in (r.get("tags") or [])]
+
+    refresh_existing = args.all or args.stale is not None
+    eligible: list[dict[str, Any]] = []
+    ineligible = 0
+    for r in recs:
+        if not (r.get("doi") or r.get("pmid")):
+            if not r.get("metrics"):
+                ineligible += 1  # no identifier to look up, and nothing stamped yet
+            continue
+        if not r.get("metrics"):
+            eligible.append(r)  # a gap — always backfill
+        elif args.all or (args.stale is not None and _metrics_stale(r, args.stale)):
+            eligible.append(r)
+
+    total_eligible = len(eligible)
+    capped = bool(args.limit and args.limit > 0 and total_eligible > args.limit)
+    if capped:
+        eligible = eligible[: args.limit]
+
+    if not eligible:
+        if args.json:
+            emit_json({"checked": 0, "updated": [], "failed": [],
+                       "remaining": 0, "ineligible": ineligible})
+        else:
+            tail = f" — {ineligible} record(s) have no DOI/PMID to enrich." if ineligible else "."
+            print(f"No records need metrics{tail}")
+        return
+
+    if args.dry_run:
+        entries = [{"citekey": r.get("citekey"), "title": r.get("title"),
+                    "as_of": (r.get("metrics") or {}).get("as_of")} for r in eligible]
+        if args.json:
+            emit_json({"checked": len(eligible), "would_update": entries,
+                       "remaining": total_eligible - len(eligible), "ineligible": ineligible})
+            return
+        verb = "refreshed" if refresh_existing else "backfilled"
+        print(f"{len(eligible)} record(s) would be {verb}:")
+        for e in entries:
+            stamp = f"as of {e['as_of']}" if e["as_of"] else "no metrics yet"
+            print(f"  [{e['citekey']}] {e['title']}  ({stamp})")
+        if capped:
+            print(f"… and {total_eligible - len(eligible)} more (capped at --limit {args.limit}).")
+        return
+
+    updated: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    if not args.json:
+        verb = "Refreshing" if refresh_existing else "Backfilling"
+        print(f"{verb} OpenAlex metrics for {len(eligible)} record(s)…")
+    client = httpx.AsyncClient(
+        timeout=60, headers={"User-Agent": _resolvers._user_agent()}, follow_redirects=True
+    )
+    try:
+        for r in eligible:
+            ck = r.get("citekey")
+            rec = dict(r)
+            try:
+                ok = await _resolvers.enrich_openalex(rec, client, refresh=refresh_existing)
+            except Exception as exc:  # noqa: BLE001 — one bad record must not abort the sweep
+                failed.append({"citekey": ck, "error": str(exc)})
+                if not args.json:
+                    print(f"  ! [{ck}] {exc}")
+                continue
+            if ok and rec.get("metrics"):
+                new = await store.update_metrics(ck, rec["metrics"], rec.get("cited_by_count"))
+                m = new.get("metrics") or {}
+                updated.append({"citekey": ck, "cited_by_count": new.get("cited_by_count"),
+                                "fwci": m.get("fwci"), "as_of": m.get("as_of")})
+                if not args.json:
+                    cb = new.get("cited_by_count")
+                    fwci = f" · FWCI {m['fwci']:.2f}" if m.get("fwci") is not None else ""
+                    print(f"  ✓ [{ck}] cited-by {cb if cb is not None else '—'}{fwci}"
+                          f" · as of {m.get('as_of')}")
+            else:
+                failed.append({"citekey": ck, "error": "no OpenAlex match"})
+                if not args.json:
+                    print(f"  ✗ [{ck}] no OpenAlex match — {r.get('title')}")
+    finally:
+        await client.aclose()
+
+    if updated:
+        await write_index(store)
+
+    remaining = total_eligible - len(eligible)
+    if args.json:
+        emit_json({"checked": len(eligible), "updated": updated, "failed": failed,
+                   "remaining": remaining, "ineligible": ineligible})
+        return
+    print(f"\nUpdated {len(updated)} of {len(eligible)} record(s); "
+          f"{len(failed)} unmatched/failed.")
+    if remaining:
+        print(f"{remaining} more eligible — re-run to continue (re-runs skip finished records), "
+              f"or raise/drop --limit ({args.limit}).")
+    if ineligible:
+        print(f"{ineligible} record(s) have no DOI/PMID and can't be enriched from OpenAlex.")
+
+
 async def cmd_list(args: argparse.Namespace, store: BiblioStore) -> None:
     recs = await store.all_records()
     if getattr(args, "content", False):
@@ -881,6 +1018,8 @@ async def cmd_show(args: argparse.Namespace, store: BiblioStore) -> None:
             bits.append(f"pctile {round(m['citation_percentile'] * 100)}%")
         if m.get("open_access"):
             bits.append(f"OA {m['open_access']}")
+        if m.get("as_of") and bits:
+            bits.append(f"as of {m['as_of']}")
         if bits:
             print(f"impact       : {' · '.join(bits)}")
         v = m.get("venue") or {}
@@ -1328,6 +1467,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", help="list the stubs that would be attempted; fetch nothing")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_backfill)
+
+    sp = sub.add_parser("refresh", help="backfill/refresh OpenAlex citation metrics (cited-by, FWCI) onto existing records")
+    sp.add_argument("--all", action="store_true", help="re-fetch every eligible record, not just those missing metrics (bypasses the cache)")
+    sp.add_argument("--stale", type=int, metavar="DAYS", help="also re-fetch records whose metrics are older than DAYS (bypasses the cache)")
+    sp.add_argument("--tag", help="only records carrying this tag")
+    sp.add_argument("--limit", type=int, default=500, help="attempt at most N records (0 = no cap; default 500)")
+    sp.add_argument("--dry-run", action="store_true", help="list what would be fetched; change nothing")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_refresh)
 
     sp = sub.add_parser("enrich", help="recover metadata for unverified/no-year records (filename -> Crossref, content-verified)")
     sp.add_argument("citekeys", nargs="*", help="only these citekeys (default: all unverified)")

@@ -336,6 +336,25 @@ class BiblioStore:
         await self.lib.update_metadata(doc_id, **fields)
         return await self._record_for_id(doc_id)
 
+    async def update_metrics(
+        self, citekey: str, metrics: dict[str, Any], cited_by_count: int | None = None
+    ) -> dict[str, Any]:
+        """Write refreshed OpenAlex metrics onto an existing record.
+
+        A read-modify-write of the ``metrics`` sub-dict (carrying its ``as_of``
+        stamp) plus an optional top-level ``cited_by_count``; bumps ``updated_at``
+        and leaves every other field untouched. Raises ``KeyError`` on an unknown
+        citekey.
+        """
+        rec = await self.get_by_citekey(citekey)
+        if rec is None:
+            raise KeyError(citekey)
+        changes: dict[str, Any] = {"metrics": metrics, "updated_at": _now_iso()}
+        if cited_by_count is not None:
+            changes["cited_by_count"] = cited_by_count
+        await self._merge_metadata(rec["document_id"], changes)
+        return await self._record_for_id(rec["document_id"])
+
     # ---- internals ----------------------------------------------------------
     @staticmethod
     def _dir_effectively_empty(d: Path) -> bool:

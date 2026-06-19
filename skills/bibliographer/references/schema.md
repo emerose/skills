@@ -55,6 +55,7 @@ journal-trust signals no bibliographic resolver provides:
 |-------|-------|
 | `source` | always `openalex` |
 | `openalex_id` | the OpenAlex work id (`W…`) |
+| `as_of` | ISO date (`YYYY-MM-DD`) the metrics were fetched — citation counts drift, so this dates them. Refresh with `bib refresh` |
 | `fwci` | field-weighted citation impact (citations normalized by field + year; 1.0 = average) |
 | `citation_percentile` | normalized citation percentile within field/year, 0–1 |
 | `is_retracted` | Retraction-Watch-backed flag (kept even when `False` = checked, not retracted) |
