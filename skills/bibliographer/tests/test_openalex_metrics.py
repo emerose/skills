@@ -4,7 +4,7 @@ Fixtures are trimmed from real OpenAlex responses (work + its Source) for the
 tofersen phase-3 NEJM paper. No network — only `_openalex_metrics` is exercised.
 """
 
-from _resolvers import _openalex_metrics
+from bibliographer.resolvers import _openalex_metrics
 
 _WORK = {
     "id": "https://openalex.org/W4297675233",

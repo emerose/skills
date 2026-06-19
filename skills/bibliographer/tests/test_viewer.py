@@ -3,7 +3,7 @@
 import json
 import re
 
-import _viewer
+from bibliographer import viewer as _viewer
 
 
 def _embedded(html):

@@ -4,7 +4,7 @@ The fixture is a single item captured from a real esummary response (trimmed to
 the fields ``_from_pubmed`` reads). No network is needed.
 """
 
-from _discovery import _from_pubmed
+from bibliographer.discovery import _from_pubmed
 
 _ITEM = {
     "uid": "38189543",

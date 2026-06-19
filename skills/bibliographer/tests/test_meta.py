@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-import _meta
+from bibliographer import meta as _meta
 
 
 def test_make_citekey():

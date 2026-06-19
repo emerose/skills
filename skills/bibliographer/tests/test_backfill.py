@@ -55,7 +55,7 @@ def test_worklist_entry_collects_ids_and_url():
 # --------------------------------------------------------------------------- #
 libkit = pytest.importorskip("libkit")
 
-from _store import BiblioStore  # noqa: E402
+from bibliographer.store import BiblioStore  # noqa: E402
 from libkit import Library, LibraryConfig  # noqa: E402
 from libkit.concurrency import ConcurrencyHint  # noqa: E402
 from libkit.loaders.markdown import MarkdownLoader  # noqa: E402
@@ -119,7 +119,7 @@ def test_backfill_worklists_stubs_with_no_oa(store, monkeypatch, capsys):
     """With every OA fetch failing, no file is attached and each stub lands on
     the worklist with its identifiers + resolvable URL."""
 
-    import _resolvers
+    from bibliographer import resolvers as _resolvers
 
     async def _no_oa(rec, dest, client):
         return None

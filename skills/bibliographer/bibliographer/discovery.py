@@ -48,9 +48,9 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-import _meta
-import _resolvers
-from _resolvers import _cached_get, _drop_empty, _strip_jats, mailto
+from . import meta as _meta
+from . import resolvers as _resolvers
+from .resolvers import _cached_get, _drop_empty, _strip_jats, mailto
 
 
 # --------------------------------------------------------------------------- #

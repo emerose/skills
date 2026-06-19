@@ -3,7 +3,7 @@
 import asyncio
 import json
 
-import _resolvers as R
+from bibliographer import resolvers as R
 
 _PDF = b"%PDF-1.5\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
 _HTML_CHALLENGE = (

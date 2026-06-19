@@ -13,7 +13,7 @@ import pytest
 
 libkit = pytest.importorskip("libkit")
 
-from _store import BiblioStore  # noqa: E402
+from bibliographer.store import BiblioStore  # noqa: E402
 from libkit import Library, LibraryConfig  # noqa: E402
 from libkit.concurrency import ConcurrencyHint  # noqa: E402
 from libkit.loaders.markdown import MarkdownLoader  # noqa: E402

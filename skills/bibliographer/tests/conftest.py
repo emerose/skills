@@ -1,4 +1,8 @@
-"""Make the skill's `scripts/` modules importable from the tests.
+"""Make the skill importable from the tests.
+
+Two import surfaces are exposed: the `bibliographer` package (library —
+`from bibliographer.store import BiblioStore`) lives at the skill root, and the
+`bib` CLI module lives under `scripts/`. Both dirs go on `sys.path`.
 
 Run the suite with uv (it pulls the test-time deps without a virtualenv):
 
@@ -14,4 +18,6 @@ Run the suite with uv (it pulls the test-time deps without a virtualenv):
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_root / "scripts"))  # the `bib` CLI module
+sys.path.insert(0, str(_root))               # the `bibliographer` package

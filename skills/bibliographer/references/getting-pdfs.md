@@ -79,7 +79,7 @@ browser-like request headers (a plain UA gets HTML, not the PDF), the real PDF
 filename must be scraped from the article landing page (the bare `/pdf/` path
 returns HTML), and the response is often a JavaScript **proof-of-work challenge**
 that must be solved before the PDF is served. `fetch` now does all of this
-automatically (`fetch_pmc_authorms_pdf` in `scripts/_resolvers.py`), as a tier
+automatically (`fetch_pmc_authorms_pdf` in `bibliographer/resolvers.py`), as a tier
 below the OA-subset routes — so author-manuscript deposits no longer need a manual
 download.
 

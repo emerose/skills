@@ -1,6 +1,6 @@
 """Offline tests for the discovery core: OpenAlex normalizer + cross-provider merge."""
 
-from _discovery import (
+from bibliographer.discovery import (
     Filters,
     _from_openalex,
     _openalex_abstract,
