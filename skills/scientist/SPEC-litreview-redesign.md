@@ -57,23 +57,25 @@ thesis report: authored synthesis OVER claims  ←────┘  (may mix inte
 ```
 
 Both arms terminate in **claims**; reports and reviews are both authored synthesis *over* claims. **A
-review is a report whose claims are all external.** A review node and a thesis report are the same
-artifact kind (see §3 *kinds* open question); they differ only in whether their claims are external.
+review is a report whose claims are all external.** Review nodes and thesis reports **share the
+node-tree machinery** but keep distinct kinds — a review node is `kind=litreview` (neutral, external),
+a thesis report is `kind=report` (concluding, may mix internal `[claim:]` + external `[lit:]`). The
+`kind` encodes *role*; the tree code is shared (resolved §10).
 
 Layered concretely for one subtopic:
 
 ```
 discover (bib) → screen (PRISMA: include/exclude+reason) → for each INCLUDED paper: extract paper-claims
-              → leaf review-node cites primary paper-claims → rollup nodes cite [review:child] → root
+              → leaf review-node cites primary paper-claims → rollup nodes cite [litreview:child] → root
 ```
 
 ---
 
 ## 3. Layer 1 — `paper → paper-claims` (new; eager generalization of the lit-support judge)
 
-Extract a paper's claim set **once** into the library and reuse it across every review that touches
-the paper. Today `[lit:]` claims are authored lazily per citation (re-reading wastes the writer
-budget); this front-loads the same artifact.
+Extract a paper's claim set **once** into scientist's own claim store and reuse it across every review
+that touches the paper. Today `[lit:]` claims are authored lazily per citation (re-reading wastes the
+writer budget); this front-loads the same artifact.
 
 - **A paper-claim** = `{ paraphrase, evidence_sha (locator in the paper), stated strength/caveats/n/p,
   verbatim hedge snippet }`.
@@ -95,8 +97,8 @@ budget); this front-loads the same artifact.
   with reason `"marginal — not extracted"` (still recorded as confronted). The exclusion bar can be
   generous, since extraction has real cost.
 - **`[lit:]` reframed:** the `[lit:]` citation token stays, but now resolves to a **pre-extracted
-  library paper-claim** (eager) instead of a lazily authored per-report one. This subsumes the
-  caller-records `sci judge` support loop for external claims.
+  paper-claim in scientist's store** (eager) instead of a lazily authored per-report one. This
+  subsumes the caller-records `sci judge` support loop for external claims.
 
 **Narrative-nuance preservation** (atomizing a paper loses arc, conditionality, emphasis, methods
 qualification, negative space, confidence register). Mitigations — claims are *reversible pins into a
@@ -109,9 +111,13 @@ retained source*:
 Irreducible residual = extractor recall; mitigated by cheap idempotent re-extraction, not eliminated.
 **Rule: never discard the source.**
 
-**Home (open question, §10):** paper-claims are attributed claims about a *library paper*, so they
-plausibly live on the bibliographer side (it owns the PDFs + libkit store) and are consumed by
-scientist reviews — deepening the `bib ↔ sci` coupling already introduced by `--ingest-discover`.
+**Home & storage (resolved).** Extraction is **scientist-side**: it *reads* the PDF from
+bibliographer's library (via the pure-Python readers scientist already has) and *writes* paper-claims
+into **scientist's own store** — never into bib's DB; bib stays a read-only source. Paper-claims live
+alongside internal claims as **grep-able per-paper JSONL files** (one `paper-claims.jsonl` per source
+paper), the canonical source of truth, loaded into memory on demand; a libkit semantic index is
+**optional, derived, and deferred** (added only if measured recall justifies it). Full design in
+[SPEC-litreview-phase2.md](SPEC-litreview-phase2.md).
 
 ---
 
@@ -177,8 +183,9 @@ the query, and rank signals; sets `citekey` from `library_citekey` when `in_libr
 
 ## 5. Layer 3 — the review-node tree (Change B)
 
-- **A review node** = a `kind=report` (literature-scoped) artifact with two layers:
-  - **Skeleton** — ordered references: `[claim:]`/`[lit:]` at leaves, `[review:child_id]` at rollups.
+- **A review node** = a `kind=litreview` node (shares the node-tree machinery with `kind=report`; the
+  kind marks role, not a separate implementation) with two layers:
+  - **Skeleton** — ordered references: `[claim:]`/`[lit:]` at leaves, `[litreview:child_id]` at rollups.
     Structured; the reuse substrate **and** the staleness tripwire.
   - **Synthesis** — authored prose *about the relationships* among the references (agree / outlier /
     conflict / gap). **Stored, not regenerated** — it is irrecoverable judgment.
@@ -236,9 +243,10 @@ knee → `θ`; accuracy-vs-breadth → `ε`; fidelity-across-one-rollup → safe
   `malformed-screening-row`; **coverage cross-check** — every `[lit:]`-cited paper must be an
   `included` row (`cited-paper-unscreened`, blocking); `included-but-uncited` (advisory); funnel
   counts; `--ingest-discover`.
-- **Add (Change B):** `[review:<node_id>]` citation type; per-node audit + render; `sci review render`
-  (tree → linear doc/PDF); per-node staleness (skeleton sha; parent re-rolls iff child summary sha
-  changed); paper-claim extraction/index commands (home TBD, §10).
+- **Add (Change B):** extend `[litreview:<id>]` to target node ids (no new token); per-node audit +
+  render; `sci review render` (tree → linear doc/PDF); per-node staleness (skeleton sha; parent
+  re-rolls iff child summary sha changed); scientist-side paper-claim extraction commands writing
+  per-paper JSONL (no DB on the critical path).
 
 **Enforcement split (resolved — mechanical vs critic).** `sci` enforces only the *objective* tree
 rules, deterministically and offline: node load ≤ **B** (cheap proxy — rendered word/char count, not a
@@ -304,10 +312,10 @@ pin); `scripts/sci.py` (drop `--must-confront`; add `--ingest-discover`); `store
 _store}.py` (must-confront card → funnel counts); `tests/test_litreview.py`; `references/{litreview,
 report,review-audit}.md`.
 
-Change B (Phases 2–3, larger): a **paper-claims** model + extraction + index (home TBD); the
-**`[review:]`** citation type + per-node tree model in `provenance/report.py`; `kind` reconciliation
-(§10); a `sci review render` tree→doc renderer; node sizing/regeneration logic; tree-aware store
-records; substantial new docs (a `references/reviews-tree.md`); the calibration eval harness.
+Change B (Phases 2–3, larger): a **paper-claims** model + scientist-side extractor writing per-paper
+JSONL (no DB); `[litreview:]` extended to node ids + the per-node tree model in `provenance/report.py`;
+a `sci review render` tree→doc renderer; node sizing/regeneration logic; tree-aware records; new docs
+(`references/paper-claims.md`, `references/reviews-tree.md`); the calibration eval harness.
 
 ---
 
@@ -334,7 +342,7 @@ paper-claims layer):
   pin). Ships the breadth/coverage integrity story on the *current* flat review.
 - **Phase 2 — paper-claims layer** (§3). The reuse substrate B needs; valuable on its own (eager
   external claims).
-- **Phase 3 — review-node tree** (§5) + `[review:]` + render + calibration.
+- **Phase 3 — review-node tree** (§5) + `[litreview:]` node-id targets + render + calibration.
 
 **Resolved (folded into the design above):**
 - *Crux* — disconfirmer survival = the conflict-survival invariant (§7): rollups lossy on detail,
@@ -347,12 +355,20 @@ paper-claims layer):
   `screening.jsonl` for v1 (no `--screen` helper); `sci` never calls search APIs (re-discover is
   manual, re-fed via `--ingest-discover`).
 
-**Still open (Phase 2/3 only — do not block Phase 1):**
-1. **`kind` reconciliation.** Current code has `kind=litreview`; an agreed-but-unbuilt `kind=review`
-   exists; Change B says a review node is `kind=report` (literature-scoped). Pick one: review-node =
-   `kind=report` + `literature-scoped` flag (retiring `kind=litreview`), or keep `kind=litreview` as
-   the literature-scoped report kind carrying a node tree. **Load-bearing — decide before Phase 3.**
-2. **paper-claims home** — bibliographer side (owns PDFs/libkit) vs scientist side. Affects which
-   skill grows the extractor. **Decide before Phase 2.**
-3. **`[litreview:]` → `[review:]`** — does the tree's `[review:<node>]` subsume the old `[litreview:]`
-   consumption token (rename + back-compat), or do both coexist? Tied to (1).
+**Resolved (Phase 2/3 architecture — full Phase 2 detail in
+[SPEC-litreview-phase2.md](SPEC-litreview-phase2.md)):**
+- *`kind`* — **keep `kind=litreview`**; review nodes share the node-tree machinery with `kind=report`,
+  `kind` encoding role (neutral/external vs concluding/internal). No rename, no migration.
+- *Citation token* — **no new token**: `[litreview:<id>]` is extended to target node ids (rollups cite
+  children via `[litreview:child]`, a report cites the root via `[litreview:root]`).
+- *paper-claims home* — **scientist-side** extractor reading bib's PDFs, writing **scientist's own
+  store**; bib read-only. No writes to bib's DB.
+- *Storage* — **grep-able per-paper JSONL files** (one `paper-claims.jsonl` per source paper) as the
+  canonical source of truth, loaded into memory on demand; **no libkit DB on the critical path**; a
+  semantic index is optional/derived/deferred, gated on measured recall.
+
+**Still open (Phase 2 detail — see the Phase 2 SPEC):**
+1. **paper-claim file = data record vs pytest spec.** Internal claims are re-runnable pytest specs; an
+   attributed paper-claim's only runnable check is "verbatim quote still matches the locator," so a
+   JSONL data record (with an optional quote-integrity check) is the leaning. Confirm in Phase 2.
+2. **Calibration values** (`B/k/ε/θ`) — pinned by the one-time eval (§5 *Calibration*), not guessed.
