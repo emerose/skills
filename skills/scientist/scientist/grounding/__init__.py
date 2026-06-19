@@ -69,7 +69,7 @@ from .derivation import (Derivation, derivation, DerivationAudit, audit_derivati
 __all__ = [
     "load", "data", "doc", "evidence", "uses", "cross", "record",
     "derivation", "Derivation", "DocRef", "UnsupportedDocFormat", "Capture",
-    "strength", "caveats", "kind", "reviewed", "must_confront",
+    "strength", "caveats", "kind", "reviewed",
     "paper", "source", "converge", "metric", "cited_by", "PaperRef", "LiteratureError",
     "current_capture", "registry", "TRACKED_SUFFIXES",
     "DerivationAudit", "audit_derivations", "current_audit",
@@ -390,17 +390,3 @@ def reviewed(**verdict):
     checkable). A literature claim with no ``@reviewed`` is *needs-review* and does not back a
     ``[lit:]`` citation. Has no effect on non-literature claims."""
     return _marker("reviewed")(**verdict)
-
-
-def must_confront(reason: str):
-    """``@must_confront("why any report here must address this")`` — mark a literature claim as
-    part of a litreview's **must-confront** obligation set: the pivotal, contested, or
-    disconfirming assertions any report citing the litreview must reckon with (cite or explicitly
-    waive). The ``reason`` is one line on *why* a report must address it.
-
-    This is a litreview's most important neutral judgment — made *before and independent of* any
-    thesis, which is what makes the obligation trustworthy. It drives the `[litreview:]` omissions
-    audit and the `stale-litreview` staleness boundary (see references/litreview.md). Metadata
-    only (no effect on the claim's pass/fail); surfaces as ``must_confront`` in the grounding
-    report. Marks the *contested core*, not every on-topic fact."""
-    return _marker("must_confront")(reason)

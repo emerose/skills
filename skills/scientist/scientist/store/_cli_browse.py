@@ -53,8 +53,10 @@ async def cmd_list(store: Store, args: argparse.Namespace) -> None:
             print(f"  [{r.get('scope','?')}] {r.get('report_id')}  {title}")
         elif args.kind == "litreview":
             title = (r.get("title") or r.get("slug") or "").strip().replace("\n", " ")[:80]
-            n = len(r.get("must_confront") or [])
-            print(f"  [{r.get('scope','?')}] {r.get('litreview_id')}  {title}  ({n} must-confront)")
+            funnel = r.get("funnel") or {}
+            inc, idn = funnel.get("included", 0), funnel.get("identified", 0)
+            print(f"  [{r.get('scope','?')}] {r.get('litreview_id')}  {title}  "
+                  f"({inc}/{idn} included)")
         else:
             fc = r.get("file_counts") or {}
             print(f"  {r.get('exp_id')}  {r.get('name') or r.get('title') or ''}"

@@ -102,7 +102,7 @@ def _claim(node="test_x", *, value=202, value2=31, as_of="2026-06", support=True
     reviewed = {"support": support} if support is not None else None
     return {"id": f"program/claims/test_litreview_x.py::{node}", "statement": "S",
             "outcome": outcome, "kind": kind, "strength": "moderate",
-            "reviewed": reviewed, "must_confront": None,
+            "reviewed": reviewed,
             "evidence": {"metric_sources": ms}, "inputs": []}
 
 
