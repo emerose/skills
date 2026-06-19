@@ -148,11 +148,12 @@ stop condition rather than "the author is satisfied"; the soft `advisory` items 
 `incommensurate-evidence` — are surfaced for the author to address or explicitly waive. For the report
 phase this subagent pass is **required** — see [report.md](report.md).
 
-**When a report cites a litreview, two litreview-specific passes sit alongside this one.** The cited
+**When a report cites a litreview, a litreview-specific pass sits alongside this one.** The cited
 litreview (`kind=litreview`) carries its own fresh-context **completeness/fairness critic** (did the
-survey miss a sub-question, mischaracterize a claim, or leave a disconfirmer untagged?), and `sci
-report` runs an **omissions audit** requiring the report to cite-or-`[litreview-waive:]` each
-must-confront claim the litreview marks. Both are distinct from this prose↔claims check — see
+survey miss a sub-question, mischaracterize a claim, or exclude a disconfirmer on a thin pretext?),
+reading the survey's committed `protocol.md` + `screening.jsonl`. `sci report` itself adds only the
+mechanical **protocol-keyed `stale-litreview` pin** (the survey's registered search changed since the
+report pinned it) — there is no omissions gate. Both are distinct from this prose↔claims check — see
 [litreview.md](litreview.md) (and [report.md](report.md) → `[litreview:]`).
 
 ## Structural check
@@ -238,11 +239,11 @@ DAG + drift walk).
 > **`grounding_report.json` is gitignored / regenerable — regenerate, don't backfill.** It is a
 > machine-owned artifact (a pure function of the claims suite), not committed, so a fresh checkout has
 > none. Anything that *reads* one — `sci trace`, `sci report`'s `[claim:]`/`[lit:]`/`[litreview:]`
-> audit, the `[litreview:]` omissions + `stale-litreview` pin — needs it (and the **full transitive
-> tree** of every cited experiment / `[report:]` / `[litreview:]` dep) regenerated first: `pytest
+> audit, the `[litreview:]` `stale-litreview` pin — needs it (and the **full transitive tree** of
+> every cited experiment / `[report:]` / `[litreview:]` dep) regenerated first: `pytest
 > <…>/analysis/claims --grounding-out <…>/analysis`. A missing or stale upstream shows `BROKEN` and
-> **masks downstream results** (e.g. a consuming report's litreview-omissions verdict), so regenerate
-> the tree before trusting an audit — the absence is a regenerate step, never a defect to commit.
+> **masks downstream results** (e.g. a consuming report's `[lit:]` verdicts), so regenerate the tree
+> before trusting an audit — the absence is a regenerate step, never a defect to commit.
 
 - **Terminals.** With a grounding report present (default search: `<exp>/analysis/grounding_report.json`,
   then `<exp>/grounding_report.json`; override with `--report`), each *claim* is a terminal and its cited

@@ -321,36 +321,23 @@ plain-Python `assert`** — no operator DSL; use any predicate (`>`, top-k, rati
   literature claim, the audit prints the pin to stamp when it is unpinned.
 
 A bibliometric claim is third-party (about the published record), so it is litreview-legal — a
-litreview may carry one and tag it `@must_confront` (e.g. "the field's most-cited result is the
-independent disconfirmer, not the single-lab datum").
+litreview may carry one as a grounded `@kind("bibliometric")` claim (e.g. "the field's most-cited
+result is the independent disconfirmer, not the single-lab datum").
 
-#### `[litreview:]` — cite a neutral literature survey (omissions audit + staleness pin)
+#### `[litreview:]` — cite a neutral literature survey (protocol-keyed staleness pin)
 
 A report can ground a whole topic on a **litreview** (`kind=litreview` — a thesis-independent,
 neutral survey of the third-party literature a report argues *from*; the full discipline is in
 [litreview.md](litreview.md)) with **`[litreview:<id>]`**, where `<id>` is `<exp-or-program>::<slug>`
 (almost always `program::<slug>`) or a bare `<slug>`. Unlike `[report:]` it rests on no conclusion —
 it points at the assessed evidence map, and a report carrying `[litreview:X]` cites X's `[lit:]` claims
-directly rather than re-authoring them. `sci report`'s audit adds two report-side checks for it (they
-live in the report audit because they are properties of the *consuming* report):
+directly rather than re-authoring them. The survey's own integrity (its committed PROSPERO/PRISMA
+`protocol.md` + `screening.jsonl`, audited by `sci litreview`) is what guards coverage; `sci report`
+adds exactly **one** report-side check, because it is a property of the *consuming* report:
 
-- **Omissions audit — `unaddressed-must-confront` (blocking).** Each litreview marks a
-  **must-confront** subset: the pivotal/contested/disconfirming claims any honest report in the area
-  must reckon with. A report citing `[litreview:X]` must *address each* must-confront claim of X —
-  either cite it (`[lit:<id>]` anywhere in the report) **or** carry an explicit waiver. The waiver is
-  a one-liner in the assumptions/weak-support section naming the claim and why it does not bear on
-  this report's argument:
-
-  ```markdown
-  - [litreview-waive:test_route_specific_clearance] out of scope — this report addresses the
-    systemic route only, where route-specific clearance does not apply.
-  ```
-
-  A waiver is *address-or-account*, not a silencer (the §3 fresh-context pass adjudicates whether it
-  is honest). An unaddressed must-confront claim is a blocking `unaddressed-must-confront` finding.
-  The audit is scoped to the must-confront set **by design** — not every claim of a broad survey.
 - **`stale-litreview` (blocking) + the `litreview_pins` front matter.** A citing report pins to X's
-  must-confront set plus the X-claims it cites, recorded per litreview in YAML front matter:
+  **registered search method** — a sha over X's `protocol.md` *Search queries* + `as_of` + `sources`,
+  recorded per litreview in YAML front matter:
 
   ```yaml
   litreview_pins:
@@ -358,18 +345,21 @@ live in the report audit because they are properties of the *consuming* report):
   ```
 
   `sci report` computes the *current* pin and surfaces it: an unrecorded pin is a non-blocking nudge
-  (it prints the value to paste in); a recorded pin that no longer matches is the blocking
-  `stale-litreview` — the must-confront set gained/lost a claim, or a cited claim drifted
-  (strength/paraphrase) or was retracted. Re-address, then re-pin. Cosmetic or irrelevant new claims
-  in X never touch the report, so a litreview can be re-swept often without a BROKEN cascade.
+  (it prints the value to paste in, or `--write-pins` writes it); a recorded pin that no longer matches
+  is the blocking `stale-litreview` — X's search was re-run with a changed query, a refreshed `as_of`
+  snapshot, or an added/dropped source, so its coverage may have moved. Re-examine X, then re-pin.
+  Edits elsewhere in X (reworded prose, a new claim, a screening decision) never touch the pin, so a
+  litreview can be re-swept often without a BROKEN cascade. There is **no** mechanical omissions/
+  coverage gate on the report side — that is carried by the survey-side and report-side completeness
+  critics, reading X's screening log (see [litreview.md](litreview.md) → *Consumption*).
 
-> **Prerequisite — both checks need the full transitive grounding tree regenerated first.** They read
-> the grounding reports of everything the report transitively rests on — each cited experiment's
-> `grounding_report.json` and any `[report:]`/`[litreview:]` dependency's. Those files are
-> **gitignored / regenerable** (a fresh checkout has none), so a missing or stale upstream shows
-> `BROKEN` and **masks the litreview omissions result**. Regenerate the whole tree (`pytest …
-> --grounding-out …` per dep — see *Running* above) before reading the omissions/pin output. See
-> [litreview.md](litreview.md) → *Consumption*.
+> **Prerequisite — the pin needs the cited litreview's `protocol.md`, and `[lit:]` resolution needs
+> the full transitive grounding tree regenerated first.** `sci report` reads the grounding reports of
+> everything the report transitively rests on — each cited experiment's `grounding_report.json` and any
+> `[report:]`/`[litreview:]` dependency's. Those files are **gitignored / regenerable** (a fresh
+> checkout has none), so a missing or stale upstream shows `BROKEN` and **masks downstream results**.
+> Regenerate the whole tree (`pytest … --grounding-out …` per dep — see *Running* above) before reading
+> the audit. See [litreview.md](litreview.md) → *Consumption*.
 
 **Importing a single edge-claim from an adjacent scope — flag-and-delegate.** When a report (or
 litreview) needs *one* claim that belongs to a neighbouring scope — e.g. citing an over-side
@@ -380,7 +370,7 @@ home-literature yourself, and the completeness critic stays scoped to *this* rep
 it must not pull the neighbouring literature into scope for a single imported edge-claim.
 
 See [litreview.md](litreview.md) → *Consumption* and *Staleness* for the discipline (the
-must-confront tag, the completeness critic) behind both.
+protocol/screening artifacts, the completeness critic) behind both.
 
 ### Figures & tables — embed a *grounded derivation*, never an ad-hoc graphic
 

@@ -1,19 +1,25 @@
-"""The litreview phase — ``provenance.litreview`` (``sci litreview``) and the ``[litreview:]``
-omissions audit in ``provenance.report``.
+"""The litreview phase — ``provenance.litreview`` (``sci litreview``) and the protocol-keyed
+``stale-litreview`` pin in ``provenance.report``.
 
 A *litreview* (``kind=litreview``) is a neutral, thesis-independent survey of the third-party
-literature on one sub-question. It marks a **must-confront** subset (the pivotal/contested/
-disconfirming claims), and a report that cites it via ``[litreview:<id>]`` must **address** each
-must-confront claim (cite it, or ``[litreview-waive:<id>]`` it) — the omissions audit.
+literature on one sub-question. Phase 1 of the litreview redesign replaces the hand-tagged
+``@must_confront`` obligation set with committed, auditable **PROSPERO/PRISMA** artifacts:
+
+* ``protocol.md`` — pre-registered question/scope/queries/inclusion+exclusion;
+* ``screening.jsonl`` — every candidate tracked to included|excluded(+reason), the PRISMA funnel;
+* a **coverage cross-check** — every ``[lit:]``-cited paper must be an ``included`` screening row;
+
+and the consuming report pins to the survey's **search protocol** (queries + as_of + sources)
+rather than to a must-confront membership set.
 
 Pure: synthetic ``program/`` trees in tmp dirs — a hand-written ``grounding_report.json`` with
-``[lit:]`` claims (some ``must_confront``), a ``review.md``, and a ``report.md``. No keys, no
-libkit store, no paper library, no model.
+``[lit:]`` claims, a ``review.md``, a ``protocol.md``, a ``screening.jsonl``, and a ``report.md``.
+No keys, no libkit store, no paper library, no model.
 """
+from __future__ import annotations
+
 import json
 from pathlib import Path
-
-import pytest
 
 from scientist import grounding
 from scientist.grounding import plugin as PLUGIN
@@ -24,15 +30,15 @@ from scientist.provenance import report as R
 # --------------------------------------------------------------------------- #
 # builders
 # --------------------------------------------------------------------------- #
-def _lit_claim(node: str, *, slug_mod: str, statement: str, must_confront=None,
+def _lit_claim(node: str, *, slug_mod: str, statement: str,
                outcome="passed", strength="moderate", support=True, groups=2) -> dict:
-    """A literature claim record shaped like the plugin emits (legacy @reviewed path)."""
+    """A literature claim record shaped like the plugin emits (legacy @reviewed path). Its single
+    source carries citekey ``<node>2020`` — the unit the coverage cross-check matches on."""
     return {
         "id": f"program/claims/test_litreview_{slug_mod}.py::{node}",
         "statement": statement,
         "outcome": outcome, "kind": "literature", "strength": strength, "caveats": None,
         "reviewed": {"support": support, "primary": True, "independent_groups": groups},
-        "must_confront": must_confront,
         "evidence": {"lit_sources": [
             {"citekey": f"{node}2020", "quote": "q", "primary": True, "group": node}]},
         "inputs": [], "reconcile": [],
@@ -40,17 +46,16 @@ def _lit_claim(node: str, *, slug_mod: str, statement: str, must_confront=None,
 
 
 def _program(tmp_path: Path, slug: str = "it-biodist") -> Path:
-    """A program/ tree: a grounding report with two must-confront [lit:] claims + one ordinary
-    claim, and a litreview folder. ``slug`` is hyphenated; the claim module underscores it."""
+    """A program/ tree: a grounding report with three [lit:] claims (citekeys floor2020 /
+    ceiling2020 / minor2020) and a litreview folder. ``slug`` is hyphenated; the module underscores
+    it. The protocol.md + screening.jsonl are laid down separately (so a test can omit/break one)."""
     mod = slug.replace("-", "_")
     prog = tmp_path / "program"
     (prog / "analysis").mkdir(parents=True, exist_ok=True)
     (prog / "litreviews" / slug).mkdir(parents=True, exist_ok=True)
     claims = [
-        _lit_claim("test_floor", slug_mod=mod, statement="~50% loss is tolerated prenatally",
-                   must_confront="any dosing report must address the tolerated ~50% loss"),
-        _lit_claim("test_ceiling", slug_mod=mod, statement="reciprocal dosing makes WT the optimum",
-                   must_confront="the over-knockdown ceiling rests on this"),
+        _lit_claim("test_floor", slug_mod=mod, statement="~50% loss is tolerated prenatally"),
+        _lit_claim("test_ceiling", slug_mod=mod, statement="reciprocal dosing makes WT the optimum"),
         _lit_claim("test_minor", slug_mod=mod, statement="a minor corroborating detail"),
     ]
     (prog / "analysis" / "grounding_report.json").write_text(
@@ -64,12 +69,46 @@ def _review_md(prog: Path, slug: str, body: str) -> Path:
     return md
 
 
-def _report_md(prog: Path, body: str, slug: str = "dosing") -> Path:
-    d = prog / "reports" / slug
-    d.mkdir(parents=True, exist_ok=True)
-    md = d / "report.md"
-    md.write_text(body, encoding="utf-8")
-    return md
+def _write_protocol(prog: Path, slug: str = "it-biodist", *, as_of="2026-06-19",
+                    sources=("openalex", "pubmed"),
+                    queries="ASO biodistribution CNS lumbar",
+                    inclusion="Primary biodistribution data in mammals.",
+                    drop_field: str | None = None, drop_heading: str | None = None) -> Path:
+    """Write protocol.md beside review.md. ``drop_field`` omits a front-matter key;
+    ``drop_heading`` empties one of the four required sections."""
+    fm_lines = [f"slug: {slug}", f'as_of: "{as_of}"', f"sources: {json.dumps(list(sources))}"]
+    fm_lines = [ln for ln in fm_lines if not (drop_field and ln.startswith(f"{drop_field}:"))]
+    secs = {
+        "Question & scope": "How a lumbar ASO distributes across the CNS.",
+        "Search queries": queries,
+        "Inclusion criteria": inclusion,
+        "Exclusion criteria": "Reviews; modeling-only; no primary data.",
+    }
+    body = "---\n" + "\n".join(fm_lines) + "\n---\n\n"
+    for heading, text in secs.items():
+        body += f"## {heading}\n" + ("" if heading == drop_heading else text) + "\n\n"
+    p = prog / "litreviews" / slug / "protocol.md"
+    p.write_text(body, encoding="utf-8")
+    return p
+
+
+_DEFAULT_SCREEN = [
+    {"id": "doi:10.1/floor", "title": "Floor", "year": 2015, "source": ["openalex"],
+     "query": "q", "decision": "included", "citekey": "test_floor2020"},
+    {"id": "doi:10.1/ceiling", "title": "Ceiling", "year": 2016, "source": ["pubmed"],
+     "query": "q", "decision": "included", "citekey": "test_ceiling2020"},
+    {"id": "doi:10.1/minor", "title": "Minor", "year": 2017, "source": ["openalex"],
+     "query": "q", "decision": "included", "citekey": "test_minor2020"},
+    {"id": "arxiv:2401.0001", "title": "Off-topic", "year": 2024, "source": ["arxiv"],
+     "query": "q", "decision": "excluded", "reason": "review only — no primary biodistribution data"},
+]
+
+
+def _write_screening(prog: Path, slug: str = "it-biodist", rows=None) -> Path:
+    rows = _DEFAULT_SCREEN if rows is None else rows
+    p = prog / "litreviews" / slug / "screening.jsonl"
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return p
 
 
 _GOOD_REVIEW = """---
@@ -91,180 +130,339 @@ Human region-to-region ratios are unmeasured.
 """
 
 
-# --------------------------------------------------------------------------- #
-# the @must_confront marker
-# --------------------------------------------------------------------------- #
-def test_must_confront_marker_is_registered_and_exported():
-    assert "must_confront" in grounding.__all__
-    assert callable(grounding.must_confront)
-    assert "must_confront" in PLUGIN._MARKERS
+def _full_litreview(tmp_path: Path, slug: str = "it-biodist", body: str = _GOOD_REVIEW) -> Path:
+    """A complete, GROUNDED-by-default litreview: grounding report + review + protocol + screening."""
+    prog = _program(tmp_path, slug)
+    review = _review_md(prog, slug, body)
+    _write_protocol(prog, slug)
+    _write_screening(prog, slug)
+    return review
 
 
-def test_must_confront_marker_flows_into_grounding_report(tmp_path):
-    """End-to-end: a @must_confront-decorated claim emits a ``must_confront`` field. Run in a
-    subprocess so the grounding plugin (auto-loaded via its pytest11 entry point) emits the report
-    without colliding with the outer session's already-registered plugin."""
-    import subprocess
-    import sys
-
-    claims = tmp_path / "claims"
-    claims.mkdir()
-    (claims / "test_litreview_demo.py").write_text(
-        "from scientist.grounding import kind, must_confront\n"
-        "@kind('literature')\n"
-        "@must_confront('a report here must address this')\n"
-        "def test_pivotal():\n"
-        "    '''a pivotal fact'''\n"
-        "    assert True\n", encoding="utf-8")
-    out = tmp_path / "out"
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", str(claims), "--grounding-out", str(out)],
-        capture_output=True, text=True)
-    report = out / "grounding_report.json"
-    if not report.is_file():
-        pytest.skip(f"grounding plugin not active in subprocess (entry point not installed):\n"
-                    f"{proc.stdout}\n{proc.stderr}")
-    data = json.loads(report.read_text(encoding="utf-8"))
-    rec = next(c for c in data["claims"] if c["id"].endswith("::test_pivotal"))
-    assert rec["must_confront"] == "a report here must address this"
+def _report_md(prog: Path, body: str, slug: str = "dosing") -> Path:
+    d = prog / "reports" / slug
+    d.mkdir(parents=True, exist_ok=True)
+    md = d / "report.md"
+    md.write_text(body, encoding="utf-8")
+    return md
 
 
 # --------------------------------------------------------------------------- #
-# litreview.audit — the artifact's own contract
+# the @must_confront marker is GONE
+# --------------------------------------------------------------------------- #
+def test_must_confront_marker_is_removed():
+    assert "must_confront" not in grounding.__all__
+    assert not hasattr(grounding, "must_confront")
+    assert "must_confront" not in PLUGIN._MARKERS
+
+
+# --------------------------------------------------------------------------- #
+# litreview.audit — the artifact's own contract (happy path)
 # --------------------------------------------------------------------------- #
 def test_litreview_audit_grounded(tmp_path):
-    prog = _program(tmp_path)
-    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    review = _full_litreview(tmp_path)
     res = LR.audit(review, home=tmp_path)
     assert res["status"] == "GROUNDED", res["findings"]
     assert res["kind"] == "litreview"
-    assert sorted(R._short_claim_id(c) for c in res["must_confront"]) == \
-        ["program::ceiling", "program::floor"]
+    assert res["protocol_present"] is True
     assert res["contested_status_addressed"] is True
-
-
-def test_contested_status_satisfied_by_no_controversy_finding(tmp_path):
-    """An explicit 'no two-camp controversy; the fault line is single-lab dependence' discussion
-    addresses contested status just as competing accounts do — and it is never blocking."""
-    prog = _program(tmp_path)
-    body = _GOOD_REVIEW.replace(
-        "## Controversies / unresolved\nLab A and Lab B disagree on the deep-brain ratio [lit:test_floor].",
-        "## Convergence & dependence\nThere is no genuine two-camp split here; the evidence "
-        "converges, and the real fault line is single-lab dependence [lit:test_floor].")
-    review = _review_md(prog, "it-biodist", body)
-    res = LR.audit(review, home=tmp_path)
-    assert res["status"] == "GROUNDED", res["findings"]
-    assert res["contested_status_addressed"] is True
-
-
-def test_contested_status_not_satisfied_by_heading_alone(tmp_path):
-    """A 'Controversies' *heading* with no contested discussion under it must NOT count — content,
-    not a title. Still GROUNDED (the check is advisory, never blocking)."""
-    prog = _program(tmp_path)
-    body = _GOOD_REVIEW.replace(
-        "## Controversies / unresolved\nLab A and Lab B disagree on the deep-brain ratio [lit:test_floor].",
-        "## Controversies\nThe cord sees the most drug at the lumbar level [lit:test_floor].")
-    review = _review_md(prog, "it-biodist", body)
-    res = LR.audit(review, home=tmp_path)
-    assert res["status"] == "GROUNDED", res["findings"]
-    assert res["contested_status_addressed"] is False
+    assert res["funnel"] == {"identified": 4, "included": 3, "excluded": 1, "pending": 0,
+                             "excluded_by_reason": {"review only — no primary biodistribution data": 1}}
 
 
 def test_litreview_audit_missing_gaps_section_is_broken(tmp_path):
-    prog = _program(tmp_path)
-    body = _GOOD_REVIEW.replace("## Gaps / open questions\nHuman region-to-region ratios are unmeasured.", "")
-    review = _review_md(prog, "it-biodist", body)
+    review = _full_litreview(tmp_path, body=_GOOD_REVIEW.replace(
+        "## Gaps / open questions\nHuman region-to-region ratios are unmeasured.", ""))
     res = LR.audit(review, home=tmp_path)
     assert res["status"] == "BROKEN"
     assert any(f["kind"] == "missing-gaps-section" for f in res["findings"])
 
 
 def test_litreview_audit_rejects_kicho_data(tmp_path):
-    prog = _program(tmp_path)
-    body = _GOOD_REVIEW.replace("[lit:test_minor]", "[claim:test_minor]")
-    review = _review_md(prog, "it-biodist", body)
+    review = _full_litreview(tmp_path, body=_GOOD_REVIEW.replace("[lit:test_minor]", "[claim:test_minor]"))
     res = LR.audit(review, home=tmp_path)
     assert res["status"] == "BROKEN"
     assert any(f["kind"] == "kicho-data-in-litreview" for f in res["findings"])
 
 
-def test_litreview_audit_empty_must_confront_is_advisory(tmp_path):
-    prog = _program(tmp_path, slug="uncontested")
-    # claims module has no must_confront → strip the tags by rewriting the grounding report.
-    gr = prog / "analysis" / "grounding_report.json"
-    data = json.loads(gr.read_text())
-    for c in data["claims"]:
-        c["must_confront"] = None
-    gr.write_text(json.dumps(data), encoding="utf-8")
-    review = _review_md(prog, "uncontested", _GOOD_REVIEW)
-    res = LR.audit(review, home=tmp_path)
-    assert res["status"] == "GROUNDED"          # empty set does NOT block
-    assert any(a["kind"] == "empty-must-confront" for a in res["advisories"])
-
-
-def test_must_confront_listing(tmp_path):
+# --------------------------------------------------------------------------- #
+# protocol.md validation
+# --------------------------------------------------------------------------- #
+def test_missing_protocol_is_blocking(tmp_path):
     prog = _program(tmp_path)
     review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    listing = LR.must_confront_listing(review, home=tmp_path)
-    assert {R._short_claim_id(m["claim_id"]) for m in listing} == \
-        {"program::floor", "program::ceiling"}
-    assert all(m["reason"] for m in listing)
-
-
-# --------------------------------------------------------------------------- #
-# the [litreview:] omissions audit (in provenance.report)
-# --------------------------------------------------------------------------- #
-def test_omissions_audit_blocks_unaddressed_must_confront(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    # A report that cites the litreview but addresses NEITHER must-confront claim.
-    report = _report_md(prog, """---
-title: "Dosing"
----
-## Argument
-We rely on the IT biodistribution survey [litreview:program::it-biodist] but cite nothing from it.
-""")
-    res = R.audit(report, home=tmp_path)
+    _write_screening(prog)                                  # screening present, protocol absent
+    res = LR.audit(review, home=tmp_path)
     assert res["status"] == "BROKEN"
-    unaddressed = [f for f in res["findings"] if f["kind"] == "unaddressed-must-confront"]
-    assert len(unaddressed) == 2
+    assert any(f["kind"] == "missing-protocol" for f in res["findings"])
+    assert res["protocol_present"] is False
+
+
+def test_missing_protocol_front_matter_field_is_blocking(tmp_path):
+    prog = _program(tmp_path)
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    _write_screening(prog)
+    _write_protocol(prog, drop_field="sources")
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "BROKEN"
+    bad = [f for f in res["findings"] if f["kind"] == "missing-protocol-field"]
+    assert len(bad) == 1 and bad[0]["field"] == "sources"
+
+
+def test_empty_sources_list_is_blocking(tmp_path):
+    prog = _program(tmp_path)
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    _write_screening(prog)
+    _write_protocol(prog, sources=())                       # sources: []
+    res = LR.audit(review, home=tmp_path)
+    assert any(f["kind"] == "missing-protocol-field" and f["field"] == "sources"
+               for f in res["findings"])
+
+
+def test_missing_protocol_heading_is_blocking(tmp_path):
+    prog = _program(tmp_path)
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    _write_screening(prog)
+    _write_protocol(prog, drop_heading="Inclusion criteria")
+    res = LR.audit(review, home=tmp_path)
+    bad = [f for f in res["findings"] if f["kind"] == "missing-protocol-field"]
+    assert len(bad) == 1 and bad[0]["field"] == "Inclusion criteria"
+
+
+# --------------------------------------------------------------------------- #
+# screening.jsonl parse + the PRISMA funnel
+# --------------------------------------------------------------------------- #
+def test_missing_screening_is_blocking(tmp_path):
+    prog = _program(tmp_path)
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    _write_protocol(prog)                                   # protocol present, screening absent
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert any(f["kind"] == "missing-screening" for f in res["findings"])
+
+
+def test_malformed_screening_row_is_blocking(tmp_path):
+    prog = _program(tmp_path)
+    _write_protocol(prog)
+    p = prog / "litreviews" / "it-biodist" / "screening.jsonl"
+    # a valid included row, then a junk line, then an id-less row.
+    p.write_text(json.dumps(_DEFAULT_SCREEN[0]) + "\n"
+                 + "{not json}\n"
+                 + json.dumps({"title": "no id", "decision": "included"}) + "\n",
+                 encoding="utf-8")
+    rows, findings = LR.parse_screening(p)
+    kinds = [f["kind"] for f in findings]
+    assert kinds.count("malformed-screening-row") == 2     # junk line + id-less row
+    assert len(rows) == 1                                   # only the valid row survives
+
+
+def test_excluded_without_reason_is_blocking(tmp_path):
+    rows = [{"id": "doi:10.1/x", "decision": "excluded"}]   # no reason
+    _, findings = LR.parse_screening(_screening_file(tmp_path, rows))
+    assert any(f["kind"] == "excluded-without-reason" for f in findings)
+
+
+def test_included_without_citekey_is_malformed(tmp_path):
+    rows = [{"id": "doi:10.1/x", "decision": "included"}]   # no citekey
+    _, findings = LR.parse_screening(_screening_file(tmp_path, rows))
+    assert any(f["kind"] == "malformed-screening-row" for f in findings)
+
+
+def test_pending_row_is_not_a_finding(tmp_path):
+    rows = [{"id": "doi:10.1/x", "title": "pending"}]       # decision unset
+    parsed, findings = LR.parse_screening(_screening_file(tmp_path, rows))
+    assert findings == []
+    funnel = LR.prisma_funnel(parsed)
+    assert funnel == {"identified": 1, "included": 0, "excluded": 0, "pending": 1,
+                      "excluded_by_reason": {}}
+
+
+def test_prisma_funnel_groups_exclusions_by_reason():
+    rows = [
+        {"id": "a", "decision": "included", "citekey": "a2020"},
+        {"id": "b", "decision": "excluded", "reason": "review only"},
+        {"id": "c", "decision": "excluded", "reason": "review only"},
+        {"id": "d", "decision": "excluded", "reason": "wrong species"},
+    ]
+    funnel = LR.prisma_funnel(rows)
+    assert funnel["identified"] == 4 and funnel["included"] == 1 and funnel["excluded"] == 3
+    assert funnel["excluded_by_reason"] == {"review only": 2, "wrong species": 1}
+
+
+def _screening_file(tmp_path: Path, rows) -> Path:
+    p = tmp_path / "screening.jsonl"
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return p
+
+
+# --------------------------------------------------------------------------- #
+# the coverage cross-check (the integrity core)
+# --------------------------------------------------------------------------- #
+def test_cited_paper_unscreened_is_blocking(tmp_path):
+    """A [lit:]-cited paper (minor2020) that is not an `included` screening row blocks."""
+    prog = _program(tmp_path)
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    _write_protocol(prog)
+    # screen in floor + ceiling only; minor is cited but never screened in.
+    _write_screening(prog, rows=_DEFAULT_SCREEN[:2])
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "BROKEN"
+    unscreened = [f for f in res["findings"] if f["kind"] == "cited-paper-unscreened"]
+    assert len(unscreened) == 1 and unscreened[0]["cite"] == "test_minor2020"
+
+
+def test_included_but_uncited_is_advisory(tmp_path):
+    prog = _program(tmp_path)
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    _write_protocol(prog)
+    rows = _DEFAULT_SCREEN + [
+        {"id": "doi:10.1/extra", "decision": "included", "citekey": "extra2020"}]
+    _write_screening(prog, rows=rows)
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "GROUNDED", res["findings"]     # advisory does NOT block
+    adv = [a for a in res["advisories"] if a["kind"] == "included-but-uncited"]
+    assert len(adv) == 1 and adv[0]["cites"] == ["extra2020"]
+
+
+# --------------------------------------------------------------------------- #
+# --ingest-discover — map `bib discover --json` into screening.jsonl
+# --------------------------------------------------------------------------- #
+_DISCOVER = {
+    "query": "ASO CNS biodistribution",
+    "sources": {"openalex": 2, "semantic-scholar": 1},
+    "results": [
+        {"title": "Silva-Santos 2015", "year": 2015, "authors": "Silva-Santos", "venue": "J",
+         "doi": "10.1234/abc", "found_in": ["openalex", "pubmed"],
+         "citation_percentile": 99.2, "fwci": 3.4, "cited_by_count": 120,
+         "in_library": True, "library_citekey": "silvasantos2015"},
+        {"title": "Preprint", "year": 2024, "authors": "Y", "venue": "arXiv",
+         "arxiv_id": "2401.00001", "found_in": ["semantic-scholar"], "in_library": False},
+        {"title": "No identifier", "year": 2020, "authors": "Z", "venue": "K",
+         "found_in": ["crossref"]},
+    ],
+}
+
+
+def test_ingest_discover_maps_and_dedupes(tmp_path):
+    review = _full_litreview(tmp_path)
+    # start from an empty screening so the mapping is unambiguous.
+    (tmp_path / "program/litreviews/it-biodist/screening.jsonl").write_text("", encoding="utf-8")
+    disc = tmp_path / "discover.json"
+    disc.write_text(json.dumps(_DISCOVER), encoding="utf-8")
+
+    res = LR.ingest_discover(review, disc, home=tmp_path)
+    assert res["appended"] == 2 and res["skipped_no_id"] == 1 and res["skipped_duplicate"] == 0
+
+    rows, findings = LR.parse_screening(tmp_path / "program/litreviews/it-biodist/screening.jsonl")
+    assert findings == []                                   # pending rows are not findings
+    by_id = {r["id"]: r for r in rows}
+    a = by_id["doi:10.1234/abc"]
+    assert a["source"] == ["openalex", "pubmed"]            # found_in → source
+    assert a["query"] == "ASO CNS biodistribution"          # from the payload
+    assert a["citation_percentile"] == 99.2 and a["fwci"] == 3.4 and a["cited_by_count"] == 120
+    assert a["citekey"] == "silvasantos2015"                # library_citekey (in_library)
+    assert "decision" not in a                              # unset — the author screens by hand
+    b = by_id["arxiv:2401.00001"]
+    assert "citekey" not in b                               # not in library
+
+    # re-ingesting the same payload appends nothing (de-duped by id).
+    res2 = LR.ingest_discover(review, disc, home=tmp_path)
+    assert res2["appended"] == 0 and res2["skipped_duplicate"] == 2
+
+
+def test_ingest_discover_query_override(tmp_path):
+    review = _full_litreview(tmp_path)
+    (tmp_path / "program/litreviews/it-biodist/screening.jsonl").write_text("", encoding="utf-8")
+    disc = tmp_path / "discover.json"
+    disc.write_text(json.dumps(_DISCOVER), encoding="utf-8")
+    LR.ingest_discover(review, disc, home=tmp_path, query="my explicit query")
+    rows, _ = LR.parse_screening(tmp_path / "program/litreviews/it-biodist/screening.jsonl")
+    assert all(r.get("query") == "my explicit query" for r in rows)
+
+
+# --------------------------------------------------------------------------- #
+# protocol-keyed staleness pin (in provenance.report)
+# --------------------------------------------------------------------------- #
+def _dosing_report(prog: Path, pin: str | None = None, slug: str = "dosing") -> Path:
+    fm = '---\ntitle: "Dosing"\n'
+    if pin is not None:
+        fm += f'litreview_pins:\n  program::it-biodist: "{pin}"\n'
+    fm += "---\n"
+    body = fm + ("## Argument\nPer the survey [litreview:program::it-biodist], ~50% loss is "
+                 "tolerated [lit:test_floor].\n")
+    return _report_md(prog, body, slug=slug)
+
+
+def test_litreview_pin_unrecorded_is_advisory(tmp_path):
+    _full_litreview(tmp_path)
+    prog = tmp_path / "program"
+    res = R.audit(_dosing_report(prog), home=tmp_path)
+    assert res["status"] == "GROUNDED", res["findings"]     # unpinned does NOT block
     lrc = res["litreview_cites"][0]
-    assert lrc["verdict"] == "unaddressed-must-confront"
-    assert len(lrc["unaddressed"]) == 2
+    assert lrc["verdict"] == "backed"
+    assert lrc.get("pin_unrecorded") is True
+    assert len(lrc["pin"]) == 12
 
 
-def test_omissions_audit_satisfied_by_citing_each(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    report = _report_md(prog, """---
-title: "Dosing"
----
-## Argument
-Per the survey [litreview:program::it-biodist], ~50% loss is tolerated [lit:test_floor] and
-reciprocal dosing sets the optimum [lit:test_ceiling].
-""")
-    res = R.audit(report, home=tmp_path)
+def test_litreview_pin_recorded_is_clean(tmp_path):
+    _full_litreview(tmp_path)
+    prog = tmp_path / "program"
+    pin = R.audit(_dosing_report(prog), home=tmp_path)["litreview_cites"][0]["pin"]
+    res = R.audit(_dosing_report(prog, pin=pin), home=tmp_path)
     assert res["status"] == "GROUNDED", res["findings"]
-    assert res["litreview_cites"][0]["verdict"] == "backed"
+    lrc = res["litreview_cites"][0]
+    assert lrc["verdict"] == "backed"
+    assert not lrc.get("pin_unrecorded")
 
 
-def test_omissions_audit_satisfied_by_waiver(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    report = _report_md(prog, """---
-title: "Dosing"
----
-## Argument
-Per the survey [litreview:program::it-biodist], ~50% loss is tolerated [lit:test_floor].
+def test_stale_litreview_on_query_change(tmp_path):
+    _full_litreview(tmp_path)
+    prog = tmp_path / "program"
+    pin = R.audit(_dosing_report(prog), home=tmp_path)["litreview_cites"][0]["pin"]
+    _dosing_report(prog, pin=pin)
+    _write_protocol(prog, queries="ASO biodistribution CNS lumbar AND deep-brain ratio")  # new query
+    res = R.audit(prog / "reports" / "dosing" / "report.md", home=tmp_path)
+    assert res["status"] == "BROKEN"
+    assert any(f["kind"] == "stale-litreview" for f in res["findings"])
+    assert res["litreview_cites"][0]["verdict"] == "stale-litreview"
 
-## Assumptions
-- [litreview-waive:test_ceiling] out of scope — this report does not bound the over-knockdown ceiling.
-""")
-    res = R.audit(report, home=tmp_path)
+
+def test_stale_litreview_on_asof_change(tmp_path):
+    _full_litreview(tmp_path)
+    prog = tmp_path / "program"
+    pin = R.audit(_dosing_report(prog), home=tmp_path)["litreview_cites"][0]["pin"]
+    _dosing_report(prog, pin=pin)
+    _write_protocol(prog, as_of="2026-12-31")               # refreshed snapshot
+    res = R.audit(prog / "reports" / "dosing" / "report.md", home=tmp_path)
+    assert any(f["kind"] == "stale-litreview" for f in res["findings"])
+
+
+def test_stale_litreview_on_sources_change(tmp_path):
+    _full_litreview(tmp_path)
+    prog = tmp_path / "program"
+    pin = R.audit(_dosing_report(prog), home=tmp_path)["litreview_cites"][0]["pin"]
+    _dosing_report(prog, pin=pin)
+    _write_protocol(prog, sources=("openalex", "pubmed", "crossref"))  # added a source
+    res = R.audit(prog / "reports" / "dosing" / "report.md", home=tmp_path)
+    assert any(f["kind"] == "stale-litreview" for f in res["findings"])
+
+
+def test_non_protocol_change_does_not_stale(tmp_path):
+    """Editing the review prose or a non-pinned protocol section (Inclusion criteria) does not
+    move the protocol pin — the survey can grow without a BROKEN cascade on consuming reports."""
+    review = _full_litreview(tmp_path)
+    prog = tmp_path / "program"
+    pin = R.audit(_dosing_report(prog), home=tmp_path)["litreview_cites"][0]["pin"]
+    _dosing_report(prog, pin=pin)
+    review.write_text(review.read_text() + "\n\nA new non-pivotal paragraph [lit:test_minor].\n",
+                      encoding="utf-8")
+    _write_protocol(prog, inclusion="Primary biodistribution data; any mammalian model.")
+    res = R.audit(prog / "reports" / "dosing" / "report.md", home=tmp_path)
     assert res["status"] == "GROUNDED", res["findings"]
+    assert not any(f["kind"] == "stale-litreview" for f in res["findings"])
 
 
-def test_omissions_audit_missing_litreview(tmp_path):
+def test_missing_litreview_still_blocks(tmp_path):
     prog = _program(tmp_path)
     report = _report_md(prog, """---
 title: "Dosing"
@@ -277,149 +475,41 @@ Citing a survey that doesn't exist [litreview:program::nonexistent].
     assert any(f["kind"] == "missing-litreview" for f in res["findings"])
 
 
-def test_omissions_audit_fails_closed_on_misnamed_module(tmp_path):
-    """A report that cites a litreview whose claim module is misnamed (contributes zero claims)
-    must FAIL CLOSED: the must-confront set is empty for the wrong reason, so the omissions audit
-    would otherwise silently pass. Parallel to litreview.audit's own guard."""
-    prog = _program(tmp_path, slug="it-biodist")  # claims live under test_litreview_it_biodist.py
-    # a litreview folder whose slug doesn't match the claim-module name → expected module
-    # test_litreview_it_biodist_typo.py contributes nothing.
-    (prog / "litreviews" / "it-biodist-typo").mkdir(parents=True, exist_ok=True)
-    _review_md(prog, "it-biodist-typo", _GOOD_REVIEW)
-    report = _report_md(prog, """---
-title: "Dosing"
----
-## Argument
-Per the survey [litreview:program::it-biodist-typo], loss is tolerated [lit:test_floor].
-""")
-    res = R.audit(report, home=tmp_path)
-    assert res["status"] == "BROKEN"
-    mm = [f for f in res["findings"] if f["kind"] == "missing-claims-module"]
-    assert len(mm) == 1
-    assert "silently pass" in mm[0]["detail"]
-    assert "test_litreview_it_biodist_typo.py" in mm[0]["detail"]
-    assert res["litreview_cites"][0]["verdict"] == "missing-claims-module"
-
-
-def test_omissions_audit_correctly_named_module_not_flagged(tmp_path):
-    """The guard does not false-positive on the happy path: a correctly-named module with claims
-    raises no missing-claims-module finding."""
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    report = _report_md(prog, """---
-title: "Dosing"
----
-## Argument
-Per the survey [litreview:program::it-biodist], ~50% loss is tolerated [lit:test_floor] and
-reciprocal dosing sets the optimum [lit:test_ceiling].
-""")
-    res = R.audit(report, home=tmp_path)
-    assert res["status"] == "GROUNDED", res["findings"]
-    assert not any(f["kind"] == "missing-claims-module" for f in res["findings"])
-
-
-def _dosing_report(prog: Path, pin: str | None = None, slug: str = "dosing") -> Path:
-    """A report that cites the litreview and addresses both must-confront claims, optionally with a
-    recorded ``litreview_pins`` front-matter stamp."""
-    fm = '---\ntitle: "Dosing"\n'
-    if pin is not None:
-        fm += f'litreview_pins:\n  program::it-biodist: "{pin}"\n'
-    fm += "---\n"
-    body = fm + ("## Argument\nPer the survey [litreview:program::it-biodist], ~50% loss is "
-                 "tolerated [lit:test_floor] and reciprocal dosing sets the optimum [lit:test_ceiling].\n")
-    return _report_md(prog, body, slug=slug)
-
-
-def _set_strength(prog: Path, node: str, strength: str) -> None:
-    gr = prog / "analysis" / "grounding_report.json"
-    data = json.loads(gr.read_text(encoding="utf-8"))
-    for c in data["claims"]:
-        if c["id"].endswith(f"::{node}"):
-            c["strength"] = strength
-    gr.write_text(json.dumps(data), encoding="utf-8")
-
-
 # --------------------------------------------------------------------------- #
-# staleness pin
+# --write-pins (mechanize the manual paste) — now protocol-keyed
 # --------------------------------------------------------------------------- #
-def test_litreview_pin_unrecorded_is_advisory(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    res = R.audit(_dosing_report(prog), home=tmp_path)
-    assert res["status"] == "GROUNDED", res["findings"]        # unpinned does NOT block
+def test_write_litreview_pins_records_surfaced_pin(tmp_path):
+    _full_litreview(tmp_path)
+    prog = tmp_path / "program"
+    report = _dosing_report(prog)
+    res = R.audit(report, home=tmp_path)
     lrc = res["litreview_cites"][0]
     assert lrc.get("pin_unrecorded") is True
-    assert len(lrc["pin"]) == 12
-
-
-def test_litreview_pin_recorded_is_clean(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    pin = R.audit(_dosing_report(prog), home=tmp_path)["litreview_cites"][0]["pin"]
-    res = R.audit(_dosing_report(prog, pin=pin), home=tmp_path)
-    assert res["status"] == "GROUNDED", res["findings"]
-    lrc = res["litreview_cites"][0]
-    assert lrc["verdict"] == "backed"
-    assert not lrc.get("pin_unrecorded")
-
-
-def test_stale_litreview_on_cited_claim_drift(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    pin = R.audit(_dosing_report(prog), home=tmp_path)["litreview_cites"][0]["pin"]
-    _dosing_report(prog, pin=pin)
-    _set_strength(prog, "test_floor", "weak")                  # drift a CITED claim
-    res = R.audit(prog / "reports" / "dosing" / "report.md", home=tmp_path)
-    assert res["status"] == "BROKEN"
-    assert any(f["kind"] == "stale-litreview" for f in res["findings"])
-    assert res["litreview_cites"][0]["verdict"] == "stale-litreview"
-
-
-def test_stale_litreview_on_must_confront_membership_change(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    pin = R.audit(_dosing_report(prog), home=tmp_path)["litreview_cites"][0]["pin"]
-    _dosing_report(prog, pin=pin)
-    # un-tag a must-confront claim → the obligation set membership changes → pin drifts.
-    gr = prog / "analysis" / "grounding_report.json"
-    data = json.loads(gr.read_text(encoding="utf-8"))
-    for c in data["claims"]:
-        if c["id"].endswith("::test_ceiling"):
-            c["must_confront"] = None
-    gr.write_text(json.dumps(data), encoding="utf-8")
-    res = R.audit(prog / "reports" / "dosing" / "report.md", home=tmp_path)
-    assert any(f["kind"] == "stale-litreview" for f in res["findings"])
-
-
-def test_noncited_nonmustconfront_change_does_not_stale(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    pin = R.audit(_dosing_report(prog), home=tmp_path)["litreview_cites"][0]["pin"]
-    _dosing_report(prog, pin=pin)
-    _set_strength(prog, "test_minor", "weak")                  # not cited, not must-confront
-    res = R.audit(prog / "reports" / "dosing" / "report.md", home=tmp_path)
-    assert res["status"] == "GROUNDED", res["findings"]
-    assert not any(f["kind"] == "stale-litreview" for f in res["findings"])
+    R.write_litreview_pins(report, {lrc["id"]: lrc["pin"]})
+    pins = R.litreview_pins(report.read_text())
+    assert pins[lrc["id"]] == lrc["pin"]
+    res2 = R.audit(report, home=tmp_path)
+    lrc2 = res2["litreview_cites"][0]
+    assert res2["status"] == "GROUNDED"
+    assert lrc2["verdict"] == "backed" and not lrc2.get("pin_unrecorded")
 
 
 # --------------------------------------------------------------------------- #
-# --delta (cheap-update claim-set diff)
+# --delta (cheap-update claim-set diff) — must_confront fields gone
 # --------------------------------------------------------------------------- #
 def test_delta(tmp_path):
-    prog = _program(tmp_path)
-    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    review = _full_litreview(tmp_path)
+    prog = tmp_path / "program"
     gr = prog / "analysis" / "grounding_report.json"
     baseline = tmp_path / "baseline.json"
     baseline.write_text(gr.read_text(encoding="utf-8"), encoding="utf-8")
-    # Mutate current: add a new must-confront claim, drift floor's strength, un-tag ceiling.
+    # Mutate current: add a new claim, drift floor's strength.
     data = json.loads(gr.read_text(encoding="utf-8"))
     data["claims"].append(_lit_claim("test_new", slug_mod="it_biodist",
-                                     statement="a new pivotal finding", must_confront="new pivotal"))
+                                     statement="a new finding"))
     for c in data["claims"]:
         if c["id"].endswith("::test_floor"):
             c["strength"] = "weak"
-        if c["id"].endswith("::test_ceiling"):
-            c["must_confront"] = None
     gr.write_text(json.dumps(data), encoding="utf-8")
 
     d = LR.delta(review, baseline, home=tmp_path)
@@ -427,13 +517,12 @@ def test_delta(tmp_path):
     assert short(d["added"]) == {"program::new"}
     assert d["removed"] == []
     assert short(d["drifted"]) == {"program::floor"}
-    assert short(d["must_confront_added"]) == {"program::new"}
-    assert short(d["must_confront_removed"]) == {"program::ceiling"}
+    assert "must_confront_added" not in d and "must_confront_removed" not in d
 
 
 def test_delta_no_change_is_empty(tmp_path):
-    prog = _program(tmp_path)
-    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    review = _full_litreview(tmp_path)
+    prog = tmp_path / "program"
     gr = prog / "analysis" / "grounding_report.json"
     baseline = tmp_path / "baseline.json"
     baseline.write_text(gr.read_text(encoding="utf-8"), encoding="utf-8")
@@ -443,7 +532,7 @@ def test_delta_no_change_is_empty(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# kind=litreview store card (store-free determinism)
+# kind=litreview store card (store-free determinism) — PRISMA funnel block
 # --------------------------------------------------------------------------- #
 def test_litreview_card_markdown_deterministic():
     from scientist.store import _meta as M
@@ -451,117 +540,106 @@ def test_litreview_card_markdown_deterministic():
         "litreview_id": "program::it-biodist", "scope": "program", "slug": "it-biodist",
         "title": "IT ASO biodistribution", "abstract": "How a lumbar ASO distributes the CNS.",
         "sections": [{"heading": "Exposure", "summary": "cord highest"}],
-        "must_confront": ["program::test_litreview_it_biodist.py::test_floor"],
+        "funnel": {"identified": 4, "included": 3, "excluded": 1},
         "cited_claims": ["program::test_litreview_it_biodist.py::test_floor"],
         "audit_status": "GROUNDED", "path": "program/litreviews/it-biodist/review.md",
     }
     md1 = M.litreview_card_markdown(card)
     md2 = M.litreview_card_markdown(card)
-    assert md1 == md2                                          # deterministic → stable document_id
+    assert md1 == md2                                         # deterministic → stable document_id
     assert md1.startswith("# Literature review: IT ASO biodistribution")
     assert "## Abstract" in md1
-    assert "## Must-confront" in md1
+    assert "## PRISMA funnel" in md1
+    assert "identified: 4" in md1 and "included: 3" in md1
     assert "## Cites" in md1
 
 
 def test_litreview_cite_renders_as_footnote(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    _full_litreview(tmp_path)
+    prog = tmp_path / "program"
     report = _report_md(prog, """---
 title: "Dosing"
 ---
 ## Argument
-Per the survey [litreview:program::it-biodist], loss is tolerated [lit:test_floor] and the optimum
-is set [lit:test_ceiling].
-
-## Assumptions
-- [litreview-waive:test_minor] irrelevant.
+Per the survey [litreview:program::it-biodist], loss is tolerated [lit:test_floor].
 """)
     md = R.render_markdown(report, home=tmp_path)
     assert "[^litreview-1]" in md
     assert "Literature review: *IT ASO biodistribution*" in md
-    assert "litreview-waive" not in md          # the waiver token is stripped from the render
 
 
 # --------------------------------------------------------------------------- #
-# Fix 1 — LOUD failure on a misnamed / empty claims module (fail closed, not open)
+# `sci new-litreview` scaffolding
 # --------------------------------------------------------------------------- #
-def test_misnamed_claims_module_is_a_loud_finding(tmp_path):
-    """The grounding report's claims live under ``test_litreview_it_biodist.py`` but the review
-    folder is ``it-biodist-typo`` → the expected module ``test_litreview_it_biodist_typo.py``
-    contributes zero claims. That must be a loud BLOCKING finding (the obligation set is silently
-    dead), distinct from the mild empty-must-confront advisory."""
-    prog = _program(tmp_path, slug="it-biodist")
-    (prog / "litreviews" / "it-biodist-typo").mkdir(parents=True, exist_ok=True)
-    review = _review_md(prog, "it-biodist-typo", _GOOD_REVIEW)
-    res = LR.audit(review, home=tmp_path)
-    assert res["status"] == "BROKEN"
-    missing = [f for f in res["findings"] if f["kind"] == "missing-claims-module"]
-    assert len(missing) == 1
-    assert "misnamed module" in missing[0]["detail"]
-    assert "test_litreview_it_biodist_typo.py" in missing[0]["detail"]
-    assert "not found on disk" in missing[0]["detail"]
-    # NOT downgraded to the soft "under-assessed?" advisory.
-    assert not any(a["kind"] == "empty-must-confront" for a in res["advisories"])
-    txt = LR.render_audit(res)
-    assert "missing-claims-module" in txt
-    assert "under-assessed" not in txt          # the misleading mild line is suppressed
-
-
-def test_present_but_empty_named_module_still_loud(tmp_path):
-    """A correctly-named module file that is on disk but contributes NO claims (empty / not yet
-    run) is still loud — the obligation set is dead either way — but the message notes it is
-    present on disk (so 'stale grounding' rather than 'misnamed' is the likely cause)."""
-    prog = _program(tmp_path, slug="it-biodist")
-    # wipe the claims out of the grounding report; create the correctly-named (empty) module file.
-    gr = prog / "analysis" / "grounding_report.json"
-    gr.write_text(json.dumps({"claims": []}), encoding="utf-8")
-    claims_dir = prog / "claims"
-    claims_dir.mkdir(exist_ok=True)
-    (claims_dir / "test_litreview_it_biodist.py").write_text("# no claims yet\n", encoding="utf-8")
-    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    res = LR.audit(review, home=tmp_path)
-    assert res["status"] == "BROKEN"
-    missing = [f for f in res["findings"] if f["kind"] == "missing-claims-module"]
-    assert len(missing) == 1 and "present on disk" in missing[0]["detail"]
-
-
-# --------------------------------------------------------------------------- #
-# Fix 2 — `sci new-litreview` scaffolding (the highest-risk manual step removed)
-# --------------------------------------------------------------------------- #
-def test_scaffold_lays_out_correctly_named_module(tmp_path):
+def test_scaffold_lays_out_all_artifacts(tmp_path):
     res = LR.scaffold(tmp_path, "it-aso-biodistribution")
-    review = tmp_path / "program/litreviews/it-aso-biodistribution/review.md"
-    prompt = tmp_path / "program/litreviews/it-aso-biodistribution/prompt.md"
+    base = tmp_path / "program/litreviews/it-aso-biodistribution"
+    review = base / "review.md"
+    protocol = base / "protocol.md"
+    screening = base / "screening.jsonl"
+    prompt = base / "prompt.md"
     module = tmp_path / "program/claims/test_litreview_it_aso_biodistribution.py"
-    assert review.is_file() and prompt.is_file() and module.is_file()
+    assert review.is_file() and protocol.is_file() and screening.is_file()
+    assert prompt.is_file() and module.is_file()
     assert res["module"].endswith("claims/test_litreview_it_aso_biodistribution.py")
-    assert len(res["created"]) == 3 and res["skipped"] == []
-    # the module is correctly named by construction → its prefix carries claims once authored.
+    assert len(res["created"]) == 5 and res["skipped"] == []
     assert R.litreview_module_path(review, tmp_path) == module
+    # the protocol stub carries the four required headings + the front-matter keys.
+    pbody = protocol.read_text()
+    for heading in ("Question & scope", "Search queries", "Inclusion criteria", "Exclusion criteria"):
+        assert f"## {heading}" in pbody
+    assert "slug: it-aso-biodistribution" in pbody and "as_of:" in pbody and "sources:" in pbody
+    assert screening.read_text() == ""                       # empty PRISMA log to seed
 
 
-def test_scaffold_review_is_minimal_no_structure_template(tmp_path):
+def test_scaffold_drops_must_confront_from_stubs(tmp_path):
     LR.scaffold(tmp_path, "dosage-biology")
-    body = (tmp_path / "program/litreviews/dosage-biology/review.md").read_text().lower()
-    # MINIMAL: front matter + a pointer to references, mandatory gaps section — but NOT the
-    # supporting/contradicting/equivocal/absent template (the structure is being redesigned).
-    assert "references/litreview.md" in body
-    assert "structure tbd" in body
-    assert "gaps / open questions" in body
+    module = (tmp_path / "program/claims/test_litreview_dosage_biology.py").read_text()
+    prompt = (tmp_path / "program/litreviews/dosage-biology/prompt.md").read_text()
+    review = (tmp_path / "program/litreviews/dosage-biology/review.md").read_text().lower()
+    assert "must_confront" not in module                     # no obligation-tag import/decorator
+    assert "must_confront" not in prompt and "must-confront" not in prompt
+    assert "controversies" not in prompt.lower()             # the must-confront guidance is gone
+    assert "ingest-discover" in prompt                       # the PRISMA workflow is documented
+    # review stub stays minimal: pointer to references, mandatory gaps, no baked template.
+    assert "references/litreview.md" in review
+    assert "gaps / open questions" in review
     for baked in ("supporting", "contradicting", "equivocal"):
-        assert baked not in body
-    assert "must_confront" in (tmp_path / "program/claims/test_litreview_dosage_biology.py").read_text()
+        assert baked not in review
 
 
 def test_scaffold_is_idempotent(tmp_path):
     LR.scaffold(tmp_path, "it-biodist")
     again = LR.scaffold(tmp_path, "it-biodist")
-    assert again["created"] == [] and len(again["skipped"]) == 3
+    assert again["created"] == [] and len(again["skipped"]) == 5
 
 
 # --------------------------------------------------------------------------- #
-# Fix 3 — litreview-specific advisory tuning (sci report unchanged)
+# contested-status read (advisory, content-based) — unchanged behavior
+# --------------------------------------------------------------------------- #
+def test_contested_status_satisfied_by_no_controversy_finding(tmp_path):
+    body = _GOOD_REVIEW.replace(
+        "## Controversies / unresolved\nLab A and Lab B disagree on the deep-brain ratio [lit:test_floor].",
+        "## Convergence & dependence\nThere is no genuine two-camp split here; the evidence "
+        "converges, and the real fault line is single-lab dependence [lit:test_floor].")
+    review = _full_litreview(tmp_path, body=body)
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "GROUNDED", res["findings"]
+    assert res["contested_status_addressed"] is True
+
+
+def test_contested_status_not_satisfied_by_heading_alone(tmp_path):
+    body = _GOOD_REVIEW.replace(
+        "## Controversies / unresolved\nLab A and Lab B disagree on the deep-brain ratio [lit:test_floor].",
+        "## Controversies\nThe cord sees the most drug at the lumbar level [lit:test_floor].")
+    review = _full_litreview(tmp_path, body=body)
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "GROUNDED", res["findings"]
+    assert res["contested_status_addressed"] is False
+
+
+# --------------------------------------------------------------------------- #
+# litreview-specific advisory tuning (sci report unchanged)
 # --------------------------------------------------------------------------- #
 _GAPS_HYPOTHETICAL_REVIEW = """---
 title: "T"
@@ -575,11 +653,11 @@ Regimes below 75% knockdown are unmeasured [lit:test_minor]; e.g. 25/50 are unte
 
 
 def test_unsupported_quantity_skips_gaps_section(tmp_path):
-    prog = _program(tmp_path)
-    review = _review_md(prog, "it-biodist", _GAPS_HYPOTHETICAL_REVIEW)
+    # screen in only minor2020 (the only cited paper here) so coverage stays clean.
+    review = _full_litreview(tmp_path, body=_GAPS_HYPOTHETICAL_REVIEW)
+    _write_screening(tmp_path / "program", rows=[_DEFAULT_SCREEN[2]])
     res = LR.audit(review, home=tmp_path)
     uq = [a for a in res["advisories"] if a["kind"] == "unsupported-quantity"]
-    # the 75 in the BODY paragraph flags; the 75 / 25 / 50 in the gaps section do not.
     assert [a["value"] for a in uq] == [75.0]
     gaps_line = _GAPS_HYPOTHETICAL_REVIEW[: _GAPS_HYPOTHETICAL_REVIEW.index("## Gaps")].count("\n") + 1
     assert all(a["line"] < gaps_line for a in uq)
@@ -600,10 +678,8 @@ Unmeasured regimes remain.
 
 
 def test_weak_load_bearing_collapsed_to_one_summary(tmp_path):
-    """In a conclusion-free survey single-group/moderate claims are the norm — the per-bound
-    weak-load-bearing finding is noise. Collapse to one summary advisory, deduped across cites."""
-    prog = _program(tmp_path)
-    review = _review_md(prog, "it-biodist", _WLB_REVIEW)
+    review = _full_litreview(tmp_path, body=_WLB_REVIEW)
+    _write_screening(tmp_path / "program", rows=_DEFAULT_SCREEN[:2])  # floor + ceiling cited
     res = LR.audit(review, home=tmp_path)
     assert not any(a["kind"] == "weak-load-bearing" for a in res["advisories"])
     summary = [a for a in res["advisories"] if a["kind"] == "weak-load-bearing-survey"]
@@ -614,8 +690,7 @@ def test_weak_load_bearing_collapsed_to_one_summary(tmp_path):
 
 
 def test_report_advisories_unchanged_for_sci_report(tmp_path):
-    """The tuning is litreview-only: a plain report keeps the per-bound weak-load-bearing finding
-    and flags numbers in any section (no gaps exemption)."""
+    """The tuning is litreview-only: a plain report keeps the per-bound weak-load-bearing finding."""
     prog = _program(tmp_path)
     report = _report_md(prog, _WLB_REVIEW)        # same body, audited AS a report
     res = R.audit(report, home=tmp_path)
@@ -624,12 +699,13 @@ def test_report_advisories_unchanged_for_sci_report(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Fix 4 — stale-grounding guard (cheap mtime check; warn, don't block)
+# stale-grounding guard (cheap mtime check; warn, don't block)
 # --------------------------------------------------------------------------- #
 def test_stale_grounding_warns_when_module_is_newer(tmp_path):
     import os
 
-    prog = _program(tmp_path, slug="it-biodist")
+    review = _full_litreview(tmp_path)
+    prog = tmp_path / "program"
     gr = prog / "analysis" / "grounding_report.json"
     claims_dir = prog / "claims"
     claims_dir.mkdir(exist_ok=True)
@@ -639,68 +715,8 @@ def test_stale_grounding_warns_when_module_is_newer(tmp_path):
     os.utime(gr, (base, base))
     os.utime(mod, (base + 100, base + 100))       # module edited after the grounding was emitted
 
-    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
     res = LR.audit(review, home=tmp_path)
     assert res["status"] == "GROUNDED"            # non-blocking
     assert res.get("warnings")
     assert any("re-run pytest --grounding-out" in w["detail"] for w in res["warnings"])
     assert "stale-grounding" in LR.render_audit(res)
-    # same guard on the sci report path.
-    rep = R.audit(_dosing_report(prog), home=tmp_path)
-    assert any("re-run pytest --grounding-out" in w["detail"] for w in rep["warnings"])
-
-
-def test_no_stale_warning_when_grounding_is_fresh(tmp_path):
-    import os
-
-    prog = _program(tmp_path, slug="it-biodist")
-    gr = prog / "analysis" / "grounding_report.json"
-    claims_dir = prog / "claims"
-    claims_dir.mkdir(exist_ok=True)
-    mod = claims_dir / "test_litreview_it_biodist.py"
-    mod.write_text("# claims source\n", encoding="utf-8")
-    base = gr.stat().st_mtime
-    os.utime(mod, (base - 100, base - 100))       # grounding newer than the module → fresh
-    os.utime(gr, (base, base))
-    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    assert not LR.audit(review, home=tmp_path).get("warnings")
-
-
-# --------------------------------------------------------------------------- #
-# Fix 5 — `sci report --write-pins` (mechanize the manual paste)
-# --------------------------------------------------------------------------- #
-def test_write_litreview_pins_records_surfaced_pin(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    report = _dosing_report(prog)                 # addresses both must-confront, pin not recorded
-    res = R.audit(report, home=tmp_path)
-    lrc = res["litreview_cites"][0]
-    assert lrc.get("pin_unrecorded") is True      # surfaces only because unaddressed is empty
-    assert not lrc.get("unaddressed")
-
-    merged = R.write_litreview_pins(report, {lrc["id"]: lrc["pin"]})
-    assert merged[lrc["id"]] == lrc["pin"]
-    # the recorded 12-char prefix matches by startswith → clean on re-audit, nudge gone.
-    assert len(lrc["pin"]) == 12
-    pins = R.litreview_pins(report.read_text())
-    assert pins[lrc["id"]] == lrc["pin"]
-    res2 = R.audit(report, home=tmp_path)
-    lrc2 = res2["litreview_cites"][0]
-    assert res2["status"] == "GROUNDED"
-    assert lrc2["verdict"] == "backed"
-    assert not lrc2.get("pin_unrecorded")
-
-
-def test_write_litreview_pins_preserves_existing_front_matter(tmp_path):
-    prog = _program(tmp_path)
-    _review_md(prog, "it-biodist", _GOOD_REVIEW)
-    report = _dosing_report(prog)
-    pin = R.audit(report, home=tmp_path)["litreview_cites"][0]["pin"]
-    R.write_litreview_pins(report, {"program::it-biodist": pin})
-    text = report.read_text()
-    assert 'title: "Dosing"' in text              # the existing key is left intact
-    assert "litreview_pins:" in text
-    # second write merges a second litreview without dropping the first.
-    merged = R.write_litreview_pins(report, {"program::other": "abcdef012345"})
-    assert merged["program::it-biodist"] == pin
-    assert merged["program::other"] == "abcdef012345"

@@ -141,19 +141,23 @@ def main() -> int:
     p_rep.add_argument("--write-pins", dest="write_pins", action="store_true",
                        help="write the surfaced litreview_pins into the report's YAML front matter "
                             "(mechanizes the manual paste). The recorded pin is a 12-char prefix "
-                            "matched by startswith; a pin only surfaces once a [litreview:] cite's "
-                            "must-confront obligations are all addressed (unaddressed list empty)")
+                            "matched by startswith; the pin is over the cited litreview's search "
+                            "protocol (queries + as_of + sources)")
 
     # ---- litreview: audit a neutral literature survey (kind=litreview). ----
     p_lr = sub.add_parser("litreview",
                           help="audit a literature review (review.md): every [lit:] claim backed, "
-                               "literature-only, a gaps section present; list its must-confront set; "
-                               "render/trace it. The [litreview:] omissions audit lives in `sci report`.")
+                               "literature-only, a gaps section present, the protocol + screening "
+                               "committed and every cited paper screened-in; render/trace it.")
     p_lr.add_argument("path", help="litreview Markdown (program/litreviews/<slug>/review.md)")
     p_lr.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
     p_lr.add_argument("--json", action="store_true", help="machine-readable output")
-    p_lr.add_argument("--must-confront", dest="must_confront", action="store_true",
-                      help="list the must-confront obligation set (claims any citing report must address)")
+    p_lr.add_argument("--ingest-discover", dest="ingest_discover", metavar="DISCOVER_JSON",
+                      help="append candidate rows to screening.jsonl from a `bib discover --json` "
+                           "payload (decision unset, de-duped by id) — `sci` never calls the search "
+                           "API; a re-discover is re-fed through here")
+    p_lr.add_argument("--query", help="with --ingest-discover: the query string to stamp on the "
+                      "ingested rows (default: the payload's top-level `query`, if any)")
     p_lr.add_argument("--render", metavar="OUT", help="render the validated litreview to OUT (via pandoc)")
     p_lr.add_argument("--to", choices=["pdf", "html", "docx"], default="pdf",
                       help="render format (default pdf; via pandoc)")
@@ -170,8 +174,9 @@ def main() -> int:
 
     # ---- new-litreview: scaffold a litreview folder + the correctly-named claim module. ----
     p_nlr = sub.add_parser("new-litreview",
-                           help="scaffold program/litreviews/<slug>/ (review.md + prompt.md) and the "
-                                "correctly-named program/claims/test_litreview_<slug>.py claim module")
+                           help="scaffold program/litreviews/<slug>/ (review.md + protocol.md + "
+                                "screening.jsonl + prompt.md) and the correctly-named "
+                                "program/claims/test_litreview_<slug>.py claim module")
     p_nlr.add_argument("slug", help="litreview slug (hyphenated, e.g. it-aso-biodistribution)")
     p_nlr.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
     p_nlr.add_argument("--title", help="review.md front-matter title (default: the slug, de-hyphenated)")
@@ -288,18 +293,17 @@ def _report(args: argparse.Namespace) -> int:
     rc = 0 if result["status"] == "GROUNDED" else 1
 
     if getattr(args, "write_pins", False):
-        # A pin surfaces only once a [litreview:] cite's must-confront obligations are all
-        # addressed (its `unaddressed` list is empty); write those into litreview_pins.
+        # Each resolved [litreview:] cite carries a protocol-keyed pin; write them into
+        # litreview_pins so re-runs stay green until the survey's search protocol drifts.
         surfaced = {lc["id"]: lc["pin"] for lc in result.get("litreview_cites", [])
-                    if lc.get("pin") and not lc.get("unaddressed")}
+                    if lc.get("pin")}
         if surfaced:
             merged = REPORT.write_litreview_pins(path, surfaced)
             if not args.json:
                 wrote = ", ".join(f"{k}: {v}" for k, v in sorted(surfaced.items()))
                 print(f"wrote litreview_pins ({wrote}); {len(merged)} pin(s) total in front matter")
         elif not args.json:
-            print("no litreview pins to write — no [litreview:] cite with all must-confront "
-                  "obligations addressed (pins surface only once `unaddressed` is empty)")
+            print("no litreview pins to write — no resolved [litreview:] cite in this report")
 
     if args.trace:
         tr = TRACE.trace_report(path, repo_root=home)
@@ -341,13 +345,25 @@ def _report(args: argparse.Namespace) -> int:
 
 def _litreview(args: argparse.Namespace) -> int:
     """`sci litreview <path>`: audit a litreview (review.md) — every [lit:] claim backed,
-    literature-only, a gaps section present — and optionally list its must-confront set, render,
-    or trace it. The [litreview:] *omissions* audit (a property of the consuming report) lives in
-    `sci report`. Exit 0 if GROUNDED (and any render succeeded), 1 otherwise."""
+    literature-only, a gaps section present, the protocol + screening committed and every cited
+    paper screened-in — and optionally ingest a `bib discover` payload into screening.jsonl, render,
+    or trace it. The protocol-keyed `stale-litreview` pin (a property of the consuming report) lives
+    in `sci report`. Exit 0 if GROUNDED (and any render succeeded), 1 otherwise."""
     import json
 
     path = Path(args.path)
     home = resolve_home(args)
+
+    if getattr(args, "ingest_discover", None):
+        res = LITREVIEW.ingest_discover(path, Path(args.ingest_discover), home=home,
+                                        query=getattr(args, "query", None))
+        if args.json:
+            print(json.dumps(res, indent=2, ensure_ascii=False, default=str))
+        else:
+            print(f"appended {res['appended']} candidate(s) to {res['screening']} "
+                  f"(skipped {res['skipped_duplicate']} duplicate, {res['skipped_no_id']} "
+                  f"without an id) — screen each to included|excluded(+reason) by hand")
+        return 0
 
     if args.delta:
         d = LITREVIEW.delta(path, Path(args.delta), home=home)
@@ -355,18 +371,6 @@ def _litreview(args: argparse.Namespace) -> int:
             print(json.dumps(d, indent=2, ensure_ascii=False, default=str))
         else:
             print(LITREVIEW.render_delta(d))
-        return 0
-
-    if args.must_confront:
-        listing = LITREVIEW.must_confront_listing(path, home=home)
-        if args.json:
-            print(json.dumps(listing, indent=2, ensure_ascii=False, default=str))
-        else:
-            if not listing:
-                print("(no must-confront claims tagged — mark the pivotal/contested/disconfirming ones)")
-            for m in listing:
-                print(f"- {REPORT._short_claim_id(m['claim_id'])}  [{m.get('strength')}]"
-                      f"  {m.get('reason') or ''}".rstrip())
         return 0
 
     result = LITREVIEW.audit(path, home=home)
@@ -403,7 +407,7 @@ def _litreview(args: argparse.Namespace) -> int:
             "litreview_id": STORE_META.report_id_for(sc["scope"], sc["exp_id"], sc["slug"]),
             "scope": sc["scope"], "slug": sc["slug"],
             "title": sec["title"], "abstract": sec["abstract"], "sections": sec["sections"],
-            "cited_claims": cited, "must_confront": result.get("must_confront", []),
+            "cited_claims": cited, "funnel": result.get("funnel", {}),
             "audit_status": result["status"], "path": result["report"],
         }
         STORE_CLI.index_litreview(args, card)
@@ -412,9 +416,10 @@ def _litreview(args: argparse.Namespace) -> int:
 
 
 def _new_litreview(args: argparse.Namespace) -> int:
-    """`sci new-litreview <slug>`: scaffold a litreview folder (review.md + prompt.md) and its
-    correctly-named claim module (test_litreview_<slug>.py). Removes the highest-risk manual step —
-    the module name the must-confront set / omissions audit key off. Exit 0 on success."""
+    """`sci new-litreview <slug>`: scaffold a litreview folder (review.md + protocol.md +
+    screening.jsonl + prompt.md) and its correctly-named claim module (test_litreview_<slug>.py).
+    Removes the highest-risk manual steps — the module name and the committed PRISMA artifacts.
+    Exit 0 on success."""
     import json
 
     home = resolve_home(args)
@@ -432,8 +437,9 @@ def _new_litreview(args: argparse.Namespace) -> int:
     if not res["created"]:
         print("nothing created (all files already exist)")
     else:
-        print(f"author the survey in review.md, ground [lit:] claims in {res['module']}, "
-              f"tag the pivotal/contested ones @must_confront, then `sci litreview <review.md>`")
+        print(f"pre-register the search in protocol.md, seed screening.jsonl "
+              f"(`sci litreview <review.md> --ingest-discover <discover.json>`), author the survey "
+              f"in review.md, ground [lit:] claims in {res['module']}, then `sci litreview <review.md>`")
     return 0
 
 

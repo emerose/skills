@@ -197,9 +197,9 @@ def litreview_card_markdown(rec: dict[str, Any]) -> str:
     """Deterministic Markdown for a litreview card (``kind=litreview``).
 
     Leads with the litreview **title** and **abstract** (the primary searchable text), then its
-    **section summaries**, the **must-confront** obligation set, and the literature it cites.
-    Determinism (sorted ids, no timestamps in the body) keeps re-ingest stable. Mirrors
-    :func:`report_card_markdown`; the must-confront block is what distinguishes a survey card."""
+    **section summaries**, the **PRISMA funnel** (identified → included / excluded), and the
+    literature it cites. Determinism (sorted ids, no timestamps in the body) keeps re-ingest stable.
+    Mirrors :func:`report_card_markdown`; the PRISMA funnel is what distinguishes a survey card."""
     title = (rec.get("title") or rec.get("slug") or rec.get("litreview_id") or "(litreview)").strip()
     lines = [f"# Literature review: {title}", ""]
     facts = _facts_block([
@@ -222,9 +222,12 @@ def litreview_card_markdown(rec: dict[str, Any]) -> str:
             else:
                 lines.append(f"- {s}")
         lines.append("")
-    must = sorted({str(c) for c in (rec.get("must_confront") or []) if c})
-    if must:
-        lines += ["## Must-confront", ""] + [f"- `{c}`" for c in must] + [""]
+    funnel = rec.get("funnel") or {}
+    if funnel:
+        lines += ["## PRISMA funnel", "",
+                  f"- identified: {funnel.get('identified', 0)}",
+                  f"- included: {funnel.get('included', 0)}",
+                  f"- excluded: {funnel.get('excluded', 0)}", ""]
     cited = sorted({str(c) for c in (rec.get("cited_claims") or []) if c})
     if cited:
         lines += ["## Cites", ""] + [f"- `{c}`" for c in cited] + [""]

@@ -362,7 +362,7 @@ class Store:
     async def upsert_litreview(self, rec: dict[str, Any]) -> dict[str, Any]:
         """Create or update a litreview card (``kind=litreview``), keyed by a stable
         ``litreview_id``. Mirrors :meth:`upsert_report`: the card's bytes derive from the
-        litreview's content (title/abstract/sections/must-confront/cited claims), so any change
+        litreview's content (title/abstract/sections/PRISMA funnel/cited claims), so any change
         yields a new ``document_id``; we ingest the new card and delete the prior one (if its id
         differs), preserving the logical ``litreview_id`` identity and ``added_at``."""
         litreview_id = rec.get("litreview_id")
