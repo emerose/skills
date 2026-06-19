@@ -78,6 +78,13 @@ not. A report cites the 1–3 litreviews its argument spans.
 
 ## Structure of `review.md` — a synthesis, not a form
 
+> **When a review outgrows one document**, store it as a **node tree** — `review.md` becomes the
+> root rollup and subtopics move into `nodes/<id>.md`, wired by `[litreview:<child>]` edges; the
+> root rollup *is* the review. A flat `review.md` is just the degenerate one-node tree (no
+> migration). The whole of this file still applies at the **root / review level**; the tree adds
+> split/merge seams, rollups, and the conflict-survival obligation. See
+> [reviews-tree.md](reviews-tree.md). `sci litreview` audit/render are tree-aware automatically.
+
 A litreview reads like a review article: a **synthesis organized by the themes of the field**,
 engaging specific studies and their numbers, showing where the literature agrees, conflicts, and is
 silent — but carrying **no novel argument or conclusion of its own**. Its two jobs are to (1) fairly
