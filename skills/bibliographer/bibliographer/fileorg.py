@@ -20,7 +20,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-import _meta
+from . import meta as _meta
 
 # Characters illegal or troublesome in file/dir names across macOS/Windows.
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')

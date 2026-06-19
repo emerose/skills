@@ -34,13 +34,15 @@ import tempfile
 from pathlib import Path
 from typing import Any, NoReturn
 
-# Sibling modules live next to this script; uv puts the script dir on sys.path,
-# but we make it explicit so `bib.py` is robust to how it's invoked.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# The `bibliographer` package lives one level up (sibling of scripts/). Put that
+# dir on sys.path so `from bibliographer import …` resolves when this script is run
+# directly via its PEP-723 shebang (no install). An installed/editable package
+# already has it on the path; this insert is a harmless no-op then.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import _fileorg  # noqa: E402
-import _meta  # noqa: E402
-from _store import BiblioStore, EmbedderConfigError  # noqa: E402
+from bibliographer import fileorg as _fileorg  # noqa: E402
+from bibliographer import meta as _meta  # noqa: E402
+from bibliographer.store import BiblioStore, EmbedderConfigError  # noqa: E402
 
 INGESTIBLE_EXTS = {".pdf", ".md", ".markdown", ".docx", ".doc", ".pptx", ".ppt", ".odt"}
 
@@ -131,7 +133,7 @@ async def write_index(store: BiblioStore) -> None:
     """Regenerate <home>/index.html — the self-contained, searchable viewer that
     makes the library folder browsable by just opening it (replaces the old
     auto-exported library.bib; BibTeX is still available on demand via `export`)."""
-    import _viewer
+    from bibliographer import viewer as _viewer
 
     recs = await store.all_records()
     title = store.home.name or "Bibliography"
@@ -198,7 +200,7 @@ async def resolve_target(
     - local PDF: sniff + resolve online, else embedded metadata.
     - other local ingestible file: minimal record from the filename.
     """
-    import _resolvers
+    from bibliographer import resolvers as _resolvers
 
     kind, value = classify(target)
     if kind == "identifier":
@@ -240,7 +242,7 @@ async def ingest_record(
     duplicate, plus the stored ``record``. With ``enrich_meta`` (and a DOI/PMID),
     stamps OpenAlex work + venue metadata onto the record before storing.
     """
-    import _resolvers
+    from bibliographer import resolvers as _resolvers
 
     rec = dict(rec)
     if not force:
@@ -388,7 +390,7 @@ def _legacy_id(name: str) -> str | None:
 async def cmd_import(args: argparse.Namespace, store: BiblioStore) -> None:
     import httpx
 
-    import _resolvers
+    from bibliographer import resolvers as _resolvers
 
     root = Path(args.directory).expanduser().resolve()
     if not root.is_dir():
@@ -538,7 +540,7 @@ async def cmd_enrich(args: argparse.Namespace, store: BiblioStore) -> None:
     verifying each candidate against the document's parsed content."""
     import httpx
 
-    import _resolvers
+    from bibliographer import resolvers as _resolvers
 
     # Manual override: `enrich <citekey> --doi <doi>` forces a specific identifier
     # (for mislabeled files / candidates Crossref-search can't find).
@@ -633,7 +635,7 @@ async def cmd_fetch(args: argparse.Namespace, store: BiblioStore) -> None:
     """
     import httpx
 
-    import _resolvers
+    from bibliographer import resolvers as _resolvers
 
     rec = await store.get_by_citekey(args.citekey)
     if rec is None:
@@ -725,7 +727,7 @@ async def cmd_backfill(args: argparse.Namespace, store: BiblioStore) -> None:
     """
     import httpx
 
-    import _resolvers
+    from bibliographer import resolvers as _resolvers
 
     recs = await store.all_records()
     stubs = stub_records(recs)
@@ -1093,8 +1095,8 @@ async def cmd_discover(args: argparse.Namespace, store: BiblioStore) -> None:
     """
     import httpx
 
-    import _discovery
-    import _resolvers
+    from bibliographer import discovery as _discovery
+    from bibliographer import resolvers as _resolvers
 
     filters = _discovery.Filters(
         year_min=args.year_min, year_max=args.year_max, open_access=args.open_access

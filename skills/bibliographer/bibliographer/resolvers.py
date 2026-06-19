@@ -34,7 +34,7 @@ from typing import Any
 
 import httpx
 
-import _meta
+from . import meta as _meta
 
 # Semantic Scholar's documented limit is 1 request/second cumulative across ALL
 # endpoints, so a single process-wide gate (with margin) keeps both interactive

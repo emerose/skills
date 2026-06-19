@@ -1,6 +1,6 @@
 """Tests for the file organizer (sanitization, author tree, collision handling)."""
 
-import _fileorg
+from bibliographer import fileorg as _fileorg
 
 
 def test_sanitize():

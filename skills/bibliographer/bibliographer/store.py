@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import _meta
+from . import meta as _meta
 
 
 def _now_iso() -> str:
@@ -219,7 +219,7 @@ class BiblioStore:
         as a new libkit document carrying the record's metadata, files it into the
         author tree, and deletes the old stub document. The citekey is preserved.
         """
-        import _fileorg
+        from . import fileorg as _fileorg
 
         rec = await self.get_by_citekey(citekey)
         if rec is None:
@@ -298,7 +298,7 @@ class BiblioStore:
         into the proper author folder. The libkit document_id is unchanged
         (same bytes), so this is a metadata update + an on-disk move.
         """
-        import _fileorg
+        from . import fileorg as _fileorg
 
         rec = await self.get_by_citekey(citekey)
         if rec is None:

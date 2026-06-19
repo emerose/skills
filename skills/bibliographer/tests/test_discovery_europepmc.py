@@ -9,7 +9,7 @@ Run with:
   uv run --with pytest --with httpx pytest tests/test_discovery_europepmc.py -q
 """
 
-from _discovery import Filters, _from_europepmc
+from bibliographer.discovery import Filters, _from_europepmc
 
 # ---------------------------------------------------------------------------
 # Captured fixture — AlphaFold2 paper (PMID 34265844), trimmed to the fields

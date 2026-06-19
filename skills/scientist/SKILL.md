@@ -93,6 +93,40 @@ explicit `--home` or a set `$SCIENTIST_HOME` always wins; if no root is found th
 "set SCIENTIST_HOME" error still fires. Literature-claim grounding likewise loads `~/.env`
 to find `$BIBLIOGRAPHER_HOME` if it isn't already set, so no `source ~/.env` is needed.
 
+### CLI or Python — your choice
+
+The CLI is a thin shell over the importable `scientist` package, so the same logic is
+callable both ways. Pick per task:
+
+- **CLI** (`sci … [--json]`) — best for a **one-shot** check or render. If you catch
+  yourself piping a validator's prose to `grep`/`head`/`tail` to find out "is it broken,
+  and which findings?", that's the signal to call the function instead (or pass `--json`)
+  and branch on the structured result.
+- **Python** (`from scientist.provenance import report, trace, coverage, litreview`) —
+  best for **composition**: looping a check over many reports/experiments, or branching on
+  fields without re-parsing text. These functions **return dicts** (the same payloads the
+  CLI prints under `--json`); a paired `render_*` turns one into the human text.
+
+```python
+from pathlib import Path
+from scientist.provenance import report, trace
+
+res = report.audit(Path("program/reports/foo/report.md"), home=Path("/data"))
+# res -> {report, scope, exp_id, citations, embeds, report_cites, findings, status}
+if res["status"] != "GROUNDED":
+    for f in res["findings"]:           # e.g. missing-claim / drifted-embed / weak-backing
+        print(f["kind"], "@ line", f["line"])
+# print(report.render_audit(res))       # ← same text the CLI would have shown
+
+tr = trace.trace_report(Path("program/reports/foo/report.md"), repo_root=Path("/data"))
+# tr["status"], tr["chains"], tr["breaks"]
+```
+
+Run it where the package is importable: `uv run --with-editable /path/to/skills/scientist
+python3 your_script.py` (use this same editable form for anything that re-runs analysis,
+e.g. `reproduce`, since it carries the pinned pandas/scipy runtime). Pass `home=` or rely
+on `$SCIENTIST_HOME` exactly as the CLI does. For a single check, just call `sci … --json`.
+
 ## Maintaining this skill (for agents working ON scientist)
 
 Read the repo-wide [AGENTS.md](../../AGENTS.md) first: improve-as-you-go, push rote work into code,

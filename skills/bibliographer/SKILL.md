@@ -352,6 +352,44 @@ to parse results, count, or feed another step. `discover --json` emits
 `{"results": [...], "sources": {name: count|error}, "added": {...}}`; `backfill
 --json` emits `{"checked": N, "fetched": [...], "remaining": [...]}`.
 
+## Two ways to call it: CLI or Python — your choice
+
+There are two equivalent surfaces; pick per task.
+
+- **CLI** (`bib …`, or `bib … --json`) — best for a **one-shot** lookup or action.
+  One line, zero install. The reflex of piping the human table to `grep`/`head` is
+  usually a sign you wanted `--json` instead — reach for that first.
+- **Python** (`from bibliographer import BiblioStore`) — best for **composition**:
+  loops/joins over many records, or feeding results into other code. Each `bib`
+  call is a fresh subprocess that cold-starts libkit; a Python session pays that
+  once and then calls the store directly. `BiblioStore` **is** the structured API —
+  its methods return the same dicts/lists the CLI prints under `--json`.
+
+```python
+import asyncio
+from pathlib import Path
+from bibliographer import BiblioStore   # see bibliographer/__init__.py
+
+async def main():
+    # read_only lets many readers run concurrently (no write lock)
+    store = BiblioStore.open(Path.home() / ".bibliographer", read_only=True)
+    try:
+        recs = await store.all_records()                  # list[dict]
+        hits = await store.query("ube3a dosage", limit=8) # semantic search
+        rec  = await store.get_by_citekey("ni2016reciprocal")
+        # …compose in-process instead of `bib show … | grep`
+    finally:
+        await store.close()
+
+asyncio.run(main())
+```
+
+Run that Python in an environment that has the package **and** libkit's embedding
+backend — the same one the CLI uses (see *Setup* above) — e.g.
+`uv run --with-editable /path/to/skills/bibliographer python3 your_script.py`.
+Honor `BIBLIOGRAPHER_HOME`/`BIBLIOGRAPHER_EMBEDDING` exactly as the CLI does. For a
+single lookup, don't bother — just call `bib … --json`.
+
 ## Good habits
 
 - **Dry-run imports first** and summarize coverage (resolved-online vs unverified,

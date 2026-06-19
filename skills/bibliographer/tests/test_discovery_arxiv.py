@@ -6,7 +6,7 @@ Run with the same invocation as the rest of the suite:
     uv run --with pytest --with httpx pytest skills/bibliographer/tests/ -q
 """
 
-from _discovery import _from_arxiv_entry
+from bibliographer.discovery import _from_arxiv_entry
 
 # ---------------------------------------------------------------------------
 # Real <entry> captured from:

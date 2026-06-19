@@ -21,8 +21,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-import _resolvers as R
-from _discovery import Filters, _stamp, search_semantic_scholar
+from bibliographer import resolvers as R
+from bibliographer.discovery import Filters, _stamp, search_semantic_scholar
 
 
 # --------------------------------------------------------------------------- #

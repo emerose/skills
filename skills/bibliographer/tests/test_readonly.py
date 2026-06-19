@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 import bib
-from _store import BiblioStore
+from bibliographer.store import BiblioStore
 
 
 # ---- classification: which commands open read-only vs read-write ------------
