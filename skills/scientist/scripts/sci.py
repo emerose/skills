@@ -138,6 +138,11 @@ def main() -> int:
                        help="also print the report-rooted provenance trace (report -> claims -> raw)")
     p_rep.add_argument("--index", action="store_true",
                        help="index the report into the store as kind=report (needs the store)")
+    p_rep.add_argument("--write-pins", dest="write_pins", action="store_true",
+                       help="write the surfaced litreview_pins into the report's YAML front matter "
+                            "(mechanizes the manual paste). The recorded pin is a 12-char prefix "
+                            "matched by startswith; a pin only surfaces once a [litreview:] cite's "
+                            "must-confront obligations are all addressed (unaddressed list empty)")
 
     # ---- litreview: audit a neutral literature survey (kind=litreview). ----
     p_lr = sub.add_parser("litreview",
@@ -162,6 +167,17 @@ def main() -> int:
                            "grounding_report.json > base.json`) — the cheap-update filter")
     p_lr.add_argument("--index", action="store_true",
                       help="index the litreview into the store as kind=litreview (needs the store)")
+
+    # ---- new-litreview: scaffold a litreview folder + the correctly-named claim module. ----
+    p_nlr = sub.add_parser("new-litreview",
+                           help="scaffold program/litreviews/<slug>/ (review.md + prompt.md) and the "
+                                "correctly-named program/claims/test_litreview_<slug>.py claim module")
+    p_nlr.add_argument("slug", help="litreview slug (hyphenated, e.g. it-aso-biodistribution)")
+    p_nlr.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
+    p_nlr.add_argument("--title", help="review.md front-matter title (default: the slug, de-hyphenated)")
+    p_nlr.add_argument("--scope", default="program",
+                       help="scope dir to scaffold under (default: program)")
+    p_nlr.add_argument("--json", action="store_true", help="machine-readable output")
 
     # ---- judge: list the literature-support work + record caller-supplied verdicts.
     #      NO model lives in the tool — the orchestrating agent (ideally a fresh-context judge
@@ -222,6 +238,8 @@ def main() -> int:
         return _report(args)
     if args.cmd == "litreview":
         return _litreview(args)
+    if args.cmd == "new-litreview":
+        return _new_litreview(args)
     if args.cmd == "judge":
         return _judge(args)
     if args.cmd == "coverage":
@@ -263,6 +281,20 @@ def _report(args: argparse.Namespace) -> int:
     emit(result, args.json, REPORT.render_audit)
 
     rc = 0 if result["status"] == "GROUNDED" else 1
+
+    if getattr(args, "write_pins", False):
+        # A pin surfaces only once a [litreview:] cite's must-confront obligations are all
+        # addressed (its `unaddressed` list is empty); write those into litreview_pins.
+        surfaced = {lc["id"]: lc["pin"] for lc in result.get("litreview_cites", [])
+                    if lc.get("pin") and not lc.get("unaddressed")}
+        if surfaced:
+            merged = REPORT.write_litreview_pins(path, surfaced)
+            if not args.json:
+                wrote = ", ".join(f"{k}: {v}" for k, v in sorted(surfaced.items()))
+                print(f"wrote litreview_pins ({wrote}); {len(merged)} pin(s) total in front matter")
+        elif not args.json:
+            print("no litreview pins to write — no [litreview:] cite with all must-confront "
+                  "obligations addressed (pins surface only once `unaddressed` is empty)")
 
     if args.trace:
         tr = TRACE.trace_report(path, repo_root=home)
@@ -372,6 +404,32 @@ def _litreview(args: argparse.Namespace) -> int:
         STORE_CLI.index_litreview(args, card)
 
     return rc
+
+
+def _new_litreview(args: argparse.Namespace) -> int:
+    """`sci new-litreview <slug>`: scaffold a litreview folder (review.md + prompt.md) and its
+    correctly-named claim module (test_litreview_<slug>.py). Removes the highest-risk manual step —
+    the module name the must-confront set / omissions audit key off. Exit 0 on success."""
+    import json
+
+    home = resolve_home(args)
+    if home is None:
+        print("no data-tree root: pass --home or set $SCIENTIST_HOME", file=sys.stderr)
+        return 1
+    res = LITREVIEW.scaffold(home, args.slug, title=args.title, scope=args.scope)
+    if args.json:
+        print(json.dumps(res, indent=2, ensure_ascii=False, default=str))
+        return 0
+    for rel in res["created"]:
+        print(f"created {rel}")
+    for rel in res["skipped"]:
+        print(f"skipped {rel} (exists)")
+    if not res["created"]:
+        print("nothing created (all files already exist)")
+    else:
+        print(f"author the survey in review.md, ground [lit:] claims in {res['module']}, "
+              f"tag the pivotal/contested ones @must_confront, then `sci litreview <review.md>`")
+    return 0
 
 
 def _judge(args: argparse.Namespace) -> int:

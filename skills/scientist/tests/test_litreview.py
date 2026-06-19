@@ -413,3 +413,226 @@ is set [lit:test_ceiling].
     assert "[^litreview-1]" in md
     assert "Literature review: *IT ASO biodistribution*" in md
     assert "litreview-waive" not in md          # the waiver token is stripped from the render
+
+
+# --------------------------------------------------------------------------- #
+# Fix 1 — LOUD failure on a misnamed / empty claims module (fail closed, not open)
+# --------------------------------------------------------------------------- #
+def test_misnamed_claims_module_is_a_loud_finding(tmp_path):
+    """The grounding report's claims live under ``test_litreview_it_biodist.py`` but the review
+    folder is ``it-biodist-typo`` → the expected module ``test_litreview_it_biodist_typo.py``
+    contributes zero claims. That must be a loud BLOCKING finding (the obligation set is silently
+    dead), distinct from the mild empty-must-confront advisory."""
+    prog = _program(tmp_path, slug="it-biodist")
+    (prog / "litreviews" / "it-biodist-typo").mkdir(parents=True, exist_ok=True)
+    review = _review_md(prog, "it-biodist-typo", _GOOD_REVIEW)
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "BROKEN"
+    missing = [f for f in res["findings"] if f["kind"] == "missing-claims-module"]
+    assert len(missing) == 1
+    assert "misnamed module" in missing[0]["detail"]
+    assert "test_litreview_it_biodist_typo.py" in missing[0]["detail"]
+    assert "not found on disk" in missing[0]["detail"]
+    # NOT downgraded to the soft "under-assessed?" advisory.
+    assert not any(a["kind"] == "empty-must-confront" for a in res["advisories"])
+    txt = LR.render_audit(res)
+    assert "missing-claims-module" in txt
+    assert "under-assessed" not in txt          # the misleading mild line is suppressed
+
+
+def test_present_but_empty_named_module_still_loud(tmp_path):
+    """A correctly-named module file that is on disk but contributes NO claims (empty / not yet
+    run) is still loud — the obligation set is dead either way — but the message notes it is
+    present on disk (so 'stale grounding' rather than 'misnamed' is the likely cause)."""
+    prog = _program(tmp_path, slug="it-biodist")
+    # wipe the claims out of the grounding report; create the correctly-named (empty) module file.
+    gr = prog / "analysis" / "grounding_report.json"
+    gr.write_text(json.dumps({"claims": []}), encoding="utf-8")
+    claims_dir = prog / "claims"
+    claims_dir.mkdir(exist_ok=True)
+    (claims_dir / "test_litreview_it_biodist.py").write_text("# no claims yet\n", encoding="utf-8")
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "BROKEN"
+    missing = [f for f in res["findings"] if f["kind"] == "missing-claims-module"]
+    assert len(missing) == 1 and "present on disk" in missing[0]["detail"]
+
+
+# --------------------------------------------------------------------------- #
+# Fix 2 — `sci new-litreview` scaffolding (the highest-risk manual step removed)
+# --------------------------------------------------------------------------- #
+def test_scaffold_lays_out_correctly_named_module(tmp_path):
+    res = LR.scaffold(tmp_path, "it-aso-biodistribution")
+    review = tmp_path / "program/litreviews/it-aso-biodistribution/review.md"
+    prompt = tmp_path / "program/litreviews/it-aso-biodistribution/prompt.md"
+    module = tmp_path / "program/claims/test_litreview_it_aso_biodistribution.py"
+    assert review.is_file() and prompt.is_file() and module.is_file()
+    assert res["module"].endswith("claims/test_litreview_it_aso_biodistribution.py")
+    assert len(res["created"]) == 3 and res["skipped"] == []
+    # the module is correctly named by construction → its prefix carries claims once authored.
+    assert R.litreview_module_path(review, tmp_path) == module
+
+
+def test_scaffold_review_is_minimal_no_structure_template(tmp_path):
+    LR.scaffold(tmp_path, "dosage-biology")
+    body = (tmp_path / "program/litreviews/dosage-biology/review.md").read_text().lower()
+    # MINIMAL: front matter + a pointer to references, mandatory gaps section — but NOT the
+    # supporting/contradicting/equivocal/absent template (the structure is being redesigned).
+    assert "references/litreview.md" in body
+    assert "structure tbd" in body
+    assert "gaps / open questions" in body
+    for baked in ("supporting", "contradicting", "equivocal"):
+        assert baked not in body
+    assert "must_confront" in (tmp_path / "program/claims/test_litreview_dosage_biology.py").read_text()
+
+
+def test_scaffold_is_idempotent(tmp_path):
+    LR.scaffold(tmp_path, "it-biodist")
+    again = LR.scaffold(tmp_path, "it-biodist")
+    assert again["created"] == [] and len(again["skipped"]) == 3
+
+
+# --------------------------------------------------------------------------- #
+# Fix 3 — litreview-specific advisory tuning (sci report unchanged)
+# --------------------------------------------------------------------------- #
+_GAPS_HYPOTHETICAL_REVIEW = """---
+title: "T"
+---
+## Body
+A stray figure of 75% appears here [lit:test_minor].
+
+## Gaps / open questions
+Regimes below 75% knockdown are unmeasured [lit:test_minor]; e.g. 25/50 are untested.
+"""
+
+
+def test_unsupported_quantity_skips_gaps_section(tmp_path):
+    prog = _program(tmp_path)
+    review = _review_md(prog, "it-biodist", _GAPS_HYPOTHETICAL_REVIEW)
+    res = LR.audit(review, home=tmp_path)
+    uq = [a for a in res["advisories"] if a["kind"] == "unsupported-quantity"]
+    # the 75 in the BODY paragraph flags; the 75 / 25 / 50 in the gaps section do not.
+    assert [a["value"] for a in uq] == [75.0]
+    gaps_line = _GAPS_HYPOTHETICAL_REVIEW[: _GAPS_HYPOTHETICAL_REVIEW.index("## Gaps")].count("\n") + 1
+    assert all(a["line"] < gaps_line for a in uq)
+
+
+_WLB_REVIEW = """---
+title: "T"
+---
+## A
+Lumbar dosing gives a 50% knockdown [lit:test_floor].
+
+## B
+A reciprocal 200% effect is seen [lit:test_ceiling].
+
+## Gaps / open questions
+Unmeasured regimes remain.
+"""
+
+
+def test_weak_load_bearing_collapsed_to_one_summary(tmp_path):
+    """In a conclusion-free survey single-group/moderate claims are the norm — the per-bound
+    weak-load-bearing finding is noise. Collapse to one summary advisory, deduped across cites."""
+    prog = _program(tmp_path)
+    review = _review_md(prog, "it-biodist", _WLB_REVIEW)
+    res = LR.audit(review, home=tmp_path)
+    assert not any(a["kind"] == "weak-load-bearing" for a in res["advisories"])
+    summary = [a for a in res["advisories"] if a["kind"] == "weak-load-bearing-survey"]
+    assert len(summary) == 1
+    assert summary[0]["count"] == 2
+    assert set(summary[0]["cites"]) == {"program::floor", "program::ceiling"}
+    assert "weak-load-bearing-survey" in LR.render_audit(res)
+
+
+def test_report_advisories_unchanged_for_sci_report(tmp_path):
+    """The tuning is litreview-only: a plain report keeps the per-bound weak-load-bearing finding
+    and flags numbers in any section (no gaps exemption)."""
+    prog = _program(tmp_path)
+    report = _report_md(prog, _WLB_REVIEW)        # same body, audited AS a report
+    res = R.audit(report, home=tmp_path)
+    assert any(a["kind"] == "weak-load-bearing" for a in res["advisories"])
+    assert not any(a["kind"] == "weak-load-bearing-survey" for a in res["advisories"])
+
+
+# --------------------------------------------------------------------------- #
+# Fix 4 — stale-grounding guard (cheap mtime check; warn, don't block)
+# --------------------------------------------------------------------------- #
+def test_stale_grounding_warns_when_module_is_newer(tmp_path):
+    import os
+
+    prog = _program(tmp_path, slug="it-biodist")
+    gr = prog / "analysis" / "grounding_report.json"
+    claims_dir = prog / "claims"
+    claims_dir.mkdir(exist_ok=True)
+    mod = claims_dir / "test_litreview_it_biodist.py"
+    mod.write_text("# claims source\n", encoding="utf-8")
+    base = gr.stat().st_mtime
+    os.utime(gr, (base, base))
+    os.utime(mod, (base + 100, base + 100))       # module edited after the grounding was emitted
+
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "GROUNDED"            # non-blocking
+    assert res.get("warnings")
+    assert any("re-run pytest --grounding-out" in w["detail"] for w in res["warnings"])
+    assert "stale-grounding" in LR.render_audit(res)
+    # same guard on the sci report path.
+    rep = R.audit(_dosing_report(prog), home=tmp_path)
+    assert any("re-run pytest --grounding-out" in w["detail"] for w in rep["warnings"])
+
+
+def test_no_stale_warning_when_grounding_is_fresh(tmp_path):
+    import os
+
+    prog = _program(tmp_path, slug="it-biodist")
+    gr = prog / "analysis" / "grounding_report.json"
+    claims_dir = prog / "claims"
+    claims_dir.mkdir(exist_ok=True)
+    mod = claims_dir / "test_litreview_it_biodist.py"
+    mod.write_text("# claims source\n", encoding="utf-8")
+    base = gr.stat().st_mtime
+    os.utime(mod, (base - 100, base - 100))       # grounding newer than the module → fresh
+    os.utime(gr, (base, base))
+    review = _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    assert not LR.audit(review, home=tmp_path).get("warnings")
+
+
+# --------------------------------------------------------------------------- #
+# Fix 5 — `sci report --write-pins` (mechanize the manual paste)
+# --------------------------------------------------------------------------- #
+def test_write_litreview_pins_records_surfaced_pin(tmp_path):
+    prog = _program(tmp_path)
+    _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    report = _dosing_report(prog)                 # addresses both must-confront, pin not recorded
+    res = R.audit(report, home=tmp_path)
+    lrc = res["litreview_cites"][0]
+    assert lrc.get("pin_unrecorded") is True      # surfaces only because unaddressed is empty
+    assert not lrc.get("unaddressed")
+
+    merged = R.write_litreview_pins(report, {lrc["id"]: lrc["pin"]})
+    assert merged[lrc["id"]] == lrc["pin"]
+    # the recorded 12-char prefix matches by startswith → clean on re-audit, nudge gone.
+    assert len(lrc["pin"]) == 12
+    pins = R.litreview_pins(report.read_text())
+    assert pins[lrc["id"]] == lrc["pin"]
+    res2 = R.audit(report, home=tmp_path)
+    lrc2 = res2["litreview_cites"][0]
+    assert res2["status"] == "GROUNDED"
+    assert lrc2["verdict"] == "backed"
+    assert not lrc2.get("pin_unrecorded")
+
+
+def test_write_litreview_pins_preserves_existing_front_matter(tmp_path):
+    prog = _program(tmp_path)
+    _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    report = _dosing_report(prog)
+    pin = R.audit(report, home=tmp_path)["litreview_cites"][0]["pin"]
+    R.write_litreview_pins(report, {"program::it-biodist": pin})
+    text = report.read_text()
+    assert 'title: "Dosing"' in text              # the existing key is left intact
+    assert "litreview_pins:" in text
+    # second write merges a second litreview without dropping the first.
+    merged = R.write_litreview_pins(report, {"program::other": "abcdef012345"})
+    assert merged["program::it-biodist"] == pin
+    assert merged["program::other"] == "abcdef012345"

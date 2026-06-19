@@ -288,6 +288,41 @@ def _grounding_reports(home: Path) -> list[tuple[str, Path]]:
             for exp_dir, report_path in iter_reports(home)]
 
 
+def stale_grounding_warnings(home: Path) -> list[dict[str, Any]]:
+    """Each ``grounding_report.json`` that is **older** than a claim module it should reflect — a
+    cheap ``mtime`` check that the recorded grounding may not match the current claim source.
+
+    ``sci report`` / ``sci litreview`` read the *recorded* grounding report (they never re-run the
+    claims suite), so an edited ``claims/test_*.py`` that was never re-run leaves the audit looking
+    at stale verdicts/strengths/must-confront tags. This compares each experiment's grounding
+    report against the newest ``claims/test_*.py`` beside it; a newer module yields a non-blocking
+    warning ``{report, modules, detail}`` telling the caller to re-run ``pytest --grounding-out``.
+    Warn, never block — the mtime heuristic can false-positive (a no-op edit), so it nudges."""
+    out: list[dict[str, Any]] = []
+    for exp_dir, report_path in iter_reports(home):
+        try:
+            gmtime = report_path.stat().st_mtime
+        except OSError:
+            continue
+        claims_dir = exp_dir / "claims"
+        if not claims_dir.is_dir():
+            continue
+        newer: list[Path] = []
+        for py in sorted(claims_dir.glob("test_*.py")):
+            try:
+                if py.stat().st_mtime > gmtime:
+                    newer.append(py)
+            except OSError:
+                continue
+        if newer:
+            out.append({
+                "report": _rel_or_name(report_path, home),
+                "modules": [_rel_or_name(p, home) for p in newer],
+                "detail": "grounding may be stale — re-run pytest --grounding-out "
+                          "(a claim module is newer than the recorded grounding report)"})
+    return out
+
+
 def index_claims(home: Path) -> dict[str, dict[str, Any]]:
     """Build ``{full_claim_id -> claim}`` across every experiment's grounding report under
     ``home``. ``full_claim_id`` is ``claim_id_for(exp_id, raw_nodeid)`` so it matches
@@ -876,6 +911,27 @@ def litreview_module_prefix(review_path: Path, home: Path) -> str:
     return f"{scope_id}::{module}::"
 
 
+def litreview_module_path(review_path: Path, home: Path) -> Path:
+    """The expected **on-disk** path of a litreview's claim module —
+    ``<scope-dir>/claims/test_litreview_<slug>.py`` (slug hyphens → underscores), the file whose
+    claims the must-confront set and the staleness pin key off (:func:`litreview_module_prefix`).
+    ``<scope-dir>`` is ``program/`` for a program litreview, else the experiment folder; it is
+    derived from where the ``review.md`` lives (``…/<scope>/litreviews/<slug>/review.md``), so this
+    is the single source of truth for "is the module named right?" — an absent file here is the
+    misnamed-module signal :func:`litreview.audit` raises loudly."""
+    rp = Path(review_path).resolve()
+    sc = report_scope(rp, home)
+    module = "test_litreview_" + str(sc["slug"]).replace("-", "_") + ".py"
+    parts = rp.parts
+    if "litreviews" in parts:                         # …/<scope>/litreviews/<slug>/review.md
+        scope_dir = Path(*parts[:parts.index("litreviews")])
+    elif sc["scope"] == "program":
+        scope_dir = home / "program"
+    else:
+        scope_dir = rp.parent
+    return scope_dir / "claims" / module
+
+
 def litreview_must_confront(
         review_path: Path, home: Path,
         claim_index: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -923,7 +979,14 @@ def litreview_pin_sha(review_path: Path, home: Path,
 def litreview_pins(text: str) -> dict[str, str]:
     """The ``litreview_pins`` mapping (``{litreview-id -> recorded pin sha}``) from a report's YAML
     front matter, or ``{}`` if absent/malformed. The report records the pin it last re-examined the
-    litreview against; the audit recomputes the current pin and flags ``stale-litreview`` on drift."""
+    litreview against; the audit recomputes the current pin and flags ``stale-litreview`` on drift.
+
+    **Pin contract** (the two facts the pilot had to reverse-engineer): the recorded value is a
+    **12-char prefix** of the full sha — the audit matches it with ``cur_pin.startswith(recorded)``,
+    NOT equality, so the surfaced 12-char ``pin`` pastes straight in. And the pin only *surfaces*
+    (as the ``pin_unrecorded`` nudge / via ``--write-pins``) once a litreview cite's **omissions
+    (``unaddressed``) list is empty** — i.e. every must-confront claim is cited or waived; an
+    unaddressed report has nothing to pin yet."""
     m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
     if not m:
         return {}
@@ -934,6 +997,42 @@ def litreview_pins(text: str) -> dict[str, str]:
         return {}
     pins = data.get("litreview_pins") if isinstance(data, dict) else None
     return {str(k): str(v) for k, v in pins.items()} if isinstance(pins, dict) else {}
+
+
+def write_litreview_pins(report_path: Path, surfaced: dict[str, str]) -> dict[str, str]:
+    """Merge ``surfaced`` (``{litreview-id -> 12-char pin}``) into a report's ``litreview_pins``
+    front-matter block and write it back — the mechanized form of the "copy the surfaced pin into
+    ``litreview_pins``" paste step (``sci report --write-pins``). Existing pins are kept (surfaced
+    values win on conflict); a report with no front matter gets one. Returns the merged mapping.
+
+    Surgical, not a full YAML round-trip: the existing ``litreview_pins:`` mapping block is replaced
+    in place and other front-matter keys are left byte-for-byte untouched, so the rest of the
+    report's front matter is never reformatted."""
+    rp = Path(report_path)
+    text = rp.read_text(encoding="utf-8")
+    merged = {**litreview_pins(text), **surfaced}
+
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+    fm_body, rest = (m.group(1), text[m.end():]) if m else ("", text)
+
+    # Drop any existing litreview_pins: key + its indented children from the front-matter body.
+    cleaned: list[str] = []
+    skipping = False
+    for line in fm_body.splitlines():
+        if re.match(r"^litreview_pins\s*:", line):
+            skipping = True
+            continue
+        if skipping:
+            if line.strip() and re.match(r"^\s+\S", line):   # an indented child of the block
+                continue
+            skipping = False
+        cleaned.append(line)
+
+    block = ["litreview_pins:"] + [f'  {k}: "{merged[k]}"' for k in sorted(merged)]
+    kept = [ln for ln in cleaned if ln.strip()]
+    new_fm = "\n".join(kept + block)
+    rp.write_text(f"---\n{new_fm}\n---\n{rest}", encoding="utf-8")
+    return merged
 
 
 def audit(report_path: Path, home: Path | None = None,
@@ -1192,6 +1291,7 @@ def audit(report_path: Path, home: Path | None = None,
         "litreview_cites": litreview_cites,
         "findings": findings,
         "advisories": advisories,
+        "warnings": stale_grounding_warnings(home),
         "status": status,
     }
 
@@ -1737,6 +1837,9 @@ def render_audit(result: dict[str, Any]) -> str:
     lines = [f"{result['report']}: {result['status']}  "
              f"(scope: {result['scope']}"
              + (f", {result['exp_id']}" if result.get("exp_id") else "") + ")"]
+    for w in result.get("warnings", []):
+        mods = ", ".join(w.get("modules", []))
+        lines.append(f"  ⚠ stale-grounding: {w['detail']}" + (f" [{mods}]" if mods else ""))
     for c in result["citations"]:
         mark = _CITE_MARK.get(c["verdict"], c["verdict"])
         tail = ""
@@ -1804,6 +1907,11 @@ def render_audit(result: dict[str, Any]) -> str:
                 lines.append(f"      {rec['cite']}: {tags}")
                 if rec.get("note"):
                     lines.append(f"        note: {rec['note']}")
+        elif a.get("detail") and "value" not in a:
+            # A prose-free advisory (empty-must-confront, the collapsed weak-load-bearing survey
+            # summary, …) carries its own message; render it verbatim.
+            loc = f" {cites}" if cites else ""
+            lines.append(f"  ~ {a['kind']} (L{a['line']}){loc}: {a['detail']}")
         else:
             lines.append(f"  ~ {a['kind']} (L{a['line']}) {cites}: {_fmt_qty(a['value'])} not "
                          f"asserted by the cited claim(s) — verify it isn't a derived/mis-transcribed number")
