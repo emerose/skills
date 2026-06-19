@@ -24,9 +24,11 @@ It exists for three reasons a report cannot serve on its own:
    re-swept once: the reports that cite a litreview inherit its re-derivation instead of each
    re-sweeping (see *Staleness*).
 
-A litreview is held to a **high completeness/fairness bar but a lower narrative-polish bar** than a
-report. It is more structured catalog than flowing essay; do not spend effort on rhetorical shape
-that you would spend on a report.
+A litreview is held to a **high completeness/fairness bar**: the test is whether it neutrally and
+completely characterizes the published evidence, not whether it argues well. It should *read* like a
+review article — a synthesis, not a catalogue of per-paper summaries (see *Structure*) — but it
+carries none of a report's persuasive intent. Where a report works to *convince*, a litreview only
+works to *represent the literature faithfully* and point the reader to the primary sources.
 
 ## What a litreview is NOT
 
@@ -67,26 +69,76 @@ encourages (e.g. `it-aso-biodistribution`, `ube3a-dosage-biology`). Per-question
 the completeness problem: "complete on IT biodistribution" is tractable; "complete on everything" is
 not. A report cites the 1–3 litreviews its argument spans.
 
-## Structure of `review.md`
+## Structure of `review.md` — a synthesis, not a form
 
-Front matter as for a report (`title`, `date`, `classification`), then:
+A litreview reads like a review article: a **synthesis organized by the themes of the field**,
+engaging specific studies and their numbers, showing where the literature agrees, conflicts, and is
+silent — but carrying **no novel argument or conclusion of its own**. Its two jobs are to (1) fairly
+characterize what the published literature reports and (2) be a **roadmap** to the primary sources, so
+a reader (or a downstream report-author) can see who found what, in what system, and drill straight to
+the original paper.
 
-- **Question & scope** — the sub-question this maps and its boundaries. One short paragraph.
-- **Body, organized by sub-question** — under each, the assessed landscape: the assertions the field
-  makes, each a grounded `[lit:]` claim, with strength, who, and how direct. For each sub-question,
-  state the evidence that **supports**, that **contradicts**, that is **equivocal**, and — explicitly
-  — where there is **no evidence**. A sub-question with only supporting claims is a red flag for a
-  steered survey.
-- **Controversies / unresolved** — where the field genuinely disagrees, presented side by side
-  ("Lab A reports X; Lab B's model implies not-X under condition C"), each side its own `[lit:]`
-  claim. This is the litreview's signature section: do **not** flatten a disagreement into whichever
-  side you list first. A claim and its counter-claim should reference each other.
+The external standard is the narrative-review literature — Pautasso's *Ten Simple Rules for Writing a
+Literature Review* [`pautasso2013ten`] and the **SANRA** quality scale [`baethge2019sanra`], both in
+the bibliographer library (`bib query "<the one thing you want>" pautasso2013ten` for a granular read).
+**You do not need to load either to write a litreview** — the discipline below is self-contained; the
+references are for calibration only. We follow that standard with **one deliberate departure**: a
+normal review rewards the author's *own* critical thesis, and ours **forbids** it.
+
+**Synthesize, don't summarize — but stay attributable.** A litreview is not a string of per-paper
+summaries, and not a fixed template of buckets. Organize by *theme*; in each paragraph lead with a
+point and weave the relevant studies together — who found it, in what system, how directly, agreeing
+or conflicting. The connective tissue must itself be *observable from the sources* ("X and Y report
+opposite effects under condition C"), **never** the author's inference ("the field is therefore
+converging on Z"). If you find yourself drawing a conclusion the papers don't state, stop — that is a
+report's job, not a litreview's.
+
+- **Summary (wrong):** "Lin et al. report tolerance to 50% loss. Okafor et al. report dose-dependent
+  deficits. Mehta et al. report variable phenotypes."
+- **Synthesis (right):** "Whether partial loss is tolerated appears to turn on *timing* rather than
+  *depth*: Lin et al. saw no deficit at 50% reduction induced prenatally [lit:…], whereas Okafor et
+  al. found graded deficits from postnatal reduction [lit:…] — though both rest on one lab's inducible
+  system, and Mehta et al. report the same reduction yielding divergent phenotypes across animals
+  [lit:…], so a single tolerance threshold is not established."
+
+The right version grounds each clause in a `[lit:]` claim *and reads off the relationships from the
+studies themselves* — it invents no thesis; it reports that the field's own results point at timing.
+
+**Appraise strength descriptively, take no position.** Note the weight of each line of evidence as you
+go — single lab, indirect, small *n*, unreplicated, contested — because a reader needs it to judge the
+source. This is description, not a verdict: surface the limitation, don't rule on it. (This is the
+half of "be critical" we keep; the evaluative half — *your* judgment of who is right — we drop.)
+
+**Be a roadmap to the primary literature.** Name the studies and their systems *in the prose*, not
+only in footnotes, so the review doubles as a finding-aid. Every load-bearing statement resolves to a
+`[lit:]` claim pinned to a specific paper — and always the **primary** source (see
+[report-authoring.md](report-authoring.md) → *Always cite the primary source*).
+
+**The shape — adapt to the evidence, never template:**
+
+- **Front matter** as for a report (`title`, `date`, `classification`).
+- **Question & scope** — why the question matters, and what the survey covers and does *not*
+  (SANRA's *importance* + *aims*). One short paragraph.
+- **Body, organized thematically** — sections that follow the natural joints of the field (by
+  mechanism, model system, developmental axis — whatever the topic's structure is), in an order you
+  could defend, each synthesizing per the rules above. For the *shape* of a real review, a
+  gene-biology review typically runs regulation → dosage role → model systems → distribution →
+  mechanism → function → open questions — a logical thematic flow, not a grid.
+- **Controversies** — where the field genuinely splits, the competing accounts side by side, each its
+  own `[lit:]` claim, cross-referencing. Do not flatten a disagreement into whichever side you list
+  first.
 - **Gaps / open questions** (mandatory) — what the literature does *not* settle: unmeasured regimes,
-  questions answered only by analogy, single-lab results never replicated. This is the litreview's
-  analog of a report's assumptions section, and the first place incompleteness shows up *by its
-  absence*. A litreview with no gaps section is not done.
+  questions answered only by analogy, single-lab results never replicated. The litreview's analog of a
+  report's assumptions section, and the first place incompleteness shows up *by its absence*. A
+  litreview with no gaps section is not done.
+- **No conclusion that recommends** — close with a state-of-knowledge summary, never a program
+  decision.
 
-No conclusion/recommendation section.
+**`supporting / contradicting / equivocal / absent` is a coverage *checklist*, not a prose form.** The
+author and the completeness critic apply it *per theme* — "have I represented the contradicting and
+the absent evidence here?" — to test coverage. It never dictates the shape of the prose. A theme
+covered only by supporting claims is a red flag for a steered survey, but the fix is to find and weave
+in the missing evidence, not to add an "Absent:" paragraph.
 
 ## The claim backbone — `[lit:]` as usual, plus a must-confront tag
 
@@ -114,9 +166,18 @@ The `reason` is one line on *why* a report must address it. This tag is the litr
 important neutral judgment: it is made **before and independent of any thesis**, which is exactly
 what makes the obligation trustworthy. Mark a claim must-confront when ignoring it would let a report
 reach a tidy conclusion the full evidence does not support — disconfirmers, the binding bound, the
-genuine controversy. Do **not** mark the whole claim set; the obligation is the *contested core*, not
-every on-topic fact. The set surfaces in the grounding report (`must_confront: {reason}`) and drives
+genuine controversy. The set surfaces in the grounding report (`must_confront: {reason}`) and drives
 both the omissions audit and staleness.
+
+**The deciding lens.** Tag a claim must-confront **if a report could rest a *number* or a *safety /
+efficacy conclusion* on it**; leave it untagged if it only supplies *framing* or *background*. A
+binding bound (a tolerance ceiling, a minimum effective level), a disconfirmer, or a genuine
+controversy is must-confront; a broadly-accepted premise that no conclusion pivots on is not. When in
+doubt, tag: an over-tag costs a citing report one citation, but an under-tag lets a report skip the
+very evidence the litreview exists to force it to confront. The "don't tag everything" instinct is
+calibrated for *large* surveys — a small, tightly-contested survey (say six claims on one disputed
+question) can legitimately tag most of its claims, because most of them genuinely *are* the contested
+core.
 
 ## Consumption — `[litreview:<id>]` and the omissions audit
 
@@ -136,6 +197,13 @@ backfill.
 claim is a blocking `unaddressed-must-confront` finding. The audit is scoped to the must-confront set
 *by design* — requiring a report to cite *every* claim of a broad survey would force irrelevant
 breadth and train reflexive waivers; the contested core is the obligation, and it is small.
+
+**The audit guarantees mention, not engagement.** "Addressed" means the must-confront claim is cited
+(or waived) *somewhere* in the report — a green omissions audit proves the report **acknowledged** the
+contested core, not that it **grappled** with it. Whether the prose actually engages the evidence
+(rather than name-checking it in a citation drive-by) is the **§3 fresh-context pass's** job, not the
+mechanical audit's. Read a passing omissions audit as "nothing contested was silently dropped," never
+as "the report engaged the controversy."
 
 **Waiver syntax.** A one-line waiver in the report's assumptions/weak-support section, naming the
 claim and the reason it does not bear on this report's argument:
@@ -226,11 +294,32 @@ judgment is here.
 After the sweep, run `sci coverage --since <date>` — banked-but-unclaimed papers are the worklist of
 assertions the survey still owes, and one mechanical leg of completeness.
 
+## Restructuring vs. authoring from scratch
+
+A litreview is often built not by a cold sweep but by **restructuring evidence already grounded
+elsewhere** — lifting `[lit:]` claims a report previously authored into a dedicated litreview module,
+so the survey formalizes knowledge the program already holds. This is the cheaper and more common
+path; the broad sweep above is for genuinely new ground. Two things make it safe and honest:
+
+- **Moving a claim is resolution-safe.** A bare `[lit:<node>]` resolves across *all* claim modules by
+  node name, so moving a claim from `test_literature_<report>.py` into `test_litreview_<slug>.py`
+  leaves every existing citation resolving — **provided the node name stays unique tree-wide**. Check
+  for a node-name collision before moving (two `test_floor`s would become ambiguous) and rename if so;
+  then re-run grounding so the moved claims land in the new module's grounding report.
+- **Surface deferred coverage hits, don't bury them.** A restructure is deliberately *not* a fresh
+  sweep — but `sci coverage` will still surface on-topic library papers no claim cites. Don't silently
+  ignore them, and don't cold-sweep them either: list them in the **Gaps** section as candidates for a
+  later assessment pass, so the deferral is *visible*. A restructured litreview that lists zero such
+  candidates on a well-studied topic is suspiciously tidy.
+
 ## Required: a completeness critic (fresh-context), distinct from the §3 pass
 
 A litreview's whole value is *complete and fair*, and that is not the §3 prose↔claims check (which
-verifies citations map to claims). Before a litreview is final, **delegate a completeness/fairness
-review to a fresh-context subagent** — the litreview author is blind to the question they didn't ask.
+verifies citations map to claims). Because the rigid section template is gone, **this critic — not the
+tool — is the primary guardian of the per-theme supporting / contradicting / absent coverage**; the
+audit's only hard structural check is that a gaps section exists. Before a litreview is final,
+**delegate a completeness/fairness review to a fresh-context subagent** — the litreview author is
+blind to the question they didn't ask.
 Hand it `review.md`, the cited claims' statements/strengths/sources, the `prompt.md` (for sub-topic
 coverage), and the `sci coverage --since` output. Prompt it adversarially:
 
@@ -247,7 +336,8 @@ pass and a light voice check too (the report-authoring rules apply, at the lower
 ## `sci litreview` — build / audit / index / render / delta
 
 ```bash
-sci litreview <review.md> [--home H] [--json]      # AUDIT: every [lit:] claim backed; structure present
+sci new-litreview <slug>                           # SCAFFOLD: folder + review.md + prompt.md + correctly-named module
+sci litreview <review.md> [--home H] [--json]      # AUDIT: every [lit:] claim backed; gaps present; module sane
 sci litreview <review.md> --must-confront [--json] # list the must-confront obligation set
 sci litreview <review.md> --render out.pdf [--to pdf|html|docx]
 sci litreview <review.md> --trace                  # litreview -> each [lit:] claim -> paper
@@ -255,18 +345,27 @@ sci litreview <review.md> --delta base.json [--json]  # claim-set delta vs a bas
 sci litreview <review.md> --index                  # upsert into the store as kind=litreview
 ```
 
+**Start with `sci new-litreview <slug>`** — it stubs the folder, `review.md`, `prompt.md`, and the
+**correctly-named** claim module (`test_litreview_<slug-underscored>.py`), removing the highest-risk
+manual step. On the report side, `sci report --write-pins` writes the surfaced `litreview_pins` into
+the report's front matter automatically (no manual paste).
+
 The `--delta` baseline is just an older copy of the grounding report — the git part stays yours:
 `git show <ref>:program/analysis/grounding_report.json > base.json`, then
 `sci litreview <review.md> --delta base.json`. It reports what entered/left the must-confront set or
 drifted, the worklist the cheap-update delta-judge weighs (see *Keeping a citing report current*).
 
 The **audit** validates mechanically (a failure → `BROKEN`, exit 1): every `[lit:]` claim resolves
-and is `backed` by the `lit_verdict` rule in [report.md](report.md); the structure carries a gaps
-section and (when there are competing claims) a controversies section; and the must-confront set is
-non-empty (a survey that obliges a citing report to confront *nothing* is almost always
-under-assessed — a warning, not a block, when the topic is genuinely uncontested). It does **not**
+and is `backed` by the `lit_verdict` rule in [report.md](report.md); a **gaps** section is present;
+and the claim module **resolves and is non-empty** — a missing or empty `test_litreview_<slug>.py`
+now **fails loudly** (the misname footgun), not as a quiet "under-assessed" advisory. It also warns
+when the grounding report is older than the claim module (re-run the claims with `--grounding-out`),
+and it **suppresses the report-tuned `weak-load-bearing` advisory**, which is noise for a
+conclusion-free survey where single-group/moderate evidence is the expected norm. It does **not**
 re-run the claims suite (that produced the grounding report); like `sci report` it reads the recorded
-grounding report.
+grounding report. **Structural coverage beyond the gaps section — the per-theme
+supporting/contradicting/absent discipline — is enforced by the completeness critic, not the tool**
+(see below).
 
 The `[litreview:]` omissions check and `stale-litreview` pin live in the **report** audit
 (`sci report`), since they are properties of the *consuming* report — see *Consumption* / *Staleness*.
