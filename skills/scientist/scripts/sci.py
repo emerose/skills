@@ -209,6 +209,11 @@ def main() -> int:
     p_cov.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
     p_cov.add_argument("--since", help="flag uncited papers added on/after this ISO date "
                        "(e.g. 2026-06-16); default: the most recently banked uncited")
+    p_cov.add_argument("--query", help="topic to scope the worklist to (RECOMMENDED for a single "
+                       "report/sub-question): intersect the uncited set with `bib query` hits and "
+                       "rank by score, instead of the coarse library-wide tally")
+    p_cov.add_argument("--query-limit", type=int, default=100,
+                       help="max `bib query` hits to scope against when --query is given (default 100)")
     p_cov.add_argument("--bib", help="command to run the bibliographer CLI "
                        "(default: $SCIENTIST_BIB_CMD, else the sibling bib.py via uv, else `bib`)")
     p_cov.add_argument("--json", action="store_true", help="machine-readable output")
@@ -552,7 +557,30 @@ def _coverage(args: argparse.Namespace) -> int:
     if isinstance(library, dict):
         library = library.get("articles") or library.get("records") or []
 
-    result = COVERAGE.coverage(library, cited, since=args.since)
+    # Topic-scoping (recommended for a single report): intersect the uncited set with `bib query`
+    # hits and rank by score. The same chunk-level hits a literature sweep uses; we fold to the
+    # best score per citekey (a paper may surface via several chunks).
+    query_scores: dict[str, float] | None = None
+    if args.query:
+        try:
+            proc = subprocess.run(
+                [*bib_cmd, "query", args.query, "--json", "--limit", str(args.query_limit)],
+                capture_output=True, text=True, check=True)
+            hits = json.loads(proc.stdout)
+        except (OSError, subprocess.CalledProcessError) as e:
+            print(f"could not run `bib query` for --query scoping: {e}", file=sys.stderr)
+            return 1
+        except ValueError as e:
+            print(f"bibliographer did not return JSON for `bib query`: {e}", file=sys.stderr)
+            return 1
+        query_scores = {}
+        for h in hits if isinstance(hits, list) else []:
+            ck, score = h.get("citekey"), h.get("score")
+            if ck and score is not None:
+                query_scores[str(ck)] = max(query_scores.get(str(ck), float(score)), float(score))
+
+    result = COVERAGE.coverage(library, cited, since=args.since,
+                               query=args.query, query_scores=query_scores)
     emit(result, args.json, COVERAGE.render_coverage)
     return 0
 

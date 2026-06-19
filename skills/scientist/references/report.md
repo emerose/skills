@@ -316,6 +316,22 @@ live in the report audit because they are properties of the *consuming* report):
   (strength/paraphrase) or was retracted. Re-address, then re-pin. Cosmetic or irrelevant new claims
   in X never touch the report, so a litreview can be re-swept often without a BROKEN cascade.
 
+> **Prerequisite — both checks need the full transitive grounding tree regenerated first.** They read
+> the grounding reports of everything the report transitively rests on — each cited experiment's
+> `grounding_report.json` and any `[report:]`/`[litreview:]` dependency's. Those files are
+> **gitignored / regenerable** (a fresh checkout has none), so a missing or stale upstream shows
+> `BROKEN` and **masks the litreview omissions result**. Regenerate the whole tree (`pytest …
+> --grounding-out …` per dep — see *Running* above) before reading the omissions/pin output. See
+> [litreview.md](litreview.md) → *Consumption*.
+
+**Importing a single edge-claim from an adjacent scope — flag-and-delegate.** When a report (or
+litreview) needs *one* claim that belongs to a neighbouring scope — e.g. citing an over-side
+"headroom" datum as the upper edge of a loss-side band — cite that one `[lit:]`/`[claim:]` claim
+directly and **name the report/litreview that owns the adjacent scope, noting the boundary**. That
+is the entire obligation: importing an edge-claim does *not* require surveying the adjacent
+home-literature yourself, and the completeness critic stays scoped to *this* report's own subject —
+it must not pull the neighbouring literature into scope for a single imported edge-claim.
+
 See [litreview.md](litreview.md) → *Consumption* and *Staleness* for the discipline (the
 must-confront tag, the completeness critic) behind both.
 

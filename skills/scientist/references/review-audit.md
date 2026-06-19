@@ -173,22 +173,30 @@ reconciliation, naming) plus the full cell-coverage check — see [extract.md](e
 ## Claims coverage — is the grounding keeping up with the library?
 
 ```bash
-sci coverage [--since 2026-06-16] [--home H] [--json]   # library papers cited by NO grounded claim
+sci coverage --query "<topic>" [--since 2026-06-16] [--home H] [--json]   # uncited papers relevant to a topic
+sci coverage [--since 2026-06-16] [--home H] [--json]                     # coarse library-wide tally
 ```
 The completeness counterpart to `sci report`: the audit checks that the citations a report *wrote*
 resolve; `coverage` checks the opposite gap — papers banked into the bibliographer library that **no
 grounded literature claim cites**. A literature sweep that grows the library by dozens of papers while
 the claim set stays put is the silent failure (the library looks like diligence, the audit stays green,
 the grounding quietly stagnates). It diffs the library citekeys (`bib list --json`) against the
-citekeys any claim cites (`evidence.lit_sources`), and prints coverage plus the uncited papers
-newest-first — flagged by `--since` (everything banked on/after a date) or the most recent N.
+citekeys any claim cites (`evidence.lit_sources`).
 
-It is a **worklist generator, not a gate** (always exit 0): the set-difference is mechanical, but
-judging which uncited papers are load-bearing enough to deserve a claim is an agent's job — ideally a
-fresh-context **completeness critic** that reads the flagged papers and proposes claims (or strength
-upgrades where a paper adds an independent group). Run it after a sweep; treat a pile of recently-banked
-uncited papers as the prompt to write the claims the sweep earned. The bibliographer CLI is found via
-`--bib`, `$SCIENTIST_BIB_CMD`, the sibling `bib.py`, or `bib` on PATH (it needs `$BIBLIOGRAPHER_HOME`).
+**Use the topic-scoped form for a per-report worklist.** Bare `sci coverage` is a **coarse,
+library-wide tally** — it returns *every* uncited paper newest-first, which on a real library is
+hundreds of rows, unranked and polluted with off-topic noise, useless for a single report or
+sub-question. `--query "<topic>"` intersects the uncited set with a `bib query` and **ranks it by
+relevance**, which is the actual per-report worklist (a topic-scoped `bib query` by hand does the
+same). `--since` narrows by *date* but not by *topic*, so it does not substitute for `--query`.
+
+It is a **worklist generator, not a gate** (always exit 0) and **one mechanical input to completeness,
+not the whole leg**: the set-difference is mechanical, but judging which uncited papers are load-bearing
+enough to deserve a claim is an agent's job — ideally a fresh-context **completeness critic** that reads
+the flagged papers and proposes claims (or strength upgrades where a paper adds an independent group).
+Run the topic-scoped form after a sweep; treat a pile of recently-banked, on-topic uncited papers as the
+prompt to write the claims the sweep earned. The bibliographer CLI is found via `--bib`,
+`$SCIENTIST_BIB_CMD`, the sibling `bib.py`, or `bib` on PATH (it needs `$BIBLIOGRAPHER_HOME`).
 
 ## Claims: grounding report, rollup, drift
 
@@ -226,6 +234,15 @@ sci trace <exp> [--json] [--claim <id>] [--report PATH]   # claim → analysis �
 **pure provenance walk: it needs NO libkit store** (reads only `experiment.yml` + an optional
 `grounding_report.json`) and never re-runs an analysis (reproduction is out of scope — this is a static
 DAG + drift walk).
+
+> **`grounding_report.json` is gitignored / regenerable — regenerate, don't backfill.** It is a
+> machine-owned artifact (a pure function of the claims suite), not committed, so a fresh checkout has
+> none. Anything that *reads* one — `sci trace`, `sci report`'s `[claim:]`/`[lit:]`/`[litreview:]`
+> audit, the `[litreview:]` omissions + `stale-litreview` pin — needs it (and the **full transitive
+> tree** of every cited experiment / `[report:]` / `[litreview:]` dep) regenerated first: `pytest
+> <…>/analysis/claims --grounding-out <…>/analysis`. A missing or stale upstream shows `BROKEN` and
+> **masks downstream results** (e.g. a consuming report's litreview-omissions verdict), so regenerate
+> the tree before trusting an audit — the absence is a regenerate step, never a defect to commit.
 
 - **Terminals.** With a grounding report present (default search: `<exp>/analysis/grounding_report.json`,
   then `<exp>/grounding_report.json`; override with `--report`), each *claim* is a terminal and its cited

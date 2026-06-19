@@ -124,9 +124,16 @@ only in footnotes, so the review doubles as a finding-aid. Every load-bearing st
   could defend, each synthesizing per the rules above. For the *shape* of a real review, a
   gene-biology review typically runs regulation → dosage role → model systems → distribution →
   mechanism → function → open questions — a logical thematic flow, not a grid.
-- **Controversies** — where the field genuinely splits, the competing accounts side by side, each its
-  own `[lit:]` claim, cross-referencing. Do not flatten a disagreement into whichever side you list
-  first.
+- **Contested status** — an honest read of whether the field genuinely splits. Where it does, lay the
+  competing accounts side by side, each its own `[lit:]` claim, cross-referencing; do not flatten a
+  disagreement into whichever side you list first. But the honest finding is often that there is *no*
+  two-camp controversy — the evidence converges, or the real fault line is something else (e.g.
+  single-lab dependence). **An explicit "no genuine controversy here; the contested axis is X"
+  discussion satisfies this expectation just as competing accounts do** — and a `## Controversies`
+  heading with nothing contested under it does not. The audit reports this as a **content-based
+  advisory, never a blocking check, and never satisfiable by a heading title alone**: never retitle a
+  section to trip it. The real bar is that the *must-confront set is engaged* (below), not that a
+  particular heading exists.
 - **Gaps / open questions** (mandatory) — what the literature does *not* settle: unmeasured regimes,
   questions answered only by analogy, single-lab results never replicated. The litreview's analog of a
   report's assumptions section, and the first place incompleteness shows up *by its absence*. A
@@ -190,6 +197,29 @@ A report that carries `[litreview:X]` stops authoring its own `[lit:]` claims fo
 — it cites X's claims directly (`[lit:<id>]`, resolved across all claim modules as today). A report
 that needs a literature fact *no* litreview covers is itself a signal that a litreview has a gap to
 backfill.
+
+**Importing a single edge-claim from an adjacent scope — flag-and-delegate, don't re-survey.** A
+survey (or report) sometimes needs *one* claim that belongs to a neighbouring scope: a loss-side
+litreview citing the over-side "headroom" datum as the upper edge of its band, say. Cite that one
+`[lit:]` claim directly (bare node names resolve across all claim modules) **and name the
+report/litreview that owns the adjacent scope, noting the boundary** — that is the whole obligation.
+Importing an edge-claim does **not** oblige you to survey its home literature: the adjacent
+overexpression corpus stays out of *this* survey's scope. The completeness critic is scoped to the
+report/survey's own subject and **must not pull the adjacent literature into scope for a single
+imported edge-claim** (see *Required: a completeness critic*) — flag-and-delegate is complete; a
+re-survey of the neighbour is out of scope.
+
+**Prerequisite — regenerate the full transitive grounding tree first.** Auditing a consuming report's
+`[litreview:]` omissions + pin reads the **grounding reports of everything the report transitively
+rests on** — every cited experiment's `grounding_report.json` *and* any `[report:]`/`[litreview:]`
+dependency's grounding. Those `grounding_report.json` files are **gitignored / regenerable**, so a
+fresh checkout has none: if *any* upstream is missing or stale, the report shows `BROKEN` on that
+upstream and **the omissions result is masked** (you can't tell a real omission from a missing
+grounding). So before auditing the consumption: regenerate the whole transitive tree
+(`pytest … --grounding-out …` for each cited experiment and each `[report:]`/`[litreview:]` dep), then
+run `sci report`. (See [report.md](report.md) → *Running* and [review-audit.md](review-audit.md) → the
+grounding-report regeneration note — a missing gitignored grounding is a regenerate step, not a defect
+to backfill.)
 
 **The omissions audit (blocking).** When a report cites `[litreview:X]`, `sci report` computes X's
 **must-confront** claims and checks the report **addresses each one**: either it cites the claim
@@ -291,8 +321,14 @@ on top of the gathered corpus: organize by question, ground the load-bearing ass
 claims, mark the must-confront set, write the controversies and gaps. Retrieval is bibliographer;
 judgment is here.
 
-After the sweep, run `sci coverage --since <date>` — banked-but-unclaimed papers are the worklist of
-assertions the survey still owes, and one mechanical leg of completeness.
+After the sweep, run `sci coverage --query "<this survey's topic>"` — banked-but-unclaimed papers
+**relevant to the topic** are the worklist of assertions the survey still owes. Use the **topic-scoped**
+form: unscoped `sci coverage` is a coarse library-wide tally that returns *every* uncited paper, unranked
+and polluted with off-topic noise — useless for a single sub-question (`--since` narrows by date but not
+by topic). `--query` intersects the uncited set with a `bib query` and ranks it by relevance, which is
+the actual per-survey worklist; a topic-scoped `bib query` does the same by hand. Treat it as one
+mechanical *input* to completeness, not the whole leg — judging which uncited papers are load-bearing
+stays the completeness critic's job.
 
 ## Restructuring vs. authoring from scratch
 
@@ -311,6 +347,13 @@ path; the broad sweep above is for genuinely new ground. Two things make it safe
   ignore them, and don't cold-sweep them either: list them in the **Gaps** section as candidates for a
   later assessment pass, so the deferral is *visible*. A restructured litreview that lists zero such
   candidates on a well-studied topic is suspiciously tidy.
+- **Defer breadth, never the disconfirmer.** What a restructure may defer to Gaps is *coverage
+  breadth* — the long tail of on-topic papers that add depth but not a new direction. It may **not**
+  defer the **load-bearing on-topic disconfirmer**: a result that contradicts a surveyed claim is
+  exactly what the completeness critic blocks on (below), so even a restructure owes enough searching
+  to *find* the disconfirmers and confront them in the prose. The line is sharp: defer breadth, never
+  the disconfirmer. A disconfirmer parked in Gaps as "coverage to revisit" is a blocking miss, not a
+  deferral.
 
 ## Required: a completeness critic (fresh-context), distinct from the §3 pass
 
@@ -321,7 +364,8 @@ audit's only hard structural check is that a gaps section exists. Before a litre
 **delegate a completeness/fairness review to a fresh-context subagent** — the litreview author is
 blind to the question they didn't ask.
 Hand it `review.md`, the cited claims' statements/strengths/sources, the `prompt.md` (for sub-topic
-coverage), and the `sci coverage --since` output. Prompt it adversarially:
+coverage), and the topic-scoped `sci coverage --query "<this survey's topic>"` worklist (the
+unscoped tally is too noisy to hand a critic — see *Gathering*). Prompt it adversarially:
 
 > *What sub-question relevant to the scope got no coverage? What claim is characterized as settled
 > that the field actually contests, or as fringe that is mainstream? What contradicting evidence to
@@ -332,6 +376,19 @@ It returns, per finding: the gap, why it matters, and what to add. **Blocking**:
 sub-question, a mischaracterized claim, an untagged disconfirmer that should be must-confront. The
 objective stop condition is an empty blocking list, judged by the reviewer. Run the §3 prose↔claims
 pass and a light voice check too (the report-authoring rules apply, at the lower polish bar).
+
+**The disconfirmer is the hard floor; breadth is not.** The critic distinguishes a *coverage-breadth*
+gap (an on-topic paper that would add depth — defer it to Gaps, non-blocking) from a *load-bearing
+on-topic disconfirmer* (a result that contradicts a surveyed claim — **blocking**, even for a
+restructure; see *Restructuring vs. authoring from scratch*). Defer breadth, never the disconfirmer.
+
+**Scope the critic to the survey's own subject.** A litreview may *import* a single edge-claim from
+an adjacent scope (e.g. a loss-side survey citing the over-side "headroom" datum as its upper band
+edge) by **flag-and-delegate** — citing the report/litreview that owns the adjacent scope and noting
+the boundary (see *Consumption*). That single imported edge-claim does **not** pull the adjacent
+home-literature into this critic's sights: do not flag the survey for "incomplete coverage" of a
+neighbouring topic it deliberately delegated. The critic's coverage bar is this survey's own
+sub-question, not the union of every scope it touches at the edges.
 
 ## `sci litreview` — build / audit / index / render / delta
 

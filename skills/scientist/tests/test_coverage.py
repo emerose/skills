@@ -59,6 +59,40 @@ def test_cited_not_in_library_surfaced():
     assert res["cited_count"] == 1   # only library∩cited counts toward coverage
 
 
+def test_query_scopes_and_ranks_uncited():
+    """--query restricts the worklist to topic-relevant uncited papers and ranks them by score
+    (the off-topic uncited paper is dropped; a cited paper never appears even if it scores)."""
+    lib = _lib(("ontopic_hi", "2026-06-01T00:00:00+00:00"),
+               ("ontopic_lo", "2026-06-02T00:00:00+00:00"),
+               ("offtopic", "2026-06-17T00:00:00+00:00"),
+               ("cited_hit", "2026-06-10T00:00:00+00:00"))
+    # bib-query hits (citekey -> score), mocked the way the library is mocked elsewhere.
+    scores = {"ontopic_lo": 0.40, "ontopic_hi": 0.90, "cited_hit": 0.95}
+    res = C.coverage(lib, cited={"cited_hit"}, query="ube3a dosage", query_scores=scores)
+    # ranked by score desc; off-topic dropped (not in scores); cited paper excluded though it scored.
+    assert [r["citekey"] for r in res["flagged"]] == ["ontopic_hi", "ontopic_lo"]
+    assert res["flagged"][0]["score"] == 0.90
+    assert res["query"] == "ube3a dosage"
+    # the coarse library-wide tally is unchanged underneath the scoping.
+    assert res["uncited_count"] == 3
+
+
+def test_query_combines_with_since():
+    lib = _lib(("old_hit", "2026-06-01T00:00:00+00:00"),
+               ("new_hit", "2026-06-17T00:00:00+00:00"))
+    scores = {"old_hit": 0.99, "new_hit": 0.10}
+    res = C.coverage(lib, cited=set(), since="2026-06-16",
+                     query="topic", query_scores=scores)
+    assert [r["citekey"] for r in res["flagged"]] == ["new_hit"]   # old_hit excluded by --since
+
+
+def test_query_render_smoke():
+    lib = _lib(("a", "2026-06-01T00:00:00+00:00"), ("b", "2026-06-17T00:00:00+00:00"))
+    out = C.render_coverage(C.coverage(lib, cited=set(), query="topic X",
+                                       query_scores={"a": 0.5, "b": 0.7}))
+    assert "topic X" in out and "score" in out and "b" in out
+
+
 def test_empty_library():
     res = C.coverage([], cited={"a"})
     assert res["coverage_pct"] == 0.0 and res["library_total"] == 0
