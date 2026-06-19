@@ -160,10 +160,12 @@ Notes that matter when adding:
   it falls back to the PDF's embedded metadata and marks the record unverified —
   tell the user, and consider supplying the DOI/arXiv id to enrich it.
 - When a record has a DOI/PMID, `add`/`import` also stamp a
-  **`metrics`** sub-dict from OpenAlex (best-effort): field-weighted citation
-  impact + percentile, a Retraction-Watch `is_retracted` flag, OA status, and
-  journal-trust signals (DOAJ membership, Scopus indexing, impact, h-index).
-  `bib show` surfaces them; `--no-network` skips them. See
+  **`metrics`** sub-dict from OpenAlex (best-effort): a `cited_by_count`,
+  field-weighted citation impact + percentile, a Retraction-Watch `is_retracted`
+  flag, OA status, journal-trust signals (DOAJ membership, Scopus indexing,
+  impact, h-index), and an `as_of` date. `bib show` surfaces them; `--no-network`
+  skips them. Citation counts drift, so they carry that `as_of` stamp and can be
+  topped up later with `bib refresh` (below). See
   [references/schema.md](references/schema.md).
 - `add` takes **several identifiers in one call** — `bib add <DOI> <PMID> …` —
   which is how you bank the keepers from a `discover` sweep. An already-present
@@ -329,6 +331,25 @@ bib backfill --tag topic:aso  # only stubs carrying this tag   (--limit N to cap
 See [references/getting-pdfs.md](references/getting-pdfs.md) for the escalation
 ladder the worklist feeds into.
 
+**Backfilling / refreshing citation metrics.** Records added before metrics
+existed — or where the OpenAlex lookup hit a network blip — have no `cited_by_count`
+/ FWCI. `bib refresh` fills those gaps: it finds every record with a DOI/PMID but
+no `metrics` block and stamps each from OpenAlex (with an `as_of` date). Because
+citation counts drift, `--stale DAYS` also re-pulls metrics older than DAYS and
+`--all` re-pulls everything; both bypass the 30-day resolver cache. OpenAlex is
+queried one record at a time behind a polite-pool throttle, so a sweep is gentle;
+`--limit` (default 500) caps a run and re-runs skip finished records, so a large
+library can be filled in chunks. Useful before a literature review, where
+most-cited sources carry weight (like FWCI).
+
+```bash
+bib refresh                   # backfill metrics for records that have none
+bib refresh --dry-run         # list what would be fetched; change nothing
+bib refresh --stale 180       # also re-pull metrics older than 180 days
+bib refresh --all --limit 0   # re-pull every eligible record, no cap
+bib refresh --tag topic:aso   # only records carrying this tag
+```
+
 **Keeping the library healthy:**
 
 ```bash
@@ -347,10 +368,11 @@ metadata. Empty folders under `papers/` are pruned automatically after every com
 ## Machine-readable output
 
 `list`, `search`, `show`, `add`, `import`, `enrich`, `query`, `discover`,
-`backfill`, `dedupe`, `check`, and `audit` take `--json`. Prefer it when you need
-to parse results, count, or feed another step. `discover --json` emits
+`backfill`, `refresh`, `dedupe`, `check`, and `audit` take `--json`. Prefer it when
+you need to parse results, count, or feed another step. `discover --json` emits
 `{"results": [...], "sources": {name: count|error}, "added": {...}}`; `backfill
---json` emits `{"checked": N, "fetched": [...], "remaining": [...]}`.
+--json` emits `{"checked": N, "fetched": [...], "remaining": [...]}`; `refresh
+--json` emits `{"checked": N, "updated": [...], "failed": [...], "remaining": N, "ineligible": N}`.
 
 ## Two ways to call it: CLI or Python — your choice
 

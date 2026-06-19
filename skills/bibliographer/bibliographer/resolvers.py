@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,29 @@ async def _s2_throttle() -> None:
         if wait > 0:
             await asyncio.sleep(wait)
         _s2_last = time.monotonic()
+
+
+# OpenAlex's polite pool (queries carrying a real ``mailto``) permits up to 10
+# req/s. A process-wide gate at half that keeps enrichment — a single ``add`` or
+# a bulk ``refresh`` sweep over the whole library — comfortably under the limit
+# without slowing a one-record add noticeably. Cache hits skip it entirely.
+_OPENALEX_MIN_INTERVAL = 0.2
+_openalex_gate = asyncio.Lock()
+_openalex_last = 0.0
+
+
+async def _openalex_throttle() -> None:
+    global _openalex_last
+    async with _openalex_gate:
+        wait = _OPENALEX_MIN_INTERVAL - (time.monotonic() - _openalex_last)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _openalex_last = time.monotonic()
+
+
+def _today_iso() -> str:
+    """UTC date (``YYYY-MM-DD``) — the ``as_of`` stamp on OpenAlex metrics."""
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 # Persistent response cache (same diskcache pattern libkit uses). Resolver
@@ -98,14 +122,17 @@ async def _cached_get(
     params: dict[str, Any] | None = None,
     headers: dict[str, Any] | None = None,
     throttle: Any = None,
+    bypass: bool = False,
 ) -> tuple[int, bytes]:
     """GET with a persistent cache. Returns ``(status_code, body)``.
 
     On a cache hit, no request is made and ``throttle`` is not invoked. Only a
-    200 response is stored.
+    200 response is stored. ``bypass`` skips the cache *read* (forcing a live
+    fetch) but still refreshes the stored entry — used to re-pull drifting data
+    like citation counts that would otherwise be pinned by the 30-day TTL.
     """
     cache = _resolver_cache()
-    if cache is not None:
+    if cache is not None and not bypass:
         hit = cache.get(key, _MISS)
         if hit is not _MISS:
             return hit
@@ -678,27 +705,38 @@ _OPENALEX_WORK_SELECT = (
 
 
 async def fetch_openalex_work(
-    client: httpx.AsyncClient, *, doi: str | None = None, pmid: str | None = None
+    client: httpx.AsyncClient,
+    *,
+    doi: str | None = None,
+    pmid: str | None = None,
+    refresh: bool = False,
 ) -> dict[str, Any] | None:
-    """An OpenAlex work by DOI (preferred) or PMID, or None. Cached."""
+    """An OpenAlex work by DOI (preferred) or PMID, or None. Cached.
+
+    ``refresh`` bypasses the cache to re-pull drifting fields (e.g. ``cited_by_count``).
+    """
     for path in ([f"doi:{doi.lower()}"] if doi else []) + ([f"pmid:{pmid}"] if pmid else []):
         status, body = await _cached_get(
             client, f"https://api.openalex.org/works/{path}",
             key=f"openalex-work|{path}|v1",
             params={"mailto": mailto(), "select": _OPENALEX_WORK_SELECT},
+            throttle=_openalex_throttle, bypass=refresh,
         )
         if status == 200:
             return json.loads(body)
     return None
 
 
-async def fetch_openalex_source(source_id: str, client: httpx.AsyncClient) -> dict[str, Any] | None:
+async def fetch_openalex_source(
+    source_id: str, client: httpx.AsyncClient, *, refresh: bool = False
+) -> dict[str, Any] | None:
     """An OpenAlex Source (journal) by id, for its ``summary_stats``. Cached."""
     sid = source_id.rsplit("/", 1)[-1]
     status, body = await _cached_get(
         client, f"https://api.openalex.org/sources/{sid}",
         key=f"openalex-source|{sid}|v1",
         params={"mailto": mailto(), "select": "id,summary_stats"},
+        throttle=_openalex_throttle, bypass=refresh,
     )
     return json.loads(body) if status == 200 else None
 
@@ -739,32 +777,41 @@ def _openalex_metrics(work: dict[str, Any], source: dict[str, Any] | None) -> di
     return metrics
 
 
-async def enrich_openalex(rec: dict[str, Any], client: httpx.AsyncClient) -> bool:
+async def enrich_openalex(
+    rec: dict[str, Any], client: httpx.AsyncClient, *, refresh: bool = False
+) -> bool:
     """Stamp ``rec['metrics']`` with OpenAlex work + venue metadata. Best-effort.
 
     Looks the work up by the record's DOI (preferred) or PMID, then fetches the
-    journal Source for its h-index / impact when available. Also backfills a
-    top-level ``cited_by_count`` when the record lacks one (e.g. a Crossref-only
-    ``add``). Returns True if metrics were attached.
+    journal Source for its h-index / impact when available. The metrics block is
+    stamped with an ``as_of`` date so a stored citation count is interpretable.
+    Backfills a top-level ``cited_by_count`` when the record lacks one (e.g. a
+    Crossref-only ``add``). Returns True if metrics were attached.
+
+    ``refresh`` re-pulls the numbers past the resolver cache and *overwrites* an
+    existing ``cited_by_count`` (OpenAlex is the canonical source on refresh).
     """
     doi, pmid = rec.get("doi"), rec.get("pmid")
     if not (doi or pmid):
         return False
-    work = await fetch_openalex_work(client, doi=doi, pmid=str(pmid) if pmid else None)
+    work = await fetch_openalex_work(
+        client, doi=doi, pmid=str(pmid) if pmid else None, refresh=refresh
+    )
     if not work:
         return False
     src = (work.get("primary_location") or {}).get("source") or {}
     source = None
     if src.get("id"):
         try:
-            source = await fetch_openalex_source(src["id"], client)
+            source = await fetch_openalex_source(src["id"], client, refresh=refresh)
         except (httpx.HTTPError, ResolveError):
             source = None
     metrics = _openalex_metrics(work, source)
     if not metrics:
         return False
+    metrics["as_of"] = _today_iso()
     rec["metrics"] = metrics
-    if rec.get("cited_by_count") is None and work.get("cited_by_count") is not None:
+    if work.get("cited_by_count") is not None and (refresh or rec.get("cited_by_count") is None):
         rec["cited_by_count"] = work["cited_by_count"]
     return True
 
