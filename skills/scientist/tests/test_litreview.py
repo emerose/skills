@@ -140,7 +140,34 @@ def test_litreview_audit_grounded(tmp_path):
     assert res["kind"] == "litreview"
     assert sorted(R._short_claim_id(c) for c in res["must_confront"]) == \
         ["program::ceiling", "program::floor"]
-    assert res["has_controversy_section"] is True
+    assert res["contested_status_addressed"] is True
+
+
+def test_contested_status_satisfied_by_no_controversy_finding(tmp_path):
+    """An explicit 'no two-camp controversy; the fault line is single-lab dependence' discussion
+    addresses contested status just as competing accounts do — and it is never blocking."""
+    prog = _program(tmp_path)
+    body = _GOOD_REVIEW.replace(
+        "## Controversies / unresolved\nLab A and Lab B disagree on the deep-brain ratio [lit:test_floor].",
+        "## Convergence & dependence\nThere is no genuine two-camp split here; the evidence "
+        "converges, and the real fault line is single-lab dependence [lit:test_floor].")
+    review = _review_md(prog, "it-biodist", body)
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "GROUNDED", res["findings"]
+    assert res["contested_status_addressed"] is True
+
+
+def test_contested_status_not_satisfied_by_heading_alone(tmp_path):
+    """A 'Controversies' *heading* with no contested discussion under it must NOT count — content,
+    not a title. Still GROUNDED (the check is advisory, never blocking)."""
+    prog = _program(tmp_path)
+    body = _GOOD_REVIEW.replace(
+        "## Controversies / unresolved\nLab A and Lab B disagree on the deep-brain ratio [lit:test_floor].",
+        "## Controversies\nThe cord sees the most drug at the lumbar level [lit:test_floor].")
+    review = _review_md(prog, "it-biodist", body)
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "GROUNDED", res["findings"]
+    assert res["contested_status_addressed"] is False
 
 
 def test_litreview_audit_missing_gaps_section_is_broken(tmp_path):

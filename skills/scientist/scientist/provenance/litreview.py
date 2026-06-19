@@ -15,7 +15,9 @@ Markdown, so citation parsing and the ``[lit:]`` verdict are not re-implemented 
 * **literature-only** — a ``[claim:]`` (Kicho data), ``[report:]``, or nested ``[litreview:]``
   citation is a blocking finding (Kicho data meets the literature only in the citing report);
 * **structure** — a *gaps / open-questions* section is mandatory (the first place incompleteness
-  shows up by its absence); a *controversies* section is reported when present;
+  shows up by its absence); a *contested-status* treatment is reported as a content-based
+  **advisory** — satisfied by competing accounts OR an explicit "no genuine controversy" finding,
+  read off the prose, never by a heading title, never blocking;
 * **must-confront** — the litreview's obligation set (claims tagged ``@must_confront`` in its
   ``test_litreview_<slug>.py`` module) is surfaced. The set keys off that module-name convention,
   so two empty-set cases are distinguished: a module that contributes **no claims at all** under
@@ -32,15 +34,31 @@ from typing import Any
 
 from . import report as REPORT
 
-# A litreview must close with a gaps / open-questions section; a controversies section is reported
-# when present (competing claims belong side by side, not flattened). Heading-level (## / ###) only.
+# A litreview must close with a gaps / open-questions section. Heading-level (## / ###) only.
 _GAPS_HEADING_RE = re.compile(
     r"^#{2,3}\s+.*\b(gaps?|open\s+questions?|unknowns?|what.+not\s+settle)\b",
     re.IGNORECASE | re.MULTILINE)
-_CONTROVERSY_HEADING_RE = re.compile(
-    r"^#{2,3}\s+.*\b(controvers|disagree|conflict|contested|unresolved)\b",
-    re.IGNORECASE | re.MULTILINE)
 _ANY_HEADING_RE = re.compile(r"^(#{1,6})\s+\S")
+
+# Contested-status treatment — content-based and ADVISORY (never blocking, never satisfiable by a
+# heading title alone). A litreview owes an honest read of whether the field genuinely splits;
+# that obligation is met EITHER by competing accounts laid side by side OR by an explicit finding
+# of *no* genuine controversy (the real fault line is single-lab dependence; the evidence
+# converges). So this matches both vocabularies and is read off the **prose**, with heading lines
+# stripped — an author must never retitle a section to trip a regex. The real bar is engaging the
+# must-confront set, not the presence of a "Controversies" heading.
+_CONTESTED_STATUS_RE = re.compile(
+    r"\b(controvers|disagree|conflict|contested|unresolved|competing|diverg|"
+    r"converg|consensus|single[- ]lab|one lab|fault line)\b",
+    re.IGNORECASE)
+
+
+def _addresses_contested_status(text: str) -> bool:
+    """Does the prose engage contested status at all — competing accounts OR an explicit
+    no-controversy finding? Heading lines are stripped first, so a bare "## Controversies" with no
+    discussion under it does NOT count (content, not a title)."""
+    body = "\n".join(ln for ln in text.splitlines() if not _ANY_HEADING_RE.match(ln))
+    return bool(_CONTESTED_STATUS_RE.search(body))
 
 
 def _gaps_section_lines(text: str) -> set[int]:
@@ -101,7 +119,7 @@ def _litreview_advisories(text: str,
 def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
     """Audit a ``review.md``: every ``[lit:]`` claim backed (via :func:`report.audit`), the
     literature-only contract, and the structural requirements. Returns the
-    :func:`report.audit` result augmented with ``{kind, must_confront, has_controversy_section}``
+    :func:`report.audit` result augmented with ``{kind, must_confront, contested_status_addressed}``
     and a recomputed ``status`` (``GROUNDED`` iff no blocking finding)."""
     rp = Path(review_path).resolve()
     home = REPORT._resolve_home(home, rp)
@@ -171,7 +189,7 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
     return {**base, "kind": "litreview", "status": status, "findings": findings,
             "advisories": advisories, "must_confront": sorted(mc),
             "claims_module": REPORT._rel_or_name(module_path, home),
-            "has_controversy_section": bool(_CONTROVERSY_HEADING_RE.search(text))}
+            "contested_status_addressed": _addresses_contested_status(text)}
 
 
 def must_confront_listing(review_path: Path, home: Path | None = None) -> list[dict[str, Any]]:
@@ -331,5 +349,9 @@ def render_audit(result: dict[str, Any]) -> str:
                    f"no claims (see missing-claims-module finding above)")
     else:
         mc_line = "  must-confront: 0 (none tagged — under-assessed?)"
-    ctrl = "present" if result.get("has_controversy_section") else "absent"
-    return out + "\n" + mc_line + f"\n  controversies section: {ctrl}"
+    ctrl = ("addressed" if result.get("contested_status_addressed")
+            else "not evident in the prose")
+    return (out + "\n" + mc_line +
+            f"\n  contested-status: {ctrl} (advisory — met by competing accounts OR an explicit "
+            f"'no genuine controversy; the contested axis is X' finding; the real bar is engaging "
+            f"the must-confront set, not a heading)")
