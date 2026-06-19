@@ -206,6 +206,11 @@ def _credibility_from_rec(rec: dict) -> dict:
         "fwci": m.get("fwci"),
         "citation_percentile": m.get("citation_percentile"),
         "cited_by_count": rec.get("cited_by_count"),
+        # When the metrics were last fetched (OpenAlex `updated_date`/an enrich timestamp). Used by a
+        # bibliometric claim (:func:`metric`) to stamp the snapshot's `as_of` and to age-check it.
+        # Absent until the library records it (None is dropped); a bibliometric claim then stamps
+        # `as_of=None` and the audit nudges to re-`bib enrich`.
+        "as_of": m.get("as_of") or m.get("updated_date"),
         "open_access": m.get("open_access"),
         "work_type": m.get("work_type"),
         "venue_type": v.get("type"),
@@ -428,3 +433,70 @@ def converge(*sources: dict) -> list[dict]:
     srcs = [s for s in sources if s]
     assert srcs, "converge() needs at least one source"
     return srcs
+
+
+# --------------------------------------------------------------------------- #
+# Bibliometric (meta) claims — a claim ABOUT the literature, not a quote IN it.
+#
+# A *bibliometric* claim ("X is the most-cited result on this question", "Y is rarely
+# replicated") is a fact about a paper's standing in the field, not a quote in its text. The
+# quote-in-paper machinery (`source`) cannot represent it — there is no sentence in any paper that
+# asserts its own citation count — so these read a stored OpenAlex metric (e.g. `cited_by_count`)
+# off the library record and assert a plain-Python relation in the test body. `metric()` is the
+# **capture seam**: it reads the value, records it (value + as_of + source) as provenance so the
+# claim is citeable/traceable/stale-able, and returns the bare number so the test asserts normally:
+#
+#     @kind("bibliometric")
+#     @strength("moderate")
+#     @reviewed(date=…, by=…, support=True, note="comparison set = …; metric = cited_by_count",
+#               sha="…")   # the audit prints the value+as_of pin to stamp
+#     def test_x_is_not_the_most_cited():
+#         "Among the loss-tolerance papers, Silva-Santos 2015 and Daily 2011 are the most cited."
+#         assert cited_by("silvasantos2015ube") > cited_by("sonzogni2020assessing")
+#
+# Why no `metric(rel=…)` operator DSL: claims are pytests, so the relation is just Python (`>`,
+# top-k, ratios, membership). `metric()` only captures provenance; correctness is the assert.
+# The captured value+as_of is what `@reviewed(sha=)` pins over (see provenance.report
+# metric_review_sha) so a refreshed count re-opens review — exactly the "caught for review" guarantee.
+# --------------------------------------------------------------------------- #
+def metric(citekey: str, name: str, *, source: str = "openalex"):
+    """Read a stored bibliometric metric for a library paper, record it as provenance, and return
+    the bare value so a ``@kind("bibliometric")`` claim can assert a plain-Python relation.
+
+    Resolves the paper (recording it + running the retraction check, like :func:`paper`), reads
+    ``name`` from the library record's flattened credibility markers (e.g. ``"cited_by_count"``),
+    captures ``{citekey, metric, value, as_of, source}`` into the active capture's
+    ``metric_sources`` (so the claim is citeable, traceable, and stale-able), and returns the value.
+
+    The value + ``as_of`` are what the bibliometric review pin is computed over: a refreshed count
+    (a new ``bib enrich``) re-opens the recorded ``@reviewed`` (see provenance.report
+    :func:`metric_review_sha`). Raises :class:`LiteratureError` if the metric is not in the record
+    yet — ``bib enrich <citekey>`` fetches OpenAlex metrics — so a missing metric fails loudly
+    rather than silently grounding on ``None``."""
+    from . import paper as _paper
+
+    ref = _paper(citekey)                       # resolve + record provenance + retraction check
+    value = (ref.credibility or {}).get(name)
+    if value is None:
+        raise LiteratureError(
+            f"metric({citekey!r}, {name!r}): not in the library record — `bib enrich {citekey}` to "
+            f"fetch OpenAlex metrics (cited_by_count, FWCI, …), then re-run. A bibliometric claim "
+            f"must not ground on a missing metric.")
+    rec = {"citekey": citekey, "metric": name, "value": value,
+           "as_of": (ref.credibility or {}).get("as_of"), "source": source}
+    _record_metric(rec)
+    return value
+
+
+def cited_by(citekey: str) -> int:
+    """The OpenAlex cited-by count for a library paper, recorded as bibliometric provenance.
+    Convenience for ``metric(citekey, "cited_by_count")`` — the common bibliometric backing."""
+    return metric(citekey, "cited_by_count")
+
+
+def _record_metric(rec: dict) -> None:
+    from . import current_capture
+
+    cap = current_capture()
+    if cap is not None:
+        cap.evidence.setdefault("metric_sources", []).append(rec)

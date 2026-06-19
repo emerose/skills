@@ -466,6 +466,105 @@ def lit_review_sha(claim: dict[str, Any]) -> str | None:
     return h.hexdigest()
 
 
+# --------------------------------------------------------------------------- #
+# Bibliometric claims — a claim ABOUT the literature (e.g. "most-cited"), grounded on a stored
+# OpenAlex metric via scientist.grounding.metric()/cited_by(), not a quote. The quote-in-paper
+# verdict (lit_verdict) cannot represent it, so it gets its own verdict + staleness pin. A [lit:]
+# citation dispatches here when the cited claim's kind is "bibliometric" (see the citation loop).
+# --------------------------------------------------------------------------- #
+def _metric_sources(claim: dict[str, Any]) -> list[dict[str, Any]]:
+    """The recorded metric snapshots of a bibliometric claim (from ``metric()``/``cited_by()``)."""
+    ev = claim.get("evidence") or {}
+    return [s for s in (ev.get("metric_sources") or []) if isinstance(s, dict)]
+
+
+def _bucket_metric(value: Any) -> str:
+    """Bucket a metric to 2 significant figures so a count ticking +1 doesn't churn the review pin —
+    the relation assert (the pytest) catches an actual flip; the pin only re-opens review when the
+    data moved *materially*. Non-numeric values pin verbatim."""
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if x == 0:
+        return "0"
+    return str(int(float(f"{x:.2g}")))
+
+
+def metric_review_sha(claim: dict[str, Any]) -> str | None:
+    """A combined sha over a bibliometric claim's metric snapshots — each
+    ``(citekey, metric, bucketed value, as_of-month)``. Stamp in ``@reviewed(sha=…)``; the audit
+    recomputes it and flags ``stale-review`` when a refreshed metric (or its ``as_of``) moves
+    materially, so the *interpretation* is re-vetted. Bucketing gives tolerance to +1 noise
+    (see :func:`_bucket_metric`); an exact flip of the asserted relation is caught by the pytest."""
+    ms = _metric_sources(claim)
+    if not ms:
+        return None
+    rows = sorted((str(s.get("citekey", "")), str(s.get("metric", "")),
+                   _bucket_metric(s.get("value")), str(s.get("as_of") or "")[:7]) for s in ms)
+    h = hashlib.sha256()
+    for r in rows:
+        h.update(("|".join(r) + "\n").encode())
+    return h.hexdigest()
+
+
+def bibliometric_verdict(claim: dict[str, Any]) -> tuple[str, str | None]:
+    """Verdict for a ``[lit:]`` citation to a ``kind="bibliometric"`` claim. The pytest assert is
+    the metric relation (a flip → ``outcome != passed`` → ``broken``); a recorded
+    ``@reviewed(support=True)`` is what makes the *interpretation* (comparison set, metric choice)
+    vetted — the arithmetic passing is necessary but not sufficient. Like a literature claim, a
+    supported bibliometric claim backs its cite at any strength. Returns ``(verdict, detail|None)``."""
+    if str(claim.get("kind")) != "bibliometric":
+        return ("wrong-kind", "cited via [lit:] but is not a literature/bibliometric claim")
+    if str(claim.get("outcome")) not in GROUNDED_OUTCOMES:
+        return ("broken", f"the metric assertion did not pass (outcome={claim.get('outcome')}) — a "
+                          "cited count moved and the asserted relation no longer holds; re-check")
+    if not _metric_sources(claim):
+        return ("no-metric", "kind=bibliometric but recorded no metric() read — assert via "
+                             "cited_by()/metric() so the value + as_of are pinned and re-checkable")
+    reviewed = claim.get("reviewed")
+    if not reviewed:
+        return ("needs-review", "no @reviewed yet — a human/agent must vet the comparison set and "
+                                "metric choice (the assert proves the arithmetic, not the meaning)")
+    if not reviewed.get("support", False):
+        return ("unsupported", "agent review judged the bibliometric claim unsound (wrong "
+                               "comparison set / metric / interpretation)")
+    return ("backed", None)
+
+
+def _asof_age_days(as_of: Any) -> int | None:
+    """Whole days between ``as_of`` (``YYYY``/``YYYY-MM``/``YYYY-MM-DD``) and today, or ``None`` if
+    unparseable. Advisory-only freshness signal — never affects GROUNDED/BROKEN."""
+    import datetime as _dt
+
+    s = str(as_of).strip()[:10]
+    for fmt in ("%Y-%m-%d", "%Y-%m", "%Y"):
+        try:
+            d = _dt.datetime.strptime(s, fmt).date()
+            return (_dt.date.today() - d).days
+        except ValueError:
+            continue
+    return None
+
+
+def _metric_asof_advisories(sources: list[dict[str, Any]], cite: str, line: int) -> list[dict]:
+    """Non-blocking freshness nudges for a bibliometric citation: a snapshot with no ``as_of`` (can't
+    tell how fresh) or one older than ~12 months (`bib enrich` + re-stamp). Never blocks GROUNDED."""
+    out: list[dict] = []
+    unknown = [str(s.get("citekey")) for s in sources if not s.get("as_of")]
+    if unknown:
+        out.append({"kind": "metric-asof-unknown", "line": line, "cite": cite,
+                    "detail": f"bibliometric snapshot has no as_of for {', '.join(unknown)} — "
+                              "`bib enrich` to record when the metric was fetched so freshness is checkable"})
+    old = [f"{s.get('citekey')} ({s.get('as_of')})" for s in sources
+           if s.get("as_of") and (_asof_age_days(s.get("as_of")) or 0) > 365]
+    if old:
+        out.append({"kind": "metric-asof-stale", "line": line, "cite": cite,
+                    "detail": f"bibliometric data older than ~12 months ({'; '.join(old)}) — "
+                              "re-`bib enrich` and re-stamp the review"})
+    return out
+
+
 def index_analysis_artifacts(home: Path) -> dict[str, str | None]:
     """``{repo-relative analysis artifact path -> recorded artifact_sha256}`` across every
     experiment's ledger under ``home`` (including ``program/``). The key is how a report's
@@ -1163,6 +1262,7 @@ def audit(report_path: Path, home: Path | None = None,
 
     # ---- literature citations (grounding on a paper in the bibliographer library) -------- #
     lit_cites: list[dict[str, Any]] = []
+    metric_advisories: list[dict[str, Any]] = []   # bibliometric as_of freshness nudges (non-blocking)
     for lc in parsed.get("lit_cites", []):
         cid, line = lc["id"], lc["line"]
         rec = {"id": cid, "line": line}
@@ -1178,12 +1278,36 @@ def audit(report_path: Path, home: Path | None = None,
                              "detail": f"matches {len(cands)} claims — qualify it: {cands}"})
         else:
             claim = claim_index[cands[0]]
-            verdict, detail = lit_verdict(claim)
             rec["claim_id"] = cands[0]
             rec["strength"] = claim.get("strength")
             rec["statement"] = claim.get("statement")
-            rec["sources"] = (claim.get("evidence") or {}).get("lit_sources", [])
             rec["reviewed"] = claim.get("reviewed")
+            if str(claim.get("kind")) == "bibliometric":
+                # A claim ABOUT the literature (most-cited, …) grounded on a stored OpenAlex metric,
+                # not a quote — its own verdict + staleness pin (over the metric values + as_of).
+                rec["metric_sources"] = (claim.get("evidence") or {}).get("metric_sources", [])
+                verdict, detail = bibliometric_verdict(claim)
+                if verdict == "backed":
+                    cur = metric_review_sha(claim)
+                    stamped = (claim.get("reviewed") or {}).get("sha")
+                    rec["review_sha"] = cur
+                    if stamped and cur and not str(cur).startswith(str(stamped)):
+                        verdict, detail = ("stale-review",
+                                           "the bibliometric values/as_of moved materially since the "
+                                           f"review (stamp={str(stamped)[:12]}, now={cur[:12]}) — "
+                                           "re-vet and re-stamp @reviewed(sha=…)")
+                    elif not stamped:
+                        rec["review_unpinned"] = True   # advisory, non-blocking
+                    metric_advisories.extend(
+                        _metric_asof_advisories(rec["metric_sources"], cid, line))
+                rec["verdict"] = verdict
+                if verdict != "backed":
+                    findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cands[0],
+                                     "detail": detail})
+                lit_cites.append(rec)
+                continue
+            verdict, detail = lit_verdict(claim)
+            rec["sources"] = (claim.get("evidence") or {}).get("lit_sources", [])
             # re-validation (LEGACY @reviewed path only): if the review was pinned
             # (@reviewed(sha=…)) and a cited paper's text has since changed, the review is stale →
             # re-read and re-stamp (blocking). Machine-judged claims pin staleness via the verdict
@@ -1295,7 +1419,8 @@ def audit(report_path: Path, home: Path | None = None,
     # unsupported-quantity catches a number no cited claim asserts; weak-load-bearing catches a
     # bound backed only by non-robust claim(s) — incommensurate evidence the prose may not hedge.
     advisories = (prose_quantity_advisories(text, claim_index)
-                  + incommensurate_evidence_advisories(text, claim_index))
+                  + incommensurate_evidence_advisories(text, claim_index)
+                  + metric_advisories)
 
     status = "GROUNDED" if not findings else "BROKEN"
     return {
@@ -1846,7 +1971,8 @@ _LIT_MARK = {"backed": "✅ backed", "needs-review": "❌ needs-review",
              "over-strength": "❌ over-strength (exceeds locator ceiling)",
              "unsupported": "❌ unsupported", "broken": "❌ broken (quote absent)",
              "wrong-kind": "❌ wrong-kind", "missing": "❌ missing", "ambiguous": "❌ ambiguous",
-             "stale-review": "❌ stale-review (paper text changed)"}
+             "stale-review": "❌ stale-review (source changed since review)",
+             "no-metric": "❌ no-metric (no cited_by()/metric() read recorded)"}
 _EMBED_MARK = {"current": "✅ current", "drifted": "❌ drifted", "missing": "❌ missing",
                "untracked": "❌ untracked", "dangling": "❌ dangling"}
 
@@ -1879,8 +2005,10 @@ def render_audit(result: dict[str, Any]) -> str:
         mark = _LIT_MARK.get(lc["verdict"], lc["verdict"])
         tail = ""
         if lc["verdict"] == "backed":
-            nsrc = len(lc.get("sources") or [])
-            tail = f"  ({lc.get('strength')}, {nsrc} source{'s' if nsrc != 1 else ''})"
+            srcs = lc.get("sources") or lc.get("metric_sources") or []
+            label = "metric" if lc.get("metric_sources") else "source"
+            nsrc = len(srcs)
+            tail = f"  ({lc.get('strength')}, {nsrc} {label}{'s' if nsrc != 1 else ''})"
             if lc.get("review_unpinned"):
                 tail += f"  [review unpinned — stamp @reviewed(sha=\"{(lc.get('review_sha') or '')[:12]}\")]"
         lines.append(f"  [lit L{lc['line']}] {lc['id']}: {mark}{tail}")

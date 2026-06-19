@@ -277,6 +277,53 @@ If a cited paper's library text later changes, the recomputed sha no longer matc
 citation flips to `stale-review` (blocking) — re-read the paper and re-stamp. An un-pinned review
 still backs but the audit nudges you to pin it.
 
+#### Bibliometric claims — a claim ABOUT the literature (e.g. "most-cited")
+
+Some load-bearing assertions are about the **literature itself**, not the science: *"X is the
+most-cited result on this question," "Y is rarely replicated," "this regime is understudied."* These
+are empirical claims about citation counts / the state of the field — and `source()` quote-grounding
+**cannot represent them**, because no sentence in any paper asserts its own citation frequency. Left
+as free prose they slip past every audit (a quote-checked sentence next to them looks "covered"),
+which is exactly how a false "single most-quoted result" once shipped GROUNDED. Ground them instead
+as a **`@kind("bibliometric")`** claim:
+
+```python
+from scientist.grounding import kind, strength, reviewed, cited_by
+
+@kind("bibliometric")
+@strength("moderate")
+@reviewed(date="2026-06-19", by="independent-review", support=True,
+          note="comparison set = the 4 loss-tolerance papers; metric = OpenAlex cited_by_count",
+          sha="<the audit prints the value+as_of pin to stamp>")
+def test_depth_datum_is_not_the_most_cited():
+    "Among the loss-tolerance papers, Silva-Santos 2015 and Daily 2011 are far more cited than the ~50% depth datum."
+    assert cited_by("silvasantos2015ube") > cited_by("sonzogni2020assessing")
+    assert cited_by("daily2011adeno")   > cited_by("sonzogni2020assessing")
+```
+
+`cited_by()`/`metric()` read a **stored OpenAlex metric** off the library record (so the read is
+keyless/offline like `source()`; populate it with `bib enrich`), record it as provenance
+(`{citekey, metric, value, as_of, source}`), and return the bare number so the **relation is a
+plain-Python `assert`** — no operator DSL; use any predicate (`>`, top-k, ratios). Cite it with
+`[lit:]` like any claim. The split of duties:
+
+- **The assert proves the arithmetic.** A count that drifts enough to flip the relation fails the
+  pytest (RED) — correctness is self-checking.
+- **`@reviewed(support=True)` proves the interpretation.** Passing the assert is *necessary but not
+  sufficient*: a human/agent must still vet the comparison set and metric choice. An unreviewed
+  bibliometric claim is `needs-review` and does **not** back a `[lit:]` cite (mirrors a literature
+  claim with no `@reviewed`).
+- **The pin is over value + as_of, bucketed.** `@reviewed(sha=…)` pins a sha of each metric's
+  `(citekey, value→2-sig-figs, as_of-month)`; a +1 tick does not churn it (the assert catches a real
+  flip), but a *material* move or a refreshed snapshot flips the cite to `stale-review` (blocking) —
+  re-vet and re-stamp. A snapshot with no `as_of`, or one older than ~12 months, is a non-blocking
+  freshness advisory (`metric-asof-unknown`/`metric-asof-stale`) — re-`bib enrich`. As with a
+  literature claim, the audit prints the pin to stamp when it is unpinned.
+
+A bibliometric claim is third-party (about the published record), so it is litreview-legal — a
+litreview may carry one and tag it `@must_confront` (e.g. "the field's most-cited result is the
+independent disconfirmer, not the single-lab datum").
+
 #### `[litreview:]` — cite a neutral literature survey (omissions audit + staleness pin)
 
 A report can ground a whole topic on a **litreview** (`kind=litreview` — a thesis-independent,
