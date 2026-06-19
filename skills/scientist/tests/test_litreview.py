@@ -250,6 +250,47 @@ Citing a survey that doesn't exist [litreview:program::nonexistent].
     assert any(f["kind"] == "missing-litreview" for f in res["findings"])
 
 
+def test_omissions_audit_fails_closed_on_misnamed_module(tmp_path):
+    """A report that cites a litreview whose claim module is misnamed (contributes zero claims)
+    must FAIL CLOSED: the must-confront set is empty for the wrong reason, so the omissions audit
+    would otherwise silently pass. Parallel to litreview.audit's own guard."""
+    prog = _program(tmp_path, slug="it-biodist")  # claims live under test_litreview_it_biodist.py
+    # a litreview folder whose slug doesn't match the claim-module name → expected module
+    # test_litreview_it_biodist_typo.py contributes nothing.
+    (prog / "litreviews" / "it-biodist-typo").mkdir(parents=True, exist_ok=True)
+    _review_md(prog, "it-biodist-typo", _GOOD_REVIEW)
+    report = _report_md(prog, """---
+title: "Dosing"
+---
+## Argument
+Per the survey [litreview:program::it-biodist-typo], loss is tolerated [lit:test_floor].
+""")
+    res = R.audit(report, home=tmp_path)
+    assert res["status"] == "BROKEN"
+    mm = [f for f in res["findings"] if f["kind"] == "missing-claims-module"]
+    assert len(mm) == 1
+    assert "silently pass" in mm[0]["detail"]
+    assert "test_litreview_it_biodist_typo.py" in mm[0]["detail"]
+    assert res["litreview_cites"][0]["verdict"] == "missing-claims-module"
+
+
+def test_omissions_audit_correctly_named_module_not_flagged(tmp_path):
+    """The guard does not false-positive on the happy path: a correctly-named module with claims
+    raises no missing-claims-module finding."""
+    prog = _program(tmp_path)
+    _review_md(prog, "it-biodist", _GOOD_REVIEW)
+    report = _report_md(prog, """---
+title: "Dosing"
+---
+## Argument
+Per the survey [litreview:program::it-biodist], ~50% loss is tolerated [lit:test_floor] and
+reciprocal dosing sets the optimum [lit:test_ceiling].
+""")
+    res = R.audit(report, home=tmp_path)
+    assert res["status"] == "GROUNDED", res["findings"]
+    assert not any(f["kind"] == "missing-claims-module" for f in res["findings"])
+
+
 def _dosing_report(prog: Path, pin: str | None = None, slug: str = "dosing") -> Path:
     """A report that cites the litreview and addresses both must-confront claims, optionally with a
     recorded ``litreview_pins`` front-matter stamp."""
