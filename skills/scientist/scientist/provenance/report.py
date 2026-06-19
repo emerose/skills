@@ -1238,6 +1238,25 @@ def audit(report_path: Path, home: Path | None = None,
         else:
             target = paths[0].resolve()
             rec["litreview"] = _rel_or_name(target, home)
+            # Fail CLOSED on a dead claim module. The must-confront set keys off the cited
+            # litreview's `test_litreview_<slug>.py` module (litreview_module_prefix). If that
+            # module contributes ZERO claims (misnamed module, or stale/unrun grounding), the
+            # obligation set is empty for the wrong reason and the omissions audit would silently
+            # pass — the same fail-open footgun litreview.audit guards on the survey side. Block.
+            prefix = litreview_module_prefix(target, home)
+            if not any(cid.startswith(prefix) for cid in claim_index):
+                rec["verdict"] = "missing-claims-module"
+                module_path = litreview_module_path(target, home)
+                on_disk = "present on disk" if module_path.is_file() else "not found on disk"
+                findings.append({
+                    "kind": "missing-claims-module", "line": line, "cite": cid,
+                    "detail": f"cited litreview's claim module {_rel_or_name(module_path, home)} "
+                              f"contributes no claims to the grounding report ({on_disk}) — misnamed "
+                              f"module? its must-confront / omissions obligation can't be computed "
+                              f"(would silently pass); rename to test_litreview_<slug>.py "
+                              f"(hyphens→underscores) or re-run pytest --grounding-out"})
+                litreview_cites.append(rec)
+                continue
             mc = litreview_must_confront(target, home, claim_index)
             rec["must_confront"] = sorted(mc)
             unaddressed = sorted(uid for uid in mc if uid not in addressed)
