@@ -176,8 +176,10 @@ smarter*, not just answer one question:
   - **After a sweep, check what you banked but never grounded.** Banking papers without turning
     the load-bearing ones into claims is the silent stagnation case (the library grows, the
     grounding doesn't). `sci coverage --since <sweep date>` lists the papers you just added that no
-    claim cites — the worklist for which claims the sweep earned (see [review-audit.md](review-audit.md)
-    → *Claims coverage*). A broad sweep that yields zero new claims is the symptom, not success.
+    claim cites; for a single report, prefer the topic-scoped `sci coverage --query "<topic>"`, which
+    ranks the uncited set by relevance instead of returning the noisy library-wide tally (see
+    [review-audit.md](review-audit.md) → *Claims coverage*). Either way it is the worklist for which
+    claims the sweep earned. A broad sweep that yields zero new claims is the symptom, not success.
   - **When an apparently valuable paper won't download, stop and ask — don't route around it.**
     If a paper looks load-bearing (it states a result the argument leans on, or would set/upgrade a
     claim's strength) but `bib fetch`/`bib discover` can't get the full text, the right move is
