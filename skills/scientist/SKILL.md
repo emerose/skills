@@ -52,6 +52,7 @@ Each phase's detail lives in `references/` and is loaded only when you need it. 
 | Author a human-facing **report** from grounded claims — `sci report` mechanics (cite `[claim:<id>]`, embed grounded figures, audit + render) | [references/report.md](references/report.md) |
 | &nbsp;&nbsp;↳ when **drafting the report prose**: voice/structure, literature-sweep & disconfirming-evidence discipline, the generation brief, the fresh-context §3 + voice/tone reviews | [references/report-authoring.md](references/report-authoring.md) |
 | Author a neutral **literature survey** (`kind=litreview`) — an assessed map of the third-party literature a report argues *from*, with a committed PROSPERO/PRISMA `protocol.md` + `screening.jsonl`; reports cite it via `[litreview:]` and pin to its search protocol | [references/litreview.md](references/litreview.md) |
+| Extract a paper's **attributed claim set** once (`sci paper-claims`) into a per-paper JSONL so an external `[lit:]` cite resolves to a pre-extracted, quote-pinned record instead of being re-authored per citation | [references/paper-claims.md](references/paper-claims.md) |
 
 `data/` naming convention + assay vocabulary: [references/naming.md](references/naming.md).
 Private CRO vocabulary (your real vendor names): [references/vocab.example.yml](references/vocab.example.yml).
