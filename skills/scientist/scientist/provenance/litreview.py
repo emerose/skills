@@ -348,9 +348,18 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
     (protocol + screening + coverage cross-check). Returns the :func:`report.audit` result
     augmented with ``{kind, funnel, protocol_present, screening_rows,
     contested_status_addressed}`` and a recomputed ``status`` (``GROUNDED`` iff no blocking
-    finding)."""
+    finding).
+
+    A review stored as a **node tree** (Phase 3 — a ``nodes/`` dir or a root that cites
+    ``[litreview:]`` child edges) is dispatched to :func:`reviewtree.audit`. A flat ``review.md``
+    (the degenerate one-node tree) stays on the unchanged path below — no migration."""
     rp = Path(review_path).resolve()
     home = REPORT._resolve_home(home, rp)
+
+    from . import reviewtree as TREE
+    if TREE.is_tree(rp):
+        return TREE.audit(rp, home=home)
+
     base = REPORT.audit(rp, home=home)
     text = rp.read_text(encoding="utf-8")
     findings: list[dict[str, Any]] = list(base["findings"])
@@ -637,7 +646,11 @@ def scaffold(home: Path, slug: str, *, title: str | None = None,
 
 def render_audit(result: dict[str, Any]) -> str:
     """Human-readable litreview audit — the :func:`report.render_audit` body plus the litreview's
-    PRISMA funnel, protocol status, and contested-status read."""
+    PRISMA funnel, protocol status, and contested-status read. A Phase-3 **tree** audit
+    (``result['tree']``) renders via :func:`reviewtree.render_audit`."""
+    if result.get("tree"):
+        from . import reviewtree as TREE
+        return TREE.render_audit(result)
     out = REPORT.render_audit(result)
     proto = "present" if result.get("protocol_present") else "MISSING"
     f = result.get("funnel") or {}

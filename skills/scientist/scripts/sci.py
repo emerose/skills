@@ -150,8 +150,19 @@ def main() -> int:
                           help="audit a literature review (review.md): every [lit:] claim backed, "
                                "literature-only, a gaps section present, the protocol + screening "
                                "committed and every cited paper screened-in; render/trace it.")
-    p_lr.add_argument("path", help="litreview Markdown (program/litreviews/<slug>/review.md)")
+    p_lr.add_argument("path", help="litreview review.md (program/litreviews/<slug>/review.md) OR a "
+                      "bare <slug> (resolved to program/litreviews/<slug>/review.md). A review may "
+                      "be a flat review.md or a Phase-3 node tree (nodes/ + [litreview:] edges) — "
+                      "audit/render are tree-aware.")
     p_lr.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
+    p_lr.add_argument("--add-node", dest="add_node", metavar="NEW_ID",
+                      help="(tree) scaffold a child node nodes/<NEW_ID>.md under --parent; `sci` only "
+                           "lays out the file — move the [lit:] cites + add the parent edge by hand "
+                           "(see references/reviews-tree.md)")
+    p_lr.add_argument("--parent", help="with --add-node: the parent node id the new node rolls into")
+    p_lr.add_argument("--write-rollup-pins", dest="write_rollup_pins", action="store_true",
+                      help="(tree) write each rollup's rolled_against: {<child>: <summary-sha>} pins "
+                           "into its frontmatter (mechanizes the manual paste)")
     p_lr.add_argument("--json", action="store_true", help="machine-readable output")
     p_lr.add_argument("--ingest-discover", dest="ingest_discover", metavar="DISCOVER_JSON",
                       help="append candidate rows to screening.jsonl from a `bib discover --json` "
@@ -365,6 +376,25 @@ def _report(args: argparse.Namespace) -> int:
     return rc
 
 
+def _resolve_review_path(arg: str, home) -> Path:
+    """Resolve the litreview positional to a ``review.md`` path. An existing file/dir is used as
+    given (a dir → its ``review.md``); otherwise a bare ``<slug>`` is resolved to
+    ``<home>/program/litreviews/<slug>/review.md`` (then tree-wide ``**/litreviews/<slug>/``)."""
+    p = Path(arg)
+    if p.is_file():
+        return p
+    if p.is_dir():
+        return p / "review.md"
+    if home is not None and "/" not in arg and "\\" not in arg and not arg.endswith(".md"):
+        cand = Path(home) / "program" / "litreviews" / arg / "review.md"
+        if cand.is_file():
+            return cand
+        hits = sorted(Path(home).glob(f"**/litreviews/{arg}/review.md"))
+        if hits:
+            return hits[0]
+    return p
+
+
 def _litreview(args: argparse.Namespace) -> int:
     """`sci litreview <path>`: audit a litreview (review.md) — every [lit:] claim backed,
     literature-only, a gaps section present, the protocol + screening committed and every cited
@@ -373,8 +403,38 @@ def _litreview(args: argparse.Namespace) -> int:
     in `sci report`. Exit 0 if GROUNDED (and any render succeeded), 1 otherwise."""
     import json
 
-    path = Path(args.path)
+    from scientist.provenance import reviewtree as TREE
+
     home = resolve_home(args)
+    path = _resolve_review_path(args.path, home)
+
+    # --add-node: scaffold a child node file (tree authoring). Needs --parent.
+    if getattr(args, "add_node", None):
+        if not args.parent:
+            print("sci litreview --add-node <id> needs --parent <parent-id>", file=sys.stderr)
+            return 1
+        if home is None:
+            print("no data-tree root: pass --home or set $SCIENTIST_HOME", file=sys.stderr)
+            return 1
+        sc = REPORT.report_scope(path, home)
+        res = TREE.add_node(home, sc["slug"], args.add_node, args.parent, scope=sc["scope"])
+        if args.json:
+            print(json.dumps(res, indent=2, ensure_ascii=False, default=str))
+        else:
+            state = "created" if res["created"] else "exists"
+            print(f"{state} {res['path']}\n  → {res['reminder']}")
+        return 0
+
+    if getattr(args, "write_rollup_pins", False):
+        touched = TREE.write_rollup_pins(path, home=home)
+        if args.json:
+            print(json.dumps(touched, indent=2, ensure_ascii=False, default=str))
+        else:
+            if not touched:
+                print("no rollup nodes to pin (a flat review, or no [litreview:] edges)")
+            for nid, pins in sorted(touched.items()):
+                print(f"pinned {nid}: " + ", ".join(f"{c}={s}" for c, s in sorted(pins.items())))
+        return 0
 
     if getattr(args, "ingest_discover", None):
         res = LITREVIEW.ingest_discover(path, Path(args.ingest_discover), home=home,
@@ -415,7 +475,10 @@ def _litreview(args: argparse.Namespace) -> int:
             rc = 1
         else:
             try:
-                out = REPORT.render(path, Path(args.render), home=home, to=args.to)
+                # A node tree linearizes depth-first (facts resolved fresh) before pandoc; a flat
+                # review renders directly. Both reuse the `sci report` markdown→pandoc path.
+                renderer = TREE.render if result.get("tree") else REPORT.render
+                out = renderer(path, Path(args.render), home=home, to=args.to)
                 print(f"rendered {out['format'].upper()} → {out['output']}")
             except REPORT.RenderError as e:
                 print(f"render failed: {e}", file=sys.stderr)
