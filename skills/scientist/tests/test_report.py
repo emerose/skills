@@ -464,6 +464,50 @@ def test_render_pdf_if_pandoc(tmp_path):
     assert 'id="fnref1"' in html
 
 
+def test_dedupe_footnotes_filter_reuses_number(tmp_path):
+    # The filter is the operative fix: pandoc re-emits a footnote's full text at every
+    # reference (N references -> N identical footnotes). dedupe-footnotes.lua collapses
+    # them so a re-cited note keeps ONE \footnote (with a \label) and later references
+    # become \footnotemark to that number — one note, cited N times.
+    import subprocess
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc not installed")
+    lua = Path(R._DEDUPE_FOOTNOTES_LUA)
+    src = ("A[^a] then again[^a] then thrice[^a]. Other[^b].\n\n"
+           "[^a]: shared note.\n[^b]: distinct note.\n")
+    md = tmp_path / "d.md"
+    md.write_text(src, encoding="utf-8")
+    tex = subprocess.run(["pandoc", str(md), "-t", "latex",
+                          f"--lua-filter={lua}"], capture_output=True, text=True, check=True).stdout
+    # the shared note's text is emitted exactly once; the two re-cites reuse its number
+    assert tex.count("\\footnote{shared note.") == 1
+    assert tex.count("\\footnotemark[\\getrefnumber{") == 2   # the two re-cites of [^a]
+    assert tex.count("\\footnote{distinct note.") == 1        # the lone note is untouched
+
+
+def test_render_pdf_dedupes_repeated_citation(tmp_path):
+    # End-to-end wiring: a report citing one claim twice renders to a PDF whose footnote
+    # text appears once (not duplicated). Needs a LaTeX engine for the PDF target.
+    if shutil.which("pandoc") is None or shutil.which("xelatex") is None:
+        pytest.skip("pandoc/xelatex not installed; PDF render unavailable")
+    exp = _exp(tmp_path)
+    _report_json(exp)
+    body = ("# KD\n\nSustained knockdown [claim:test_knockdown]. Restated here too "
+            "[claim:test_knockdown].\n")
+    md = _report_md(exp, body)
+    out = tmp_path / "out.pdf"
+    res = R.render(md, out, home=tmp_path, to="pdf")
+    assert Path(res["output"]).is_file()
+    try:
+        import pdfplumber
+    except ImportError:
+        return                                               # file exists; text check skipped
+    with pdfplumber.open(out) as pdf:
+        text = "".join((pg.extract_text() or "") for pg in pdf.pages)
+    # the claim's statement is footnoted once despite two citations
+    assert text.count("knockdown is 53% at the top dose".replace(" ", "")) == 1
+
+
 def test_strip_front_matter_keys():
     md = ("---\ntitle: A report\nauthor: Kicho Science\ndate: 2026-06-17\n"
           "classification: INTERNAL\n---\n\n# Body\n\ntext\n")

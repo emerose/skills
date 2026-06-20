@@ -1769,6 +1769,7 @@ _PDF_HEADER_TEX = r"""
 % --- modern report style (injected by `sci report`) ---
 \usepackage{graphicx}   % layout.lua emits raw \includegraphics, so load it unconditionally
                         % (pandoc only auto-loads graphicx when it still sees an Image)
+\usepackage{refcount}   % dedupe-footnotes.lua reuses a note's number via \getrefnumber
 \usepackage{fancyhdr}
 \usepackage{caption}
 \captionsetup{font=small,labelfont=bf,justification=raggedright,singlelinecheck=false}
@@ -1910,11 +1911,15 @@ def _pick_font(candidates: list[str], available: set[str]) -> str | None:
     return next((c for c in candidates if c in available), None)
 
 
-# Bundled pandoc filters (all formats): widen exhibits, and unnumber the References list.
-# (endnotes.lua — which relocated footnotes into an endnotes section — is kept in-tree but
-# no longer wired in: citations now render as true per-page footnotes.)
+# Bundled pandoc filters: layout widens exhibits, references unnumbers the References list
+# (all formats); dedupe-footnotes collapses a note cited more than once into ONE numbered
+# per-page footnote cited N times (LaTeX/PDF only — pandoc otherwise re-emits the note's
+# full text at every reference, so a re-cited claim printed as duplicate identical footnotes).
+# (endnotes.lua — which instead relocated footnotes into an endnotes section — is kept in-tree
+# but no longer wired in: citations render as true per-page footnotes.)
 _LAYOUT_LUA = Path(__file__).with_name("layout.lua")
 _REFERENCES_LUA = Path(__file__).with_name("references.lua")
+_DEDUPE_FOOTNOTES_LUA = Path(__file__).with_name("dedupe-footnotes.lua")
 
 
 class RenderError(RuntimeError):
@@ -1957,11 +1962,13 @@ def render(report_path: Path, out_path: Path, home: Path | None = None,
         tf.write(md)
         tmp_md = Path(tf.name)
     try:
-        # layout.lua widens tables/figures; references.lua unnumbers the References list.
-        # Both are structural AST transforms (every target, no LaTeX package). Citations
-        # are left as native footnotes for the writer to typeset per-page.
+        # layout.lua widens tables/figures; references.lua unnumbers the References list
+        # (both structural AST transforms, every target, no LaTeX package). Citations are
+        # left as native per-page footnotes; dedupe-footnotes.lua then collapses identical
+        # ones so a re-cited note shares one number (LaTeX only; self-guards otherwise).
         cmd = [pandoc, str(tmp_md), "-o", str(out), "--standalone",
                f"--lua-filter={_LAYOUT_LUA}", f"--lua-filter={_REFERENCES_LUA}",
+               f"--lua-filter={_DEDUPE_FOOTNOTES_LUA}",
                f"--resource-path={rp.parent}", f"--resource-path={home}"]
         if to == "pdf":
             # modern house style: KOMA `scrartcl` (sans headings), serif body + modern
