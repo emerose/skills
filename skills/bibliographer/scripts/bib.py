@@ -99,6 +99,11 @@ def die(msg: str, code: int = 1) -> NoReturn:
     raise SystemExit(code)
 
 
+def warn(msg: str) -> None:
+    """Print a non-fatal warning to stderr (so it never pollutes stdout/JSON)."""
+    print(f"warning: {msg}", file=sys.stderr)
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:
@@ -1443,22 +1448,47 @@ async def cmd_export(args: argparse.Namespace, store: BiblioStore) -> None:
 
 
 async def cmd_query(args: argparse.Namespace, store: BiblioStore) -> None:
-    """Semantic / full-text search *inside* the papers (libkit hybrid query)."""
-    results = await store.query(args.text, limit=args.limit)
+    """Semantic / full-text search *inside* the papers (libkit hybrid query).
+
+    When no embedding backend is configured the store opens FTS-only; rather than
+    silently returning BM25 results dressed up as semantic ones, we warn LOUDLY on
+    stderr (naming why and how to restore semantic search) and run an explicit
+    full-text query. Results carry an ``[FTS-only]`` marker so the degraded mode
+    is unmistakable to a human or an LLM reading the output."""
+    fts_only = not store.semantic_available
+    if fts_only:
+        reason = store.embedder_reason or "no embedding backend is configured"
+        warn(
+            "semantic search is UNAVAILABLE — no embedder could be built "
+            f"({reason}).\n"
+            "  Falling back to FULL-TEXT (BM25) search only; results are keyword "
+            "matches, not semantic.\n"
+            "  To restore semantic search, install a local model "
+            "(libkit[fancychunk-torch], or [fancychunk-mlx] on Apple Silicon) or set "
+            "BIBLIOGRAPHER_EMBEDDING=remote with DEEPINFRA_API_KEY."
+        )
+    results = await store.query(args.text, limit=args.limit, fts_only=fts_only)
+    mode = "fts" if fts_only else "hybrid"
     if args.json:
         emit_json(
-            [
-                {
-                    "score": r.score,
-                    "title": r.chunk.title,
-                    "citekey": (r.chunk.metadata or {}).get("citekey"),
-                    "document_id": r.chunk.document_id,
-                    "text": r.chunk.text,
-                }
-                for r in results
-            ]
+            {
+                "mode": mode,  # "hybrid" (semantic+FTS) or "fts" (FTS-only fallback)
+                "semantic": not fts_only,
+                "results": [
+                    {
+                        "score": r.score,
+                        "title": r.chunk.title,
+                        "citekey": (r.chunk.metadata or {}).get("citekey"),
+                        "document_id": r.chunk.document_id,
+                        "text": r.chunk.text,
+                    }
+                    for r in results
+                ],
+            }
         )
         return
+    if fts_only:
+        print("[FTS-only] keyword (BM25) matches — semantic search unavailable")
     if not results:
         print("(no matches)")
         return
@@ -1909,6 +1939,12 @@ _READ_ONLY_COMMANDS = frozenset({
     "gaps", "outliers",
 })
 
+# Commands that run libkit *vector* search and so want an embedder. Only `query`
+# does; every other read is metadata/FTS and opens without an embedder (so it
+# works with no embedding backend configured). `query` still opens — FTS-only,
+# with a loud warning — when no embedder is available (see cmd_query).
+_SEMANTIC_COMMANDS = frozenset({"query"})
+
 
 async def dispatch(args: argparse.Namespace) -> None:
     # Load .env BEFORE resolving the default home: $BIBLIOGRAPHER_HOME often lives in
@@ -1917,8 +1953,12 @@ async def dispatch(args: argparse.Namespace) -> None:
     _load_dotenv(Path(args.home).expanduser() if args.home else None)
     home = Path(args.home).expanduser() if args.home else _default_home()
     read_only = args.command in _READ_ONLY_COMMANDS
+    # Only `query` runs vector/semantic search, so only it asks for an embedder.
+    # Every other read opens FTS-only (no embedder construction) and so works
+    # even with no embedding backend configured — see BiblioStore.open.
+    want_semantic = args.command in _SEMANTIC_COMMANDS
     try:
-        store = BiblioStore.open(home, read_only=read_only)
+        store = BiblioStore.open(home, read_only=read_only, want_semantic=want_semantic)
     except EmbedderConfigError as e:
         die(str(e))
     except FileNotFoundError as e:

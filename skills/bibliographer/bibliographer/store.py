@@ -39,8 +39,36 @@ class BiblioStore:
     def __init__(self, home: Path, lib: Any) -> None:
         self.home = home
         self.lib = lib
+        # Whether the open library can serve semantic / vector search. False for
+        # an FTS-only open (no embedder available, or none requested); callers
+        # that ran a *semantic* query must surface that to the user rather than
+        # silently returning full-text results. ``embedder_reason`` records *why*
+        # no embedder was built (which package / env var is missing) for the
+        # message that tells the user how to restore semantic search.
+        self.semantic_available: bool = bool(getattr(lib, "has_embedder", True))
+        self.embedder_reason: str | None = None
 
     # ---- lifecycle ----------------------------------------------------------
+    @staticmethod
+    def _build_embedder(embedding: str, model: str) -> tuple[Any, str | None]:
+        """Construct the configured embedder, or ``(None, reason)`` if unavailable.
+
+        Probing by *constructing* is the only honest check — a local model is
+        only usable if its package imports, and a remote one only if its key is
+        set — and libkit's :func:`default_embedder` encodes exactly that, raising
+        a descriptive ``RuntimeError`` when no backend is available. We never
+        reimplement that logic; we just catch the failure so the caller can fall
+        back to FTS-only instead of crashing. (Note: building a *local* embedder
+        loads the model, so this is only called when a command actually wants
+        semantic search — never for plain reads.)
+        """
+        from libkit.embedders import default_embedder
+
+        try:
+            return default_embedder(embedding=embedding, model=model), None
+        except (RuntimeError, ValueError) as e:
+            return None, str(e)
+
     @classmethod
     def open(
         cls,
@@ -49,6 +77,7 @@ class BiblioStore:
         embedding: str | None = None,
         model: str | None = None,
         read_only: bool = False,
+        want_semantic: bool = False,
     ) -> "BiblioStore":
         """Open (creating if needed) the libkit library under ``home``.
 
@@ -69,6 +98,19 @@ class BiblioStore:
         a read-only open never creates the store, a missing catalog is reported
         up front (rather than as a lower-level libkit failure) so a first-run
         read points the user at ``bib init`` / ``bib add``.
+
+        **Embedder resilience (libkit >=0.5.0).** Reads and full-text search
+        never embed, so a read-only open does NOT build an embedder by default —
+        it goes through ``Library.open_reader`` (FTS-only), which means
+        ``bib text`` / ``list`` / ``search`` and the scientist grounding readers
+        work even when no embedding backend is configured (no local model
+        package, no ``DEEPINFRA_API_KEY``). Pass ``want_semantic=True`` (only
+        ``bib query`` does) to additionally build the embedder and enable vector
+        search; if it can't be built the store still opens FTS-only with
+        :attr:`semantic_available` ``False`` and :attr:`embedder_reason` set, so
+        the caller can warn loudly instead of silently degrading. A writable
+        open always needs an embedder (ingest embeds) and raises
+        :class:`EmbedderConfigError` with actionable guidance when none exists.
         """
         from libkit import Library
         from libkit.errors import EmbedderMismatch
@@ -93,27 +135,78 @@ class BiblioStore:
         # parsed/embedded by any libkit tool — or a prior run — is reused, which
         # is the whole point of the cache. Relocate it with libkit's own
         # LIBKIT_CACHE_DIR if desired.
+        if read_only:
+            from libkit.errors import EmbedderDimMismatch
+
+            embedder, reason = (None, None)
+            if want_semantic:
+                embedder, reason = cls._build_embedder(embedding, model)
+            if embedder is not None:
+                try:
+                    lib = Library.open_reader(db_path, embedder=embedder)
+                except (EmbedderMismatch, EmbedderDimMismatch) as e:
+                    # The configured embedder doesn't match how this library was
+                    # built (wrong model/dim). A *read* must not crash on that —
+                    # degrade to FTS-only and record why, so `bib query` warns
+                    # loudly with an actionable fix instead of a raw traceback.
+                    embedder = None
+                    reason = (
+                        "the configured embedder does not match this library "
+                        f"(stored {getattr(e, 'observed', '?')}, configured "
+                        f"{getattr(e, 'expected', '?')}); set BIBLIOGRAPHER_EMBEDDING / "
+                        "BIBLIOGRAPHER_EMBED_MODEL to the model the library was built with"
+                    )
+                    lib = Library.open_reader(db_path, embedder=None)
+            else:
+                lib = Library.open_reader(db_path, embedder=None)
+            store = cls(home, lib)
+            store.semantic_available = embedder is not None
+            store.embedder_reason = None if embedder is not None else reason
+            return store
+
+        # Writable open: ingest embeds, so an embedder is mandatory.
+        from libkit.errors import EmbedderDimMismatch
+
         try:
             lib = Library.open(
                 db_path,
                 embedding=embedding,
                 model=model,
                 allow_embedder_mismatch=allow_mismatch,
-                read_only=read_only,
+                read_only=False,
             )
-        except EmbedderMismatch as e:
-            # libkit (>=0.2.1) refuses to mix vectors from different embedders in
-            # one library. Translate its error into actionable guidance.
+        except (EmbedderMismatch, EmbedderDimMismatch) as e:
+            raise cls._mismatch_error(e) from e
+        except (RuntimeError, ValueError) as e:
+            # libkit's default_embedder couldn't find a usable backend. A write
+            # needs to embed, so this is fatal — but point the user at the fix
+            # (and note that read-only commands work without an embedder).
             raise EmbedderConfigError(
-                "this library was built with a different embedding backend than the "
-                "one configured now:\n"
-                f"  stored : {e.observed}\n"
-                f"  current: {e.expected}\n"
-                "Set BIBLIOGRAPHER_EMBEDDING / BIBLIOGRAPHER_EMBED_MODEL to match how "
-                "the library was created, or set BIBLIOGRAPHER_ALLOW_EMBEDDER_MISMATCH=1 "
-                "to override (only if you know the two are vector-compatible)."
+                "no embedding backend is available, so the library cannot be opened for "
+                "writes (adding/ingesting a paper has to embed its text).\n"
+                f"  reason: {e}\n"
+                "Install a local model — libkit[fancychunk-torch] (or [fancychunk-mlx] "
+                "on Apple Silicon) — or set BIBLIOGRAPHER_EMBEDDING=remote with "
+                "DEEPINFRA_API_KEY. Read-only commands (text/list/search/show/export) "
+                "work without an embedder."
             ) from e
-        return cls(home, lib)
+        store = cls(home, lib)
+        store.semantic_available = True
+        return store
+
+    @staticmethod
+    def _mismatch_error(e: Any) -> "EmbedderConfigError":
+        # libkit (>=0.2.1) refuses to mix vectors from different embedders in
+        # one library. Translate its error into actionable guidance.
+        return EmbedderConfigError(
+            "this library was built with a different embedding backend than the "
+            "one configured now:\n"
+            f"  stored : {e.observed}\n"
+            f"  current: {e.expected}\n"
+            "Set BIBLIOGRAPHER_EMBEDDING / BIBLIOGRAPHER_EMBED_MODEL to match how "
+            "the library was created, or set BIBLIOGRAPHER_ALLOW_EMBEDDER_MISMATCH=1 "
+            "to override (only if you know the two are vector-compatible)."
+        )
 
     async def close(self) -> None:
         await self.lib.close()
@@ -263,9 +356,16 @@ class BiblioStore:
         await self.lib.delete(rec["document_id"])
         return rec
 
-    async def query(self, text: str, *, limit: int = 8) -> list[Any]:
-        """Semantic / full-text search *inside* the papers (libkit hybrid query)."""
-        return await self.lib.query(text, limit=limit)
+    async def query(self, text: str, *, limit: int = 8, fts_only: bool = False) -> list[Any]:
+        """Semantic / full-text search *inside* the papers (libkit hybrid query).
+
+        With ``fts_only=True`` (or when the store opened without an embedder) this
+        runs a BM25-only search. A *semantic* query against a store with no
+        embedder raises ``libkit.errors.EmbedderUnavailable`` (never a silent
+        FTS fallback); the caller decides whether to surface that as an error or
+        retry with ``fts_only=True`` under a clear "FTS-only" banner.
+        """
+        return await self.lib.query(text, limit=limit, fts_only=fts_only)
 
     async def leading_text(self, document_id: str, chunks: int = 2) -> str:
         """First few chunks of a document's parsed content (for match verification)."""

@@ -68,9 +68,16 @@ full metadata; it's upgraded to `full` when a PDF arrives.
 
 ## Setup: keys and the embedding backend
 
-Opening the library always constructs an embedder (libkit fixes the store's
-vector dimension at creation), so **every command needs an embedding backend**.
-Put keys in `~/.env` (the tool loads it automatically; see `.env.example`):
+An embedding backend is needed to **add/ingest papers** (ingest embeds their text)
+and to run **semantic `bib query`**. It is **not** needed to read or full-text
+search a library that already exists: `text`, `list`, `search`, `show`, `export`,
+`dedupe`, `check`, `audit`, `gaps`, `outliers` — and the scientist grounding
+readers — open the store **FTS-only** (no embedder) and work with no key or local
+model configured. Only a *writable* command (`add`/`import`/`fetch`/…) errors when
+no backend exists, and only `bib query` degrades: with no usable embedder it prints
+a loud `[FTS-only]` warning to stderr and runs a keyword (BM25) search instead of
+silently pretending the results are semantic. Put keys in `~/.env` (the tool loads
+it automatically; see `.env.example`):
 
 - **`DEEPINFRA_API_KEY`** + `BIBLIOGRAPHER_EMBEDDING=remote` — recommended: remote
   embeddings (Qwen3-Embedding-0.6B, dim 1024), so **no local model download**.
@@ -92,11 +99,12 @@ seen — and never waits on the Semantic Scholar throttle. Tune with
 Two more things to know about opening a library:
 
 - **Embedder identity is enforced.** libkit records which embedder built the
-  library and refuses to open it with a different one (mixing models in one vector
-  space is silent corruption). If you change `BIBLIOGRAPHER_EMBEDDING` /
-  `BIBLIOGRAPHER_EMBED_MODEL`, you'll get a clear error telling you to match the
+  library and refuses to open it for **writes** with a different one (mixing models
+  in one vector space is silent corruption). If you change `BIBLIOGRAPHER_EMBEDDING` /
+  `BIBLIOGRAPHER_EMBED_MODEL`, a write gives a clear error telling you to match the
   original or set `BIBLIOGRAPHER_ALLOW_EMBEDDER_MISMATCH=1` (only when you *know*
-  the two are vector-compatible).
+  the two are vector-compatible). A read-only `bib query` whose embedder doesn't
+  match the library does **not** crash — it warns loudly and falls back to FTS-only.
 - **Parse/embed reuse the libkit cache.** libkit caches parses (keyed by file +
   loader) and embeddings (keyed by embedder + chunk text) in its shared,
   content-addressed cache, so re-ingesting a document — or one already processed
@@ -285,7 +293,10 @@ bib text shao2021antisense --all | grep -in "knockdown"   # locate a phrase (not
 
 Use `search` for fast metadata lookup; use `query` when the user wants to find
 *passages/concepts inside* the papers (it embeds the query and runs libkit's
-hybrid vector + BM25 search).
+hybrid vector + BM25 search). With no usable embedder, `query` falls back to
+BM25-only and says so loudly (`[FTS-only]` on stdout, a warning on stderr, and
+`"mode":"fts","semantic":false` in `--json` — whose results are under a `results`
+key); it never returns keyword matches dressed up as semantic ones.
 
 `bib text` prints one paper's **stored library text** — the exact string a scientist
 `[lit:]` quote-check reads (`source(citekey, quote=...)`). Use it to pick a real
@@ -432,11 +443,15 @@ from pathlib import Path
 from bibliographer import BiblioStore   # see bibliographer/__init__.py
 
 async def main():
-    # read_only lets many readers run concurrently (no write lock)
-    store = BiblioStore.open(Path.home() / ".bibliographer", read_only=True)
+    # read_only lets many readers run concurrently (no write lock).
+    # Pass want_semantic=True only if you'll call store.query() (it builds an
+    # embedder); plain reads below open FTS-only and need no backend.
+    store = BiblioStore.open(Path.home() / ".bibliographer", read_only=True,
+                             want_semantic=True)
     try:
-        recs = await store.all_records()                  # list[dict]
-        hits = await store.query("ube3a dosage", limit=8) # semantic search
+        recs = await store.all_records()                  # list[dict], no embedder
+        hits = await store.query("ube3a dosage", limit=8) # semantic (or FTS-only if
+                                                          # store.semantic_available is False)
         rec  = await store.get_by_citekey("ni2016reciprocal")
         # …compose in-process instead of `bib show … | grep`
     finally:
@@ -445,10 +460,11 @@ async def main():
 asyncio.run(main())
 ```
 
-Run that Python in an environment that has the package **and** libkit's embedding
-backend — the same one the CLI uses (see *Setup* above) — e.g.
-`uv run --with-editable /path/to/skills/bibliographer python3 your_script.py`.
-Honor `BIBLIOGRAPHER_HOME`/`BIBLIOGRAPHER_EMBEDDING` exactly as the CLI does. For a
+Run that Python in an environment that has the package (e.g.
+`uv run --with-editable /path/to/skills/bibliographer python3 your_script.py`). A
+semantic `store.query()` additionally needs libkit's embedding backend — the same
+one the CLI uses (see *Setup* above); pure reads do not. Honor
+`BIBLIOGRAPHER_HOME`/`BIBLIOGRAPHER_EMBEDDING` exactly as the CLI does. For a
 single lookup, don't bother — just call `bib … --json`.
 
 ## Good habits
@@ -481,7 +497,13 @@ single lookup, don't bother — just call `bib … --json`.
   pile takes real time/cost.
 - **Don't switch embedding placement on an existing library** (e.g. remote→local)
   without `BIBLIOGRAPHER_ALLOW_EMBEDDER_MISMATCH=1` — libkit will (correctly)
-  refuse it.
+  refuse a *write*. (A read-only `bib query` with a mismatched embedder degrades to
+  FTS-only with a warning rather than failing — reads never need the embedder.)
+- **Reads don't need an embedder.** Only `add`/`import`/`fetch` (which embed) and
+  semantic `bib query` need a backend; every read opens FTS-only via libkit's
+  `Library.open_reader`. If a read ever fails with "needs a local model" / "needs
+  DEEPINFRA_API_KEY", that's a regression — opening for a read must never construct
+  an embedder. (This is why the reader path uses `open_reader`, not `open`.)
 - **A DOI in a PDF can be a *citation*, not the paper.** Sniffing identifiers from
   PDF text can grab a DOI from the **reference list** (a cited work) and mislabel
   the file as that paper — this really happened. `import` guards against it (it
