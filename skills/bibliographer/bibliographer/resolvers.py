@@ -9,13 +9,18 @@ limit):
 
 * Crossref      — DOIs (primary; rich bibliographic fields)
 * arXiv         — arXiv ids
-* NCBI E-utils  — PMID/PMCID, plus the ID converter (PMCID<->DOI<->PMID)
-* Semantic Scholar — any id type; used to backfill abstracts
+* NCBI E-utils  — PMID/PMCID: the ID converter (PMCID<->DOI<->PMID) plus a real
+                  metadata resolver (ESummary for title/authors/year/venue,
+                  EFetch for the abstract) — so a DOI-less PMID never depends on
+                  Semantic Scholar
+* Semantic Scholar — any id type; a last-resort fallback / abstract backfill
 * Unpaywall     — DOI -> open-access PDF URL (feeds fetch-then-ingest)
 
 ``resolve()`` chains them: resolve by the identifier's native source, optionally
 enrich a missing abstract from Semantic Scholar, and attach an OA PDF URL from
-Unpaywall when one exists.
+Unpaywall when one exists. For a PMID/PMCID it prefers DOI->Crossref, then
+PubMed, then Semantic Scholar — treating any single source's failure as a
+fall-through (not fatal) as long as some source yields a title.
 """
 
 from __future__ import annotations
@@ -385,6 +390,138 @@ async def ncbi_idconv(ids: str, client: httpx.AsyncClient) -> dict[str, str]:
         return {}
     rec = (json.loads(body).get("records") or [{}])[0]
     return _drop_empty({"pmid": rec.get("pmid"), "pmcid": rec.get("pmcid"), "doi": rec.get("doi")})
+
+
+# --------------------------------------------------------------------------- #
+# PubMed (NCBI E-utilities) metadata resolver
+# --------------------------------------------------------------------------- #
+# PubMed itself holds full bibliographic metadata for any PMID — title, authors,
+# year, journal, volume/issue/pages, and (via EFetch) the abstract. Resolving a
+# PMID/PMCID against PubMed directly means a DOI-less PMID is NOT solely
+# dependent on Semantic Scholar's ``/paper/{id}`` endpoint, which carries an
+# endpoint-specific throttle (429s even with a valid key). ESummary gives the
+# core fields in one keyless JSON call; EFetch adds the abstract.
+def _author_from_pubmed(name: str) -> dict[str, str]:
+    """Split PubMed's ``"Surname Initials"`` form into ``{family, given}``.
+
+    PubMed ESummary ``authors[*].name`` is surname-*first* (``"Zhang Y"``,
+    ``"van der Berg JA"``) — the reverse of the ``"Given Family"`` convention
+    Crossref/S2/arXiv use; here ``family`` is everything before the last space,
+    ``given`` the trailing initials.
+    """
+    name = (name or "").strip()
+    parts = name.rsplit(" ", 1)
+    if len(parts) == 2 and parts[0]:
+        return {"family": parts[0], "given": parts[1]}
+    return {"family": name, "given": ""}
+
+
+def _from_pubmed(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalise one PubMed ESummary result dict to a record. Pure (no network)."""
+    authors = [
+        _author_from_pubmed(a.get("name", ""))
+        for a in (item.get("authors") or [])
+        if a.get("authtype") == "Author"   # skip CollectiveName rows
+    ]
+    # pubdate: "2023 Nov 22" | "2024 Mar" | "2024" — first 4-digit run is the year.
+    pubdate = item.get("pubdate") or item.get("epubdate") or ""
+    m = re.search(r"\d{4}", pubdate)
+    year = int(m.group(0)) if m else None
+    # articleids: prefer idtype "pmc" (clean "PMC123") over "pmcid" (verbose blob).
+    doi: str | None = None
+    pmcid: str | None = None
+    for aid in item.get("articleids") or []:
+        idtype, value = aid.get("idtype", ""), (aid.get("value") or "").strip()
+        if idtype == "doi" and value:
+            doi = value.lower()
+        elif idtype == "pmc" and value.startswith("PMC"):
+            pmcid = value
+    pmid = str(item.get("uid") or "").strip() or None
+    return _drop_empty({
+        "title": _strip_jats(item.get("title")),
+        "authors": authors,
+        "year": year,
+        "venue": item.get("fulljournalname") or item.get("source") or None,
+        "doi": doi,
+        "pmid": pmid,
+        "pmcid": pmcid,
+        "source_url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else None,
+        "volume": item.get("volume") or None,
+        "issue": item.get("issue") or None,
+        "pages": item.get("pages") or None,
+        # ESummary carries no abstract; fetch_pubmed backfills it from EFetch.
+        "bibtex_type": "article",
+        "source": "pubmed",
+    })
+
+
+async def fetch_pubmed_esummary(pmid: str, client: httpx.AsyncClient) -> dict[str, Any]:
+    """Resolve a PMID to a record via NCBI ESummary (title/authors/year/venue).
+
+    Raises :class:`ResolveError` on a non-200, an absent/error record, or a
+    record with no title (so the caller can fall through to another source).
+    """
+    status, body = await _cached_get(
+        client, "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+        key=f"pubmed-esummary|{pmid}|v1",
+        params={"db": "pubmed", "id": str(pmid), "retmode": "json",
+                "tool": "bibliographer", "email": mailto()},
+    )
+    if status != 200:
+        raise ResolveError(f"PubMed ESummary {status} for {pmid}")
+    item = (json.loads(body).get("result") or {}).get(str(pmid))
+    if not item or item.get("error"):
+        raise ResolveError(f"PubMed has no record for {pmid}")
+    rec = _from_pubmed(item)
+    if not rec.get("title"):
+        raise ResolveError(f"PubMed returned no title for {pmid}")
+    return rec
+
+
+async def fetch_pubmed_abstract(pmid: str, client: httpx.AsyncClient) -> str | None:
+    """The abstract text for a PMID via NCBI EFetch, or None. Best-effort.
+
+    EFetch returns a PubmedArticle XML; the abstract is one or more
+    ``<AbstractText>`` nodes (structured abstracts label each section). We join
+    them, prefixing any section label, and strip residual markup.
+    """
+    status, body = await _cached_get(
+        client, "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+        key=f"pubmed-abstract|{pmid}|v1",
+        params={"db": "pubmed", "id": str(pmid), "rettype": "abstract",
+                "retmode": "xml", "tool": "bibliographer", "email": mailto()},
+    )
+    if status != 200:
+        return None
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return None
+    parts: list[str] = []
+    for el in root.iter("AbstractText"):
+        text = "".join(el.itertext()).strip()
+        if not text:
+            continue
+        label = el.get("Label")
+        parts.append(f"{label}: {text}" if label else text)
+    return _strip_jats(" ".join(parts)) or None
+
+
+async def fetch_pubmed(pmid: str, client: httpx.AsyncClient, *, want_abstract: bool = True) -> dict[str, Any]:
+    """Resolve a PMID to a record from PubMed (ESummary + EFetch abstract).
+
+    The core fields come from ESummary (raising if unavailable); the abstract is
+    layered on from EFetch best-effort — a missing abstract never blocks the add.
+    """
+    rec = await fetch_pubmed_esummary(pmid, client)
+    if want_abstract:
+        try:
+            abstract = await fetch_pubmed_abstract(pmid, client)
+        except (httpx.HTTPError, ResolveError):
+            abstract = None
+        if abstract:
+            rec["abstract"] = abstract
+    return rec
 
 
 async def download_pdf(url: str, dest: Path, client: httpx.AsyncClient) -> bool:
@@ -993,17 +1130,30 @@ async def _resolve_kind(kind: str, value: str, client: httpx.AsyncClient) -> dic
     if kind == "s2":
         return await fetch_semantic_scholar("s2", value, client)
     if kind in ("pmid", "pmcid"):
-        # Prefer DOI -> Crossref (richest); fall back to Semantic Scholar.
+        # Three independent metadata sources, tried in descending richness; any
+        # one source's failure (e.g. an S2 429) is a fall-through, not fatal, as
+        # long as some source yields a title.
         conv = await ncbi_idconv(value, client)
+        pmid = conv.get("pmid") or (value if kind == "pmid" else None)
         rec: dict[str, Any] = {}
+        # 1. DOI -> Crossref (richest bibliographic record).
         if conv.get("doi"):
             try:
                 rec = await fetch_crossref(conv["doi"], client)
-            except ResolveError:
+            except (ResolveError, httpx.HTTPError):
                 rec = {}
-        if not rec:
+        # 2. PubMed directly — the authoritative source for a PMID and, crucially,
+        #    enough to bank a DOI-less paper without depending on S2 at all.
+        if not rec.get("title") and pmid:
+            try:
+                rec = await fetch_pubmed(pmid, client)
+            except (ResolveError, httpx.HTTPError):
+                rec = {}
+        # 3. Semantic Scholar — last resort. Its /paper/{id} endpoint is the one
+        #    prone to endpoint-specific 429s, so it must not be the primary path.
+        if not rec.get("title"):
             rec = await fetch_semantic_scholar(kind, value, client)
-        rec.setdefault("pmid", conv.get("pmid"))
+        rec.setdefault("pmid", conv.get("pmid") or pmid)
         rec.setdefault("pmcid", conv.get("pmcid"))
         return _drop_empty(rec)
     raise ResolveError(f"no resolver for kind {kind!r}")

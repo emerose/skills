@@ -211,11 +211,12 @@ async def resolve_target(
     kind, value = classify(target)
     if kind == "identifier":
         if no_network:
-            die(f"--no-network given but {value!r} needs an online lookup")
-        try:
-            rec = await _resolvers.resolve(value, client=client)
-        except _resolvers.ResolveError as e:
-            die(str(e))
+            # Raise (don't die) so a batch caller can skip this id and continue;
+            # cmd_add turns it into a clean error for a single-id invocation.
+            raise _resolvers.ResolveError(
+                f"--no-network given but {value!r} needs an online lookup"
+            )
+        rec = await _resolvers.resolve(value, client=client)
         return rec, pdf_override
 
     # kind == "file"
@@ -314,6 +315,8 @@ async def cmd_add(args: argparse.Namespace, store: BiblioStore) -> None:
         {t.strip() for t in args.tags.split(",") if t.strip()} if args.tags else set()
     )
 
+    from bibliographer import resolvers as _resolvers
+
     results: list[dict[str, Any]] = []
     for ident in ids:
         try:
@@ -324,6 +327,10 @@ async def cmd_add(args: argparse.Namespace, store: BiblioStore) -> None:
             )
         except Exception as e:  # noqa: BLE001 — one bad identifier must not sink the batch
             if len(ids) == 1:
+                # Single add: a resolve failure is a clean error; an unexpected
+                # exception (a real bug) should still surface with its traceback.
+                if isinstance(e, _resolvers.ResolveError):
+                    die(str(e))
                 raise
             print(f"  ! {ident}: {e}", file=sys.stderr)
             results.append({"status": "error", "identifier": ident, "error": str(e)})
@@ -431,7 +438,7 @@ async def cmd_import(args: argparse.Namespace, store: BiblioStore) -> None:
                 if _legacy_id(f.name):
                     rec["legacy_id"] = _legacy_id(f.name)
 
-                online = rec.get("source") in ("crossref", "arxiv", "semantic_scholar")
+                online = rec.get("source") in ("crossref", "arxiv", "semantic_scholar", "pubmed")
                 counts["resolved" if online else "unverified"] += 1
                 if rec.get("sniffed_from"):
                     counts["sniffed"] += 1

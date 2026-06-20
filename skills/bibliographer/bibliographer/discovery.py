@@ -281,56 +281,10 @@ async def search_semantic_scholar(
 
 
 # --- PubMed (NCBI E-utilities) --------------------------------------------- #
-def _author_from_pubmed(name: str) -> dict[str, str]:
-    """Split PubMed's ``"Surname Initials"`` form into ``{family, given}``.
-
-    PubMed esummary ``authors[*].name`` is surname-*first* (``"Zhang Y"``,
-    ``"van der Berg JA"``) — the reverse of the ``"Given Family"`` convention
-    OpenAlex/S2/arXiv use, so :func:`_author_from_display_name` can't be reused:
-    here ``family`` is everything before the last space, ``given`` the trailing
-    initials.
-    """
-    name = (name or "").strip()
-    parts = name.rsplit(" ", 1)
-    if len(parts) == 2 and parts[0]:
-        return {"family": parts[0], "given": parts[1]}
-    return {"family": name, "given": ""}
-
-
-def _from_pubmed(item: dict[str, Any]) -> dict[str, Any]:
-    """Normalise one PubMed esummary result dict to a record."""
-    authors = [
-        _author_from_pubmed(a.get("name", ""))
-        for a in (item.get("authors") or [])
-        if a.get("authtype") == "Author"   # skip CollectiveName rows
-    ]
-    # pubdate: "2023 Nov 22" | "2024 Mar" | "2024" — first 4-digit run is the year.
-    pubdate = item.get("pubdate") or item.get("epubdate") or ""
-    m = re.search(r"\d{4}", pubdate)
-    year = int(m.group(0)) if m else None
-    # articleids: prefer idtype "pmc" (clean "PMC123") over "pmcid" (verbose blob).
-    doi: str | None = None
-    pmcid: str | None = None
-    for aid in item.get("articleids") or []:
-        idtype, value = aid.get("idtype", ""), (aid.get("value") or "").strip()
-        if idtype == "doi" and value:
-            doi = value.lower()
-        elif idtype == "pmc" and value.startswith("PMC"):
-            pmcid = value
-    pmid = str(item.get("uid") or "").strip() or None
-    return _drop_empty({
-        "title": _strip_jats(item.get("title")),
-        "authors": authors,
-        "year": year,
-        "venue": item.get("fulljournalname") or item.get("source") or None,
-        "doi": doi,
-        "pmid": pmid,
-        "pmcid": pmcid,
-        # esummary carries no abstract; left absent (enrichment can backfill).
-        "source_url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else None,
-        "bibtex_type": "article",
-        "source": "pubmed",
-    })
+# The PubMed ESummary normalizers live in :mod:`resolvers` (they back both the
+# single-PMID metadata resolver and this search provider); imported here so the
+# parsing has one home.
+from .resolvers import _author_from_pubmed, _from_pubmed  # noqa: E402,F401
 
 
 async def search_pubmed(
