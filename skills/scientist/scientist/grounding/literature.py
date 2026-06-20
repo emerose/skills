@@ -39,16 +39,27 @@ def _import_bibliostore():
     except Exception:
         pass
     here = Path(__file__).resolve()
-    for anc in here.parents:                # walk up to a sibling bibliographer skill
+    for anc in here.parents:                # walk up to a sibling bibliographer skill (old layout)
         cand = anc / "bibliographer" / "scripts" / "_store.py"
         if cand.is_file():
             sys.path.insert(0, str(cand.parent))
             from _store import BiblioStore   # type: ignore
             _BIBLIOSTORE = BiblioStore
             return BiblioStore
+    for anc in here.parents:                # walk up to a sibling bibliographer *package* (current layout)
+        # The skill root is ``anc/bibliographer`` and the package lives one level deeper at
+        # ``anc/bibliographer/bibliographer/store.py``; putting the skill root on sys.path makes
+        # ``import bibliographer`` resolve. The new BiblioStore API (open/get_by_citekey/
+        # leading_text/chunk_text/close) matches what this module already calls.
+        skill_root = anc / "bibliographer"
+        if (skill_root / "bibliographer" / "store.py").is_file():
+            sys.path.insert(0, str(skill_root))
+            from bibliographer.store import BiblioStore   # type: ignore
+            _BIBLIOSTORE = BiblioStore
+            return BiblioStore
     raise LiteratureError(
-        "can't locate the bibliographer skill's scripts/ to read paper text — install the "
-        "bibliographer skill alongside scientist, or put its scripts/ on PYTHONPATH.")
+        "can't locate the bibliographer skill to read paper text — install the bibliographer "
+        "skill alongside scientist, or put it on PYTHONPATH.")
 
 
 # A directory carrying one of these marks the root of the checkout the module lives in.
