@@ -8,17 +8,23 @@ description: >-
   inside the papers, generate BibTeX, bulk-import a folder of PDFs, and run
   dedupe/integrity checks. It also **discovers new papers** on a topic across many
   scholarly search APIs (OpenAlex, Semantic Scholar, Europe PMC, PubMed, Crossref,
-  arXiv) and banks them into the library. Use this skill whenever the user wants to
+  arXiv) and banks them into the library. It can also analyze the **citation graph**
+  of the collection: find papers it's probably missing (works it cites a lot but
+  doesn't contain), cluster papers into topic areas by shared references, and flag
+  off-topic papers added by mistake. Use this skill whenever the user wants to
   save, file, organize, look up, or tidy research papers, build or maintain a
   bibliography or reading list, run a literature search / find papers on a topic,
   import a folder of PDFs into their paper collection, find
   duplicate papers, recover or fix metadata for scanned/untitled PDFs, search the
-  contents of their papers, or export citations — even if they don't say
+  contents of their papers, export citations, or mine citations to find missing /
+  off-topic / topically-clustered papers — even if they don't say
   "bibliographer." Triggers include "add this paper," "save this arXiv link,"
   "what papers do I have on X," "find papers on X," "do a literature search,"
   "what's published on X," "import these PDFs," "make a bibliography,"
   "find the DOI/metadata for these PDFs," "search my papers for X," "check my
-  library for duplicates," or "export BibTeX." For a tree of internal scientific
+  library for duplicates," "export BibTeX," "what papers am I missing,"
+  "what topics/clusters are in my library," or "are any of these papers off-topic."
+  For a tree of internal scientific
   experiments (raw lab/CRO data, extracted measurements, analysis, grounded claims),
   use the scientist skill instead.
 ---
@@ -350,6 +356,34 @@ bib refresh --all --limit 0   # re-pull every eligible record, no cap
 bib refresh --tag topic:aso   # only records carrying this tag
 ```
 
+**Citation-graph analysis (gaps, clusters, off-topic papers).** Beyond per-paper
+metrics, bibliographer can use the **citation graph** — which paper cites which
+work — to surface things no metadata field can. First backfill each paper's
+**outgoing reference list** (the OpenAlex ids of the works it cites) with `bib
+refs`; then three read-only analyses run off it:
+
+```bash
+bib refs                       # backfill references (citation edges) for all eligible records
+bib refs --dry-run             # list what would be fetched; change nothing  (--tag/--limit to scope)
+bib gaps                       # works your library cites a lot but doesn't contain (candidates to add)
+bib gaps --min-citing 3 --json # only works cited by ≥3 of your papers, structured
+bib cluster                    # group papers into topic areas by shared references
+bib cluster --write-tags       # record each cluster as a `cluster:<n>` tag
+bib outliers                   # flag possibly off-topic papers (citation-isolated from the library)
+```
+
+`refs` is a **one-time backfill** (a published paper's reference list is static)
+and gentle on OpenAlex. `gaps` ranks external works by how many distinct library
+papers cite them — judge each and bank keepers with `bib add` (high citing-count
+means *central to what you have*, not automatically *worth adding*). `cluster`
+groups papers by **bibliographic coupling** (citing the same sources), a citation
+signal independent of the text-embedding topics from `bib query`. `outliers`
+flags papers that share (almost) no references with the rest of the library *and*
+neither cite nor are cited by it — a worklist of likely mistaken inclusions; it
+removes nothing. **Run `bib refresh` before `bib refs`** so every paper has an
+`openalex_id` (the node id that lets edges connect back into the library). See
+[references/citation-analysis.md](references/citation-analysis.md).
+
 **Keeping the library healthy:**
 
 ```bash
@@ -368,11 +402,16 @@ metadata. Empty folders under `papers/` are pruned automatically after every com
 ## Machine-readable output
 
 `list`, `search`, `show`, `add`, `import`, `enrich`, `query`, `discover`,
-`backfill`, `refresh`, `dedupe`, `check`, and `audit` take `--json`. Prefer it when
+`backfill`, `refresh`, `refs`, `gaps`, `cluster`, `outliers`, `dedupe`, `check`,
+and `audit` take `--json`. Prefer it when
 you need to parse results, count, or feed another step. `discover --json` emits
 `{"results": [...], "sources": {name: count|error}, "added": {...}}`; `backfill
 --json` emits `{"checked": N, "fetched": [...], "remaining": [...]}`; `refresh
 --json` emits `{"checked": N, "updated": [...], "failed": [...], "remaining": N, "ineligible": N}`.
+`refs --json` mirrors `refresh` (`{"checked", "updated", "failed", "remaining", "ineligible"}`);
+`gaps --json` emits `{"candidates": [...], "min_citing": N}`; `cluster --json` emits
+`{"clusters": [...], "unclustered": [...], "min_shared": N, "tags_written": N|null}`;
+`outliers --json` emits `{"checked": N, "isolated": [...], "no_references": N, "min_shared": N}`.
 
 ## Two ways to call it: CLI or Python — your choice
 
@@ -478,7 +517,10 @@ sweep with `bib discover` (sub-topic decomposition, banking, other-source
 latitude), see [references/literature-search.md](references/literature-search.md).
 For getting a PDF when there's no open-access copy (preprint servers, PMC, the
 institutional browser, and authorized peer sources), see
-[references/getting-pdfs.md](references/getting-pdfs.md). For the metadata model
+[references/getting-pdfs.md](references/getting-pdfs.md). For using the citation
+graph to find missing / off-topic / clustered papers (`refs`/`gaps`/`cluster`/
+`outliers`), see
+[references/citation-analysis.md](references/citation-analysis.md). For the metadata model
 and the libkit mapping, see
 [references/schema.md](references/schema.md). For how bibliographer uses libkit
 as its store (embedding, search, caching, the warm-cache migration), see

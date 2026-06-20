@@ -355,6 +355,34 @@ class BiblioStore:
         await self._merge_metadata(rec["document_id"], changes)
         return await self._record_for_id(rec["document_id"])
 
+    async def update_references(
+        self,
+        citekey: str,
+        references: list[str],
+        as_of: str,
+        openalex_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Write a fetched outgoing reference list onto an existing record.
+
+        A read-modify-write of ``references`` (OpenAlex work ids the paper cites)
+        and its ``references_as_of`` stamp; also fills a top-level ``openalex_id``
+        when the record has none yet (so the paper is a recognisable *target* of
+        intra-library citation edges). Raises ``KeyError`` on an unknown citekey.
+        """
+        rec = await self.get_by_citekey(citekey)
+        if rec is None:
+            raise KeyError(citekey)
+        changes: dict[str, Any] = {
+            "references": list(references),
+            "references_as_of": as_of,
+            "updated_at": _now_iso(),
+        }
+        have_id = rec.get("openalex_id") or (rec.get("metrics") or {}).get("openalex_id")
+        if openalex_id and not have_id:
+            changes["openalex_id"] = openalex_id
+        await self._merge_metadata(rec["document_id"], changes)
+        return await self._record_for_id(rec["document_id"])
+
     # ---- internals ----------------------------------------------------------
     @staticmethod
     def _dir_effectively_empty(d: Path) -> bool:
