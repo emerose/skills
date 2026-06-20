@@ -75,6 +75,96 @@ re-runs; embeddings likewise. The parse cache hits regardless of chunker setting
 from a prior run — only re-embedding would re-run, which is cheap. Relocate the
 cache with libkit's own `LIBKIT_CACHE_DIR` if you want it elsewhere.
 
+## Catalog disk bloat and `bib compact`
+
+The whole library — documents, chunks, the VSS **HNSW** index
+(`chunks_vector_hnsw` on `chunks`), and the FTS snapshot (`fts_main_chunks`) —
+lives in one DuckDB file. Two DuckDB facts make that file grow far past its
+logical size under normal use:
+
+- **DuckDB never shrinks a database file in place.** Deletes/updates free blocks
+  *inside* the file (reused for later writes) but never return them to the OS, so
+  the file stays at its high-water mark. Confirmed directly: delete every row,
+  then `VACUUM` + `CHECKPOINT` → file size unchanged.
+- The **experimental persistent HNSW index** rewrites/appends on every
+  `CHECKPOINT`; under heavy add/delete/update churn its on-disk footprint
+  balloons, and because of the point above that growth is sticky.
+
+Observed in production: **225 GB for ~1,700 papers** (logical data ~1 GB), with
+`PRAGMA database_size` showing `used_blocks ≈ total_blocks`, `free_blocks ≈ 0` —
+the bloat is *live* index pages, not free space, so `VACUUM`/`CHECKPOINT` reclaim
+~nothing.
+
+### What actually reclaims the space (measured)
+
+Measured on a churned throwaway library (real libkit, fake embedder; see
+`tests/test_compact.py` and the methodology in `bibliographer/compact.py`):
+
+| method | reclaims file space? | notes |
+|---|---|---|
+| `PRAGMA hnsw_compact_index('chunks_vector_hnsw')` | **no** | runs without error, file size unchanged — it tidies the in-memory index structure but, because DuckDB won't shrink in place, the file doesn't drop |
+| `CHECKPOINT` + `VACUUM` | **no** | in-place; never returns blocks to the OS |
+| `DROP INDEX` + recreate HNSW, then `CHECKPOINT` | **no** | freed blocks stay in the file (same in-place limitation) — and you've paid a full index rebuild for nothing |
+| **`COPY FROM DATABASE` → fresh file** | **yes (≈3×+)** | only a fresh file omits the freed blocks; rebuilds a compact HNSW + FTS index in the process |
+
+**Conclusion: a full COPY-rewrite into a new file is the only mechanism that
+shrinks the catalog**, because it is the only one that produces a file without the
+freed/over-grown blocks. The cheaper-looking options (in-place compaction, VACUUM,
+drop+recreate) cannot help while DuckDB lacks in-place file shrink. This is what
+`bib compact` does (`bibliographer/compact.py`).
+
+### The COPY-rewrite recipe (and its gotchas)
+
+Use an **in-memory orchestrator** connection with VSS loaded, attach the old file
+read-only and a fresh destination, `COPY FROM DATABASE`, detach:
+
+```python
+import duckdb                                 # libkit's pinned duckdb (1.5.4) — storage compat
+con = duckdb.connect()                        # in-memory orchestrator
+con.execute("INSTALL vss; LOAD vss;")         # WITHOUT this the COPY fails: unknown index type 'HNSW'
+con.execute("SET hnsw_enable_experimental_persistence=true;")
+con.execute("ATTACH '<home>/catalog.duckdb' AS src (READ_ONLY)")
+con.execute("ATTACH '<newfile>' AS dst")
+con.execute("COPY FROM DATABASE src TO dst")  # rebuilds a compact HNSW + FTS index
+con.execute("DETACH src"); con.execute("DETACH dst")
+```
+
+- **`LOAD vss` is mandatory** or the index copy errors with `unknown index type
+  'HNSW'`.
+- **Stale WAL gotcha:** a leftover `catalog.duckdb.wal` next to the new file will
+  be mis-replayed onto it → corruption. `compact` moves any `catalog.duckdb.wal*`
+  aside during the swap.
+- **Verify before swapping:** `compact` opens the rebuilt file and asserts the
+  document/chunk counts match the source, the HNSW index + `fts_main_chunks`
+  schema exist, and a sample vector query returns, *before* renaming the old file
+  to `catalog.duckdb.bloated-bak` and moving the new one in. The backup is kept
+  until the swap succeeds (`--keep-backup` keeps it after).
+- **Exclusive access:** it must run with the library closed (it rewrites the file
+  out from under libkit), so it refuses while a writer holds libkit's
+  `<db>.writelock`, and takes that lock itself for the duration.
+
+### Long-term fix — belongs upstream in libkit (follow-up)
+
+`bib compact` is the right *operational* tool, but it is a periodic clean-up, not
+a cure: a single tag-write was observed to grow a freshly-compacted file 609 MB →
+802 MB, so the library re-bloats with use. The durable fix belongs **in libkit**,
+where the HNSW lifecycle lives. Options, roughly in order of leverage:
+
+1. **Rebuild the HNSW index instead of incrementally updating it** past a churn
+   threshold (drop + `CREATE INDEX` inside libkit's writer), and/or compact the
+   catalog on close or after N writes. libkit already `CHECKPOINT`s on close and
+   owns the writer connection, so it is the natural place to amortize this.
+2. Track row-version / index-growth and trigger a COPY-rewrite-on-close when the
+   `used_blocks` high-water-mark outruns live data by some factor.
+3. Reconsider the experimental persistent HNSW (or its checkpoint cadence) — its
+   per-CHECKPOINT re-append is the root of the growth.
+
+Recommendation: file this upstream against libkit (an `vacuum()`/`compact()`
+method on `Library`, or automatic compaction on close/after-N-writes) so every
+libkit consumer benefits and bibliographer can eventually call that instead of
+operating on the file directly. Until then, `bib compact` is the workaround —
+run it periodically and after big churn.
+
 ## libkit version
 
 Requires **libkit ≥ 0.2.2** (pinned in `bib.py`'s `uv` header). bibliographer

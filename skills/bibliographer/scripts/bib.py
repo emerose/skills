@@ -1701,6 +1701,71 @@ async def cmd_audit(args: argparse.Namespace, store: BiblioStore) -> None:
         print(f"  … and {len(findings) - 60} more (use --json for the full worklist)")
 
 
+async def cmd_compact(args: argparse.Namespace, home: Path) -> None:
+    """Reclaim disk bloat in the library's ``catalog.duckdb``.
+
+    libkit keeps everything — documents, chunks, the VSS HNSW index, the FTS
+    snapshot — in one DuckDB file, and DuckDB never shrinks a file in place
+    (freed blocks are reused, never returned to the OS) while the experimental
+    persistent HNSW index re-appends on every CHECKPOINT under churn. The file
+    therefore balloons (observed: 225 GB for ~1,700 papers) past its logical
+    size, and VACUUM/CHECKPOINT reclaim ~nothing. The only fix that actually
+    shrinks the file is rewriting it fresh — ``COPY FROM DATABASE`` into a new
+    file rebuilds a compact HNSW + FTS index — which is what this does, then
+    verifies and atomically swaps. See bibliographer/compact.py for the why and
+    the measured comparison of alternatives.
+
+    This runs with the library *closed* and operates on the file directly, so it
+    refuses (and dry-run reports) when a writer holds libkit's write lock, and
+    takes that lock itself for the duration.
+    """
+    from bibliographer import compact as _compact
+
+    db = home / "catalog.duckdb"
+    if not db.exists():
+        die(f"no bibliographer library at {home} (catalog.duckdb missing) — "
+            "run `bib init` or `bib add <id>` first.")
+
+    try:
+        result = _compact.compact(
+            home,
+            dry_run=args.dry_run,
+            keep_backup=args.keep_backup,
+        )
+    except _compact.CompactError as e:
+        die(str(e))
+
+    if args.json:
+        emit_json(result)
+        return
+
+    if args.dry_run:
+        size_h = result["size_before_h"]
+        print(f"catalog: {result['catalog']}")
+        print(f"current size: {size_h}")
+        bs = result.get("block_stats") or {}
+        if "error" not in bs:
+            used = bs.get("used_bytes")
+            free = bs.get("free_bytes")
+            frac = bs.get("free_fraction")
+            if used is not None:
+                print(f"  used blocks: {_compact.human_size(used)} · "
+                      f"free blocks: {_compact.human_size(free)}"
+                      + (f" ({frac * 100:.1f}% free)" if isinstance(frac, float) else ""))
+        if result.get("writer_active"):
+            print("  ! a writer currently holds the lock — compact would refuse until it finishes")
+        print(f"\n{result.get('reclaimable_hint', '')}")
+        print(f"\nDRY RUN — nothing changed. Would: {result['would_do']}")
+        return
+
+    print(f"Compacted {result['catalog']}")
+    print(f"  {result['documents']} document(s), {result['chunks']} chunk(s)")
+    print(f"  {result['size_before_h']} → {result['size_after_h']}  "
+          f"(reclaimed {result['reclaimed_h']}) in {result['elapsed_s']}s")
+    if result.get("backup"):
+        print(f"  backup kept: {result['backup']}")
+
+
 async def cmd_check(args: argparse.Namespace, store: BiblioStore) -> None:
     recs = await store.all_records()
     issues: list[str] = []
@@ -1915,6 +1980,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_audit)
 
+    sp = sub.add_parser("compact", help="reclaim catalog.duckdb disk bloat (rewrite the store; rebuilds a compact HNSW/FTS index)")
+    sp.add_argument("--dry-run", action="store_true", help="report current size + bloat estimate and what would happen; change nothing")
+    sp.add_argument("--keep-backup", action="store_true", help="keep the old file as catalog.duckdb.bloated-bak after a successful compaction")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_compact)
+
     return p
 
 
@@ -1945,6 +2016,12 @@ _READ_ONLY_COMMANDS = frozenset({
 # with a loud warning — when no embedder is available (see cmd_query).
 _SEMANTIC_COMMANDS = frozenset({"query"})
 
+# Commands that must run with NO open libkit Library handle. `compact` rewrites
+# catalog.duckdb directly (via a separate DuckDB connection) and swaps the file,
+# which an open Library would never tolerate; it manages libkit's write lock
+# itself. These receive the resolved ``home`` path instead of a ``BiblioStore``.
+_NO_STORE_COMMANDS = frozenset({"compact"})
+
 
 async def dispatch(args: argparse.Namespace) -> None:
     # Load .env BEFORE resolving the default home: $BIBLIOGRAPHER_HOME often lives in
@@ -1952,6 +2029,14 @@ async def dispatch(args: argparse.Namespace) -> None:
     # explicit --home always wins and skips this inference.
     _load_dotenv(Path(args.home).expanduser() if args.home else None)
     home = Path(args.home).expanduser() if args.home else _default_home()
+
+    # `compact` rewrites catalog.duckdb out from under libkit, so it must run
+    # with NO Library handle open. It takes libkit's write lock itself and
+    # operates on the file directly; receive the home path, not an open store.
+    if args.command in _NO_STORE_COMMANDS:
+        await args.func(args, home)
+        return
+
     read_only = args.command in _READ_ONLY_COMMANDS
     # Only `query` runs vector/semantic search, so only it asks for an embedder.
     # Every other read opens FTS-only (no embedder construction) and so works
