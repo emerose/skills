@@ -513,7 +513,7 @@ sub-question, not the union of every scope it touches at the edges.
 sci new-litreview <slug>                            # SCAFFOLD: folder + review.md + protocol.md + screening.jsonl + prompt.md + module
 sci litreview <review.md> [--home H] [--json]       # AUDIT: [lit:] backed; gaps present; protocol + screening committed; cited papers screened-in
 sci litreview <review.md> --ingest-discover d.json  # seed screening.jsonl from `bib discover --json` (decision unset, de-duped by id)
-sci litreview <review.md> --render out.pdf [--to pdf|html|docx]
+sci litreview <review.md> --render review.pdf       # RENDER: linearize tree → review.pdf; COMMIT beside review.md as the deliverable [--to pdf|html|docx]
 sci litreview <review.md> --trace                   # litreview -> each [lit:] claim -> paper
 sci litreview <review.md> --delta base.json [--json]  # claim-set delta vs a baseline (the cheap-update filter)
 sci litreview <review.md> --index                   # upsert into the store as kind=litreview
@@ -523,8 +523,11 @@ sci litreview <review.md> --index                   # upsert into the store as k
 `screening.jsonl`, `prompt.md`, and the **correctly-named** claim module
 (`test_litreview_<slug-underscored>.py`), removing the highest-risk manual steps. Then pre-register
 the search in `protocol.md`, `--ingest-discover` your `bib discover` output and screen each candidate,
-and author the survey. On the report side, `sci report --write-pins` writes the surfaced
-`litreview_pins` into the report's front matter automatically (no manual paste).
+and author the survey. Finish by rendering `review.pdf` beside `review.md` (`--render review.pdf`)
+and **committing it as the deliverable** — it's a derived view, but a checked-in one; re-render and
+re-commit whenever the tree or a cited fact changes (see [reviews-tree.md](reviews-tree.md) §6). On
+the report side, `sci report --write-pins` writes the surfaced `litreview_pins` into the report's
+front matter automatically (no manual paste).
 
 The `--delta` baseline is just an older copy of the grounding report — the git part stays yours:
 `git show <ref>:program/analysis/grounding_report.json > base.json`, then

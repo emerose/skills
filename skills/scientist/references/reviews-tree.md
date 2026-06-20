@@ -183,7 +183,13 @@ every judgment about *seam, honesty, and conflict-propagation* stays with the cr
 sci litreview <slug> --render review.pdf        # tree → one linear doc (facts resolved fresh)
 ```
 
-The tree is the **store**; the rendered document is a disposable **view**. `--render` linearizes
+The tree is the **store**; the rendered `review.pdf` is a **derived view** — generated from the
+tree, never hand-edited and never treated as source. It is, though, the **committed human-facing
+deliverable**: render `review.pdf` beside `review.md` and commit it (markdown source ≠ a readable
+survey — the PDF is what a reader actually opens), then **re-render and re-commit whenever the tree
+or any cited fact changes**. Treat it as a checked-in build artifact, not disposable scratch: if
+`sci litreview --render` would change the bytes, the committed copy is stale and must be
+regenerated — never edit the PDF to "fix" it. `--render` linearizes
 depth-first — the root's synthesis is the overview, each child a nested section (heading depth =
 tree depth), recursing in citation order — and every `[lit:]`/`[claim:]` number is pulled **fresh**
 from the claim store at render time (the stored synthesis is the stable connective argument; the
