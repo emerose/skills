@@ -940,6 +940,296 @@ async def cmd_refresh(args: argparse.Namespace, store: BiblioStore) -> None:
         print(f"{ineligible} record(s) have no DOI/PMID and can't be enriched from OpenAlex.")
 
 
+async def cmd_refs(args: argparse.Namespace, store: BiblioStore) -> None:
+    """Backfill each paper's outgoing reference list (citation edges) from OpenAlex.
+
+    Stores ``references`` — the OpenAlex ids of the works a paper cites — plus the
+    paper's own OpenAlex id, on every record that has a DOI/PMID/OpenAlex id but no
+    reference list yet. This is the citation graph `gaps`, `cluster`, and `outliers`
+    read. A published paper's reference list is static, so this is a one-time
+    backfill; re-runs skip finished records (`--all` re-pulls past the cache).
+    OpenAlex is queried one record at a time behind a polite-pool throttle, so a big
+    sweep is slow but never abusive; `--limit` (default 500) caps a run.
+    """
+    import httpx
+
+    from bibliographer import resolvers as _resolvers
+
+    recs = await store.all_records()
+    if args.tag:
+        recs = [r for r in recs if args.tag in (r.get("tags") or [])]
+    if args.citekeys:
+        want = set(args.citekeys)
+        recs = [r for r in recs if r.get("citekey") in want]
+
+    eligible: list[dict[str, Any]] = []
+    ineligible = 0
+    for r in recs:
+        has_id = (
+            r.get("openalex_id") or (r.get("metrics") or {}).get("openalex_id")
+            or r.get("doi") or r.get("pmid")
+        )
+        if not has_id:
+            if "references" not in r:
+                ineligible += 1  # nothing to look the work up by
+            continue
+        if "references" not in r or args.all:
+            eligible.append(r)
+
+    total_eligible = len(eligible)
+    capped = bool(args.limit and args.limit > 0 and total_eligible > args.limit)
+    if capped:
+        eligible = eligible[: args.limit]
+
+    if not eligible:
+        if args.json:
+            emit_json({"checked": 0, "updated": [], "failed": [],
+                       "remaining": 0, "ineligible": ineligible})
+        else:
+            tail = f" — {ineligible} record(s) have no DOI/PMID/OpenAlex id." if ineligible else "."
+            print(f"No records need references{tail}")
+        return
+
+    if args.dry_run:
+        entries = [{"citekey": r.get("citekey"), "title": r.get("title")} for r in eligible]
+        if args.json:
+            emit_json({"checked": len(eligible), "would_update": entries,
+                       "remaining": total_eligible - len(eligible), "ineligible": ineligible})
+            return
+        print(f"{len(eligible)} record(s) would have references fetched:")
+        for e in entries:
+            print(f"  [{e['citekey']}] {e['title']}")
+        if capped:
+            print(f"… and {total_eligible - len(eligible)} more (capped at --limit {args.limit}).")
+        return
+
+    updated: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    if not args.json:
+        print(f"Fetching OpenAlex references for {len(eligible)} record(s)…")
+    client = httpx.AsyncClient(
+        timeout=60, headers={"User-Agent": _resolvers._user_agent()}, follow_redirects=True
+    )
+    try:
+        for r in eligible:
+            ck = r.get("citekey")
+            rec = dict(r)
+            try:
+                ok = await _resolvers.enrich_references(rec, client, refresh=args.all)
+            except Exception as exc:  # noqa: BLE001 — one bad record must not abort the sweep
+                failed.append({"citekey": ck, "error": str(exc)})
+                if not args.json:
+                    print(f"  ! [{ck}] {exc}")
+                continue
+            if ok:
+                new = await store.update_references(
+                    ck, rec.get("references") or [], rec["references_as_of"],
+                    rec.get("openalex_id"),
+                )
+                n = len(new.get("references") or [])
+                updated.append({"citekey": ck, "references": n})
+                if not args.json:
+                    print(f"  ✓ [{ck}] {n} reference(s)")
+            else:
+                failed.append({"citekey": ck, "error": "no OpenAlex match"})
+                if not args.json:
+                    print(f"  ✗ [{ck}] no OpenAlex match — {r.get('title')}")
+    finally:
+        await client.aclose()
+
+    remaining = total_eligible - len(eligible)
+    if args.json:
+        emit_json({"checked": len(eligible), "updated": updated, "failed": failed,
+                   "remaining": remaining, "ineligible": ineligible})
+        return
+    print(f"\nFetched references for {len(updated)} of {len(eligible)} record(s); "
+          f"{len(failed)} unmatched/failed.")
+    if remaining:
+        print(f"{remaining} more eligible — re-run to continue (re-runs skip finished records), "
+              f"or raise/drop --limit ({args.limit}).")
+    if ineligible:
+        print(f"{ineligible} record(s) have no DOI/PMID/OpenAlex id to look up.")
+
+
+async def cmd_gaps(args: argparse.Namespace, store: BiblioStore) -> None:
+    """Papers your library cites a lot but doesn't contain — candidates to add.
+
+    Reads the per-paper reference lists (`bib refs` first) and ranks the external
+    works cited by the most library papers, then labels the top candidates from
+    OpenAlex (title/year/citations) so you can judge and `bib add` the keepers.
+    Ranking is offline; only labelling touches the network (`--no-network` skips it).
+    """
+    from bibliographer import citations as _citations
+
+    recs = await store.all_records()
+    if args.tag:
+        recs = [r for r in recs if args.tag in (r.get("tags") or [])]
+    if not _citations.has_reference_data(recs):
+        msg = "no reference data yet — run `bib refs` to fetch citation edges first."
+        if args.json:
+            emit_json({"candidates": [], "note": msg})
+        else:
+            print(f"No gaps to report: {msg}")
+        return
+
+    cands = _citations.gap_candidates(recs, min_citing=args.min_citing, limit=args.limit)
+
+    labels: dict[str, dict[str, Any]] = {}
+    if cands and not args.no_network:
+        import httpx
+
+        from bibliographer import resolvers as _resolvers
+
+        client = httpx.AsyncClient(
+            timeout=60, headers={"User-Agent": _resolvers._user_agent()}, follow_redirects=True
+        )
+        try:
+            labels = await _resolvers.fetch_openalex_works(client, [c["work_id"] for c in cands])
+        except Exception:  # noqa: BLE001 — labelling is best-effort
+            labels = {}
+        finally:
+            await client.aclose()
+
+    for c in cands:
+        lbl = labels.get(c["work_id"])
+        if lbl:
+            c.update({k: lbl[k] for k in ("title", "year", "cited_by_count", "doi") if k in lbl})
+
+    if args.json:
+        emit_json({"candidates": cands, "min_citing": args.min_citing})
+        return
+    if not cands:
+        print(f"No external work is cited by ≥{args.min_citing} of your papers "
+              "(lower --min-citing, or run `bib refs` on more records).")
+        return
+    print(f"{len(cands)} candidate(s) cited by ≥{args.min_citing} of your papers but not in the library:\n")
+    for c in cands:
+        title = c.get("title") or "(unlabelled — OpenAlex " + c["work_id"] + ")"
+        year = c.get("year") or "????"
+        cb = c.get("cited_by_count")
+        cb_s = f" · cited-by {cb}" if cb is not None else ""
+        doi_s = f"  doi:{c['doi']}" if c.get("doi") else f"  {c['work_id']}"
+        print(f"  [{c['citing_count']}×] ({year}) {title}{cb_s}")
+        print(f"        cited by: {', '.join(c['citing_citekeys'])}{doi_s}")
+    print("\nBank the keepers with `bib add <doi-or-id>` (judge each — high citing-count "
+          "≠ on-topic).")
+
+
+async def cmd_cluster(args: argparse.Namespace, store: BiblioStore) -> None:
+    """Group papers into topic areas by bibliographic coupling (shared references).
+
+    Two papers couple when they cite some of the same works; connected groups above
+    `--min-shared` form a cluster. Reports the clusters; `--write-tags` records each
+    as a `cluster:<n>` tag on its members (replacing any prior `cluster:*` tags).
+    Run `bib refs` first to populate references.
+    """
+    from bibliographer import citations as _citations
+
+    recs = await store.all_records()
+    if args.tag:
+        recs = [r for r in recs if args.tag in (r.get("tags") or [])]
+    if not _citations.has_reference_data(recs):
+        msg = "no reference data yet — run `bib refs` to fetch citation edges first."
+        if args.json:
+            emit_json({"clusters": [], "unclustered": [], "note": msg})
+        else:
+            print(f"No clusters: {msg}")
+        return
+
+    result = _citations.coupling_clusters(recs, min_shared=args.min_shared)
+    clusters: list[list[str]] = result["clusters"]
+    unclustered: list[str] = result["unclustered"]
+    title_of = {r["citekey"]: r.get("title") for r in recs if r.get("citekey")}
+
+    written = 0
+    if args.write_tags:
+        assign = {ck: f"cluster:{i}" for i, g in enumerate(clusters, 1) for ck in g}
+        for r in recs:
+            ck = r.get("citekey")
+            if not ck:
+                continue
+            old = [t for t in (r.get("tags") or []) if t.startswith("cluster:")]
+            new = assign.get(ck)
+            add = [new] if new and new not in old else []
+            remove = [t for t in old if t != new]
+            if add or remove:
+                await store.set_tags(ck, add=add, remove=remove)
+                written += 1
+        if written:
+            await write_index(store)
+
+    if args.json:
+        emit_json({
+            "clusters": [
+                {"cluster": i, "size": len(g),
+                 "members": [{"citekey": ck, "title": title_of.get(ck)} for ck in g]}
+                for i, g in enumerate(clusters, 1)
+            ],
+            "unclustered": unclustered,
+            "min_shared": args.min_shared,
+            "tags_written": written if args.write_tags else None,
+        })
+        return
+    if not clusters:
+        print(f"No clusters at --min-shared {args.min_shared} "
+              f"({len(unclustered)} paper(s) uncoupled). Try a lower threshold.")
+        return
+    print(f"{len(clusters)} cluster(s) at --min-shared {args.min_shared} "
+          f"({len(unclustered)} unclustered):\n")
+    for i, g in enumerate(clusters, 1):
+        print(f"  cluster:{i}  ({len(g)} papers)")
+        for ck in g:
+            print(f"      [{ck}] {title_of.get(ck) or ''}")
+    if args.write_tags:
+        print(f"\nWrote cluster tags to {written} record(s).")
+    else:
+        print("\nRe-run with --write-tags to record these as `cluster:<n>` tags.")
+
+
+async def cmd_outliers(args: argparse.Namespace, store: BiblioStore) -> None:
+    """Flag papers that may be off-topic / added by mistake.
+
+    A paper is suspicious when it shares (almost) no references with the rest of
+    the library *and* neither cites nor is cited by any other paper in it. Reads
+    the reference lists (`bib refs` first) and prints a worklist; removes nothing.
+    """
+    from bibliographer import citations as _citations
+
+    recs = await store.all_records()
+    if args.tag:
+        recs = [r for r in recs if args.tag in (r.get("tags") or [])]
+    if not _citations.has_reference_data(recs):
+        msg = "no reference data yet — run `bib refs` to fetch citation edges first."
+        if args.json:
+            emit_json({"isolated": [], "checked": 0, "note": msg})
+        else:
+            print(f"No outliers to report: {msg}")
+        return
+
+    report = _citations.isolation_report(recs, min_shared=args.min_shared)
+    isolated = [e for e in report if e["isolated"]]
+    no_refs = sum(1 for e in report if not e["has_references"])
+
+    if args.json:
+        emit_json({"checked": len(report), "isolated": isolated,
+                   "no_references": no_refs, "min_shared": args.min_shared,
+                   "report": report if args.all else None})
+        return
+    if not isolated:
+        print(f"No citation-isolated papers at --min-shared {args.min_shared} "
+              f"({len(report)} checked).")
+    else:
+        print(f"{len(isolated)} possibly off-topic paper(s) — isolated in the citation graph:\n")
+        for e in isolated:
+            print(f"  [{e['citekey']}] {e.get('title') or ''}")
+            print(f"        max shared refs: {e['max_coupling']} · intra-library edges: "
+                  f"{e['intra_edges']} · references: {e['reference_count']}")
+        print("\nThese cite (almost) nothing the rest of your library cites, and neither "
+              "cite nor are cited by it. Review before `bib rm` — removes nothing on its own.")
+    if no_refs:
+        print(f"\n({no_refs} paper(s) have no reference data — run `bib refs` to include them.)")
+
+
 async def cmd_list(args: argparse.Namespace, store: BiblioStore) -> None:
     recs = await store.all_records()
     if getattr(args, "content", False):
@@ -1007,6 +1297,10 @@ async def cmd_show(args: argparse.Namespace, store: BiblioStore) -> None:
             print(f"{f:<13}: {rec[f]}")
     if rec.get("cited_by_count") is not None:
         print(f"cited-by     : {rec['cited_by_count']}")
+    if "references" in rec:
+        n = len(rec.get("references") or [])
+        stamp = f" (as of {rec['references_as_of']})" if rec.get("references_as_of") else ""
+        print(f"references   : {n} outgoing citation(s){stamp}")
     m = rec.get("metrics") or {}
     if m:
         bits = []
@@ -1477,6 +1771,37 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_refresh)
 
+    sp = sub.add_parser("refs", help="backfill each paper's outgoing reference list (citation edges) from OpenAlex")
+    sp.add_argument("citekeys", nargs="*", help="only these citekeys (default: all eligible)")
+    sp.add_argument("--all", action="store_true", help="re-fetch references for every eligible record, not just those missing them (bypasses the cache)")
+    sp.add_argument("--tag", help="only records carrying this tag")
+    sp.add_argument("--limit", type=int, default=500, help="attempt at most N records (0 = no cap; default 500)")
+    sp.add_argument("--dry-run", action="store_true", help="list what would be fetched; change nothing")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_refs)
+
+    sp = sub.add_parser("gaps", help="external works your library cites a lot but doesn't contain (candidates to add)")
+    sp.add_argument("--min-citing", type=int, default=2, help="only works cited by at least N library papers (default 2)")
+    sp.add_argument("--limit", type=int, default=30, help="show at most N candidates (default 30; 0 = all)")
+    sp.add_argument("--tag", help="only consider records carrying this tag")
+    sp.add_argument("--no-network", action="store_true", help="skip OpenAlex label lookup; print bare work ids")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_gaps)
+
+    sp = sub.add_parser("cluster", help="group papers into topic areas by bibliographic coupling (shared references)")
+    sp.add_argument("--min-shared", type=int, default=2, help="min shared references to couple two papers (default 2)")
+    sp.add_argument("--tag", help="only cluster records carrying this tag")
+    sp.add_argument("--write-tags", action="store_true", help="record each cluster as a `cluster:<n>` tag (replaces prior cluster:* tags)")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_cluster)
+
+    sp = sub.add_parser("outliers", help="flag possibly off-topic papers (citation-isolated from the rest of the library)")
+    sp.add_argument("--min-shared", type=int, default=2, help="coupling below this counts as isolated (default 2)")
+    sp.add_argument("--tag", help="only consider records carrying this tag")
+    sp.add_argument("--all", action="store_true", help="include the full per-paper report in --json output")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_outliers)
+
     sp = sub.add_parser("enrich", help="recover metadata for unverified/no-year records (filename -> Crossref, content-verified)")
     sp.add_argument("citekeys", nargs="*", help="only these citekeys (default: all unverified)")
     sp.add_argument("--dry-run", action="store_true", help="show proposed matches, change nothing")
@@ -1574,11 +1899,14 @@ def build_parser() -> argparse.ArgumentParser:
 #   dedupe — only *reports* duplicate groups (the user removes extras via `bib rm`).
 #   check  — reads records + hashes on-disk files; never repairs.
 #   audit  — reads records + leading chunk text; emits a worklist, never repairs.
+#   gaps   — reads reference lists; OpenAlex label lookup is network, not a store write.
+#   outliers — reads reference lists; emits a worklist, never writes.
 # Deliberately NOT here (they write the store or a managed file): init, add, import,
-# fetch, backfill, enrich, discover, tag, rm — and `viewer`, which regenerates
-# index.html in the library.
+# fetch, backfill, refresh, refs, enrich, discover, tag, rm — `cluster` (writes
+# `cluster:*` tags with --write-tags) — and `viewer`, which regenerates index.html.
 _READ_ONLY_COMMANDS = frozenset({
     "search", "list", "show", "text", "query", "export", "dedupe", "check", "audit",
+    "gaps", "outliers",
 })
 
 

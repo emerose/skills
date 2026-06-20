@@ -817,6 +817,125 @@ async def enrich_openalex(
 
 
 # --------------------------------------------------------------------------- #
+# OpenAlex citation graph (outgoing references + candidate labels)
+# --------------------------------------------------------------------------- #
+# A work's ``referenced_works`` is its outgoing citation edges — the OpenAlex ids
+# of the papers it cites. Stored on each record as ``references`` (by ``bib
+# refs``), this is the graph that ``bib gaps``/``cluster``/``outliers`` read. A
+# published paper's reference list is static, so it backfills once and is cached
+# like every other resolver response.
+def _strip_oa(x: str | None) -> str:
+    """OpenAlex ids arrive as full URLs; keep the bare ``W…``/``S…`` id."""
+    return (x or "").replace("https://openalex.org/", "")
+
+
+def _openalex_refs(work: dict[str, Any]) -> dict[str, Any]:
+    """``{openalex_id, references}`` from an OpenAlex work. Pure (no network)."""
+    return {
+        "openalex_id": _strip_oa(work.get("id")) or None,
+        "references": [_strip_oa(w) for w in (work.get("referenced_works") or []) if w],
+    }
+
+
+def _openalex_label(work: dict[str, Any]) -> dict[str, Any]:
+    """A compact label for a candidate work (gap-finding display). Pure."""
+    return _drop_empty({
+        "work_id": _strip_oa(work.get("id")) or None,
+        "title": work.get("display_name"),
+        "year": work.get("publication_year"),
+        "cited_by_count": work.get("cited_by_count"),
+        "doi": _strip_oa((work.get("doi") or "").replace("https://doi.org/", "")) or None,
+    })
+
+
+async def fetch_openalex_references(
+    client: httpx.AsyncClient,
+    *,
+    openalex_id: str | None = None,
+    doi: str | None = None,
+    pmid: str | None = None,
+    refresh: bool = False,
+) -> dict[str, Any] | None:
+    """A work's ``{openalex_id, references}`` by OpenAlex id / DOI / PMID, or None.
+
+    Prefers the exact OpenAlex id when known (e.g. from a prior ``metrics``
+    lookup), else resolves by DOI then PMID. Cached; ``refresh`` re-pulls.
+    """
+    paths = (
+        ([_strip_oa(openalex_id)] if openalex_id else [])
+        + ([f"doi:{doi.lower()}"] if doi else [])
+        + ([f"pmid:{pmid}"] if pmid else [])
+    )
+    for path in paths:
+        status, body = await _cached_get(
+            client, f"https://api.openalex.org/works/{path}",
+            key=f"openalex-refs|{path}|v1",
+            params={"mailto": mailto(), "select": "id,referenced_works"},
+            throttle=_openalex_throttle, bypass=refresh,
+        )
+        if status == 200:
+            return _openalex_refs(json.loads(body))
+    return None
+
+
+async def enrich_references(
+    rec: dict[str, Any], client: httpx.AsyncClient, *, refresh: bool = False
+) -> bool:
+    """Stamp ``rec['references']`` (+ ``openalex_id``, ``references_as_of``).
+
+    Best-effort. Returns True when a reference list was attached — an **empty**
+    list is a valid answer (OpenAlex has the work but records no references) and
+    is still stamped, so the record isn't retried forever.
+    """
+    oa_id = rec.get("openalex_id") or (rec.get("metrics") or {}).get("openalex_id")
+    data = await fetch_openalex_references(
+        client, openalex_id=oa_id, doi=rec.get("doi"),
+        pmid=str(rec["pmid"]) if rec.get("pmid") else None, refresh=refresh,
+    )
+    if data is None:
+        return False
+    rec["references"] = data["references"]
+    rec["references_as_of"] = _today_iso()
+    if data.get("openalex_id") and not oa_id:
+        rec["openalex_id"] = data["openalex_id"]
+    return True
+
+
+async def fetch_openalex_works(
+    client: httpx.AsyncClient, ids: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Map OpenAlex work id -> a compact label dict, batched. Best-effort/cached.
+
+    Used to put titles/years/citation counts on the top ``gap_candidates`` so the
+    user can judge them. Queries the works endpoint with an ``ids.openalex`` OR
+    filter, ≤50 ids per request (OpenAlex's filter cap). Missing ids are simply
+    absent from the result.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    clean = [_strip_oa(i) for i in ids if i]
+    for i in range(0, len(clean), 50):
+        chunk = clean[i : i + 50]
+        status, body = await _cached_get(
+            client, "https://api.openalex.org/works",
+            key=f"openalex-label|{'|'.join(sorted(chunk))}|v1",
+            params={
+                "mailto": mailto(),
+                "filter": "ids.openalex:" + "|".join(chunk),
+                "select": "id,display_name,publication_year,cited_by_count,doi",
+                "per-page": len(chunk),
+            },
+            throttle=_openalex_throttle,
+        )
+        if status != 200:
+            continue
+        for work in json.loads(body).get("results", []) or []:
+            label = _openalex_label(work)
+            if label.get("work_id"):
+                out[label["work_id"]] = label
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # orchestration
 # --------------------------------------------------------------------------- #
 async def resolve(

@@ -30,6 +30,18 @@
       "prompt": "Some of my imported papers are old scans with no DOI and ended up as 'Unknown' entries with junk titles. Can you find proper metadata for them?",
       "expected_output": "The skill runs `bib enrich` (optionally --dry-run first) to recover metadata for the unverified records: it queries Crossref from each file's original author_year_title filename and verifies the candidate against the document's parsed content before applying (so a mislabeled file isn't given the wrong paper's metadata). Verified matches are auto-applied (real title/authors/DOI, regenerated citekey, re-filed under the author tree) and the rest are listed for review. For holdouts it suggests resolving via Semantic Scholar/PubMed or `bib enrich <citekey> --doi <id>`, and notes that non-articles (GeneReviews, StatPearls, bulletins) can't get a DOI and should be tagged type:<kind>. It does not blindly trust filenames.",
       "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "My paper library has a few hundred articles. Which important papers am I probably missing — ones that my collection cites a lot but that I don't actually have?",
+      "expected_output": "The skill backfills the citation graph with `bib refs` (fetching each paper's outgoing reference list from OpenAlex; ideally after `bib refresh` so every record has an openalex_id), then runs `bib gaps`. It explains that `gaps` ranks external works by how many distinct library papers cite them, surfaces the top candidates with title/year/citation-count and which of the user's papers cite each, and that a high citing-count means central-to-the-collection (worth judging) rather than automatically worth adding. It offers to bank the keepers with `bib add`. It does not bank anything automatically.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "Can you figure out what topic areas are in my paper library, and whether any papers look off-topic / like they were added by mistake?",
+      "expected_output": "After ensuring the citation graph is populated (`bib refs`, ideally preceded by `bib refresh`), the skill runs `bib cluster` to group papers into topic areas by bibliographic coupling (shared references), optionally writing `cluster:<n>` tags with --write-tags, and `bib outliers` to flag papers that share (almost) no references with the rest of the library and neither cite nor are cited by it. It presents the outliers as a review worklist (nothing is removed), notes that coupling is a citation signal complementary to the text-embedding topics from `bib query`, and that papers lacking reference data are reported as unknown rather than flagged.",
+      "files": []
     }
   ]
 }

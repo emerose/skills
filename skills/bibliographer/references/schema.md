@@ -45,6 +45,9 @@ in a free-form `metadata` JSON column (see libkit's own schema, v2):
 | `oa_pdf_url` | open-access PDF URL from Unpaywall, if any |
 | `cited_by_count` | citation count (from discovery sources, or backfilled from OpenAlex at add) |
 | `metrics` | OpenAlex work + venue metadata stamped at ingest — see below |
+| `references` | list of OpenAlex work ids (`W…`) this paper cites — its **outgoing citation edges**, backfilled by `bib refs`. The graph `gaps`/`cluster`/`outliers` read. A published paper's reference list is static, so this is fetched once; an empty list means OpenAlex has the work but records no references |
+| `references_as_of` | ISO date the reference list was fetched |
+| `openalex_id` | the paper's own OpenAlex work id (`W…`), stamped by `bib refs` when not already in `metrics.openalex_id`. The canonical node id — how a `references` entry pointing *back into* the library is recognised |
 | `added_at`, `updated_at` | ISO timestamps |
 
 The **`metrics`** sub-dict (best-effort from OpenAlex when the record has a
@@ -62,6 +65,20 @@ journal-trust signals no bibliographic resolver provides:
 | `open_access` | OA status: `gold`/`green`/`hybrid`/`bronze`/`closed` |
 | `work_type` | OpenAlex type (`article`, `review`, `editorial`, …) |
 | `venue` | `{name, type, in_doaj, indexed_in_scopus, issn_l, publisher, impact_2yr, h_index}` — `in_doaj` is an anti-predatory signal; `impact_2yr`/`h_index` are journal-level (`indexed_in_scopus` is sparsely populated by OpenAlex, so absence ≠ not indexed) |
+
+## Citation graph (references)
+
+The `references` key turns the library into a citation graph. Each paper stores
+its **outgoing** edges (the OpenAlex ids of the works it cites); the **node**
+namespace is OpenAlex work ids, so an edge whose target equals some library
+paper's `openalex_id`/`metrics.openalex_id` is an *intra-library* edge. This
+asymmetry is deliberate: outgoing references are bounded (~tens per paper) and
+static, so they're stored in full; incoming citations (who cites a paper) are
+unbounded and drift, so they're never materialised — `cited_by_count` summarises
+them instead. `bib refs` backfills `references` from OpenAlex's
+`referenced_works`; the analytics live in `bibliographer/citations.py` (pure,
+offline) and are exposed as `bib gaps` / `bib cluster` / `bib outliers`. See
+[citation-analysis.md](citation-analysis.md).
 
 An **unverified** record (`source` = `pdf`/`file`, no identifier recovered) is
 filed under `papers/Unknown/` with an `anon…` citekey. `bib enrich` upgrades these:
