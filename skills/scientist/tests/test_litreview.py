@@ -699,6 +699,56 @@ def test_report_advisories_unchanged_for_sci_report(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# universal-negative gaps lint (advisory) — gaps-negative-claim-unreconciled
+# --------------------------------------------------------------------------- #
+# The motivating defect: a gaps bullet asserting a universal negative ("No faithful UBE3A-attributable
+# mouse …") that contradicted a cited paper-claim AND the review's own synthesis, yet passed the audit
+# (which checks only that a gaps section exists) and the completeness critic (which checked
+# conflict-survival, not internal consistency). The lint flags every such line so the author must
+# reconcile it against the screening log + claim store. Advisory: it never blocks.
+_NEG_GAP_REVIEW = """---
+title: "T"
+---
+## Body
+Lumbar dosing gives a 50% knockdown [lit:test_floor].
+
+## Gaps / open questions
+- No faithful UBE3A-attributable mouse reproduces the human maternal-duplication phenotype.
+- Human region-to-region ratios remain unmeasured.
+"""
+
+
+def test_gaps_negative_claim_flagged_and_nonblocking(tmp_path):
+    review = _full_litreview(tmp_path, body=_NEG_GAP_REVIEW)
+    _write_screening(tmp_path / "program", rows=_DEFAULT_SCREEN[:1])  # only floor is cited
+    res = LR.audit(review, home=tmp_path)
+    assert res["status"] == "GROUNDED", res["findings"]              # advisory does NOT block
+    neg = [a for a in res["advisories"] if a["kind"] == "gaps-negative-claim-unreconciled"]
+    # The "No faithful … mouse reproduces …" universal-negative is flagged; the benign
+    # "ratios remain unmeasured" line (no no/never/only trigger) is not.
+    assert len(neg) == 1
+    assert "UBE3A-attributable mouse" in neg[0]["text"]
+    assert "gaps-negative-claim-unreconciled" in LR.render_audit(res)
+
+
+def test_gaps_negative_lint_is_function_level():
+    """Direct check on the motivating bullet + a couple of pattern variants, away from the audit."""
+    flagged = lambda body: [a["text"] for a in LR.gaps_negative_claim_advisories(body)]  # noqa: E731
+    base = "## Gaps / open questions\n{bullet}\n"
+    # the real defect, the exact phrasing
+    assert flagged(base.format(
+        bullet="- No faithful UBE3A-attributable mouse for human maternal Dup15q exists."))
+    # other universal-negative forms over a survey subject
+    assert flagged(base.format(bullet="- The dose-response was never measured in primates."))
+    assert flagged(base.format(bullet="- Only one lab has reproduced the seizure model."))
+    # a plain open question with no universal-negative is NOT flagged
+    assert not flagged(base.format(bullet="- How timing modulates the phenotype is open."))
+    # a universal-negative OUTSIDE the gaps section is not this lint's job
+    assert not LR.gaps_negative_claim_advisories(
+        "## Body\nNo model reproduces the phenotype.\n## Gaps / open questions\nAll settled.\n")
+
+
+# --------------------------------------------------------------------------- #
 # stale-grounding guard (cheap mtime check; warn, don't block)
 # --------------------------------------------------------------------------- #
 def test_stale_grounding_warns_when_module_is_newer(tmp_path):

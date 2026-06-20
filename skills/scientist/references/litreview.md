@@ -146,6 +146,21 @@ only in footnotes, so the review doubles as a finding-aid. Every load-bearing st
   questions answered only by analogy, single-lab results never replicated. The litreview's analog of a
   report's assumptions section, and the first place incompleteness shows up *by its absence*. A
   litreview with no gaps section is not done.
+
+  **A gap is a checkable NEGATIVE claim — reconcile it against the screening log + claim store before
+  it ships.** "There is no X" asserts that *the screened-in literature does not contain X*; it is the
+  one zone of the survey that is simultaneously un-grounded (gaps bullets carry no `[lit:]` citation,
+  so nothing pins them to the claim store) and barely audited (the tool checks only that the section
+  *exists*, never its content). So before a gap ships, check it the way you'd verify any negative:
+  does a screened-in paper's claim contradict or *scope* the absence? If `screening.jsonl` includes a
+  paper whose paper-claim already reports X, the gap is **wrong**; if a paper reports X under a
+  narrower condition, the gap must be **narrowed** to the regime that genuinely remains open ("no
+  *human* model," not "no model"). A **universal-negative** gap — "no model/study/mouse does X,"
+  "never measured," "largely non-X," "only," "always" — is the highest-risk, easiest-to-overstate form
+  and is the **same class as the meta-claim tripwire** below ("first to," "no study has,"
+  "understudied"): treat it with the same suspicion *even though it carries no citation*. The
+  deterministic `gaps-negative-claim-unreconciled` advisory (below) flags each such line to force this
+  reconciliation; clearing it is the author's job, not the tool's.
 - **No conclusion that recommends** — close with a state-of-knowledge summary, never a program
   decision.
 
@@ -435,15 +450,42 @@ unscoped tally is too noisy to hand a critic — see *Gathering*). Prompt it adv
 > actually engages? **Is any claim about the literature itself** — "most-cited," "rarely replicated,"
 > "understudied," "the consensus is" — **asserted as prose without a grounded `@kind("bibliometric")`
 > claim behind it?** Such meta-claims cannot be quote-grounded, so they slip past the §3 check; flag
-> any unbacked one (it must be measured via `cited_by()`/`metric()` or cut).*
+> any unbacked one (it must be measured via `cited_by()`/`metric()` or cut). **Is every gaps bullet
+> and every universal/negative summary sentence internally consistent** — does any "no/never/only/
+> always/largely-non-X" assertion *contradict or over-broaden a cited claim*, or *contradict another
+> section of the same review*? Cross-check each against (i) the cited claims and (ii) the synthesis it
+> sits beside; a gap or rollup that the survey's own evidence refutes or narrows is a finding.*
 
 It returns, per finding: the gap, why it matters, and what to add. **Blocking**: a missing
 sub-question, a mischaracterized claim, a disconfirmer excluded-on-a-pretext (or screened-in but never
-engaged), an ungrounded meta-claim about the literature. The objective stop condition is an empty
-blocking list, judged by the reviewer. Run the §3 prose↔claims pass and a light voice check too (the
-report-authoring rules apply, at the lower polish bar). The committed `protocol.md` + `screening.jsonl`
-are this critic's primary evidence — it checks coverage against the screening log, not against the
-author's memory.
+engaged), an ungrounded meta-claim about the literature, **a gaps bullet or universal/negative summary
+sentence that contradicts (or over-broadens) a cited claim or another section of the same review**.
+The objective stop condition is an empty blocking list, judged by the reviewer. Run the §3 prose↔claims
+pass and a light voice check too (the report-authoring rules apply, at the lower polish bar). The
+committed `protocol.md` + `screening.jsonl` are this critic's primary evidence — it checks coverage
+against the screening log, not against the author's memory.
+
+**Internal consistency is a distinct axis from conflict-survival.** Conflict-survival asks whether a
+disconfirmer *propagates* — does it get screened in, engaged, and (in a review tree) rolled up rather
+than buried. Internal consistency asks the orthogonal question: does the survey *contradict itself or
+its own cited evidence*? The two are independent — a review can propagate every disconfirmer up the
+tree and still close with a gaps bullet that flatly denies one of them. The highest-risk place this
+hides is precisely the under-grounded top of the survey: **rollup/synthesis sentences and gaps
+bullets**, which carry universal/negative quantifiers ("no model," "never," "only," "largely non-X")
+and *no* `[lit:]` citation, so neither the §3 check nor the coverage cross-check touches them. The
+critic must therefore read every such sentence against the claims it cites and against its own other
+sections.
+
+> **Worked example (the real defect this axis was added for).** A gaps bullet read *"No faithful
+> UBE3A-attributable mouse for human maternal duplication."* The same review **cited** a paper-claim
+> that an UBE3A-overexpression mouse reproduces a SUDEP-like seizure-mortality phenotype, and its own
+> root synthesis described that model as *"near-wild-type-except-SUDEP."* The gap is a universal
+> negative that **contradicts both a cited claim and the review's own synthesis** — yet it carried no
+> citation, so it passed the `[lit:]`/coverage audit, and it was a self-contradiction rather than a
+> dropped disconfirmer, so the conflict-survival pass missed it too. The fix is to *narrow* the gap to
+> the regime that genuinely remains open ("no model faithful *outside* the SUDEP axis," if that is
+> what the evidence supports) or to cut it. The deterministic `gaps-negative-claim-unreconciled`
+> advisory now flags such a bullet mechanically; this critic axis adjudicates it.
 
 **The disconfirmer is the hard floor; breadth is not.** The critic distinguishes a *coverage-breadth*
 gap (an on-topic paper that would add depth — defer it to Gaps, non-blocking) from a *load-bearing
@@ -490,7 +532,12 @@ the **protocol** is committed and complete (`missing-protocol` / `missing-protoc
 `included` screening row (`cited-paper-unscreened`), with `included-but-uncited` as an advisory. It
 derives the PRISMA funnel, warns when the grounding report is older than the claim module (re-run with
 `--grounding-out`), and **suppresses the report-tuned `weak-load-bearing` advisory** (noise for a
-conclusion-free survey). It does **not** re-run the claims suite or call any search API — it reads the
+conclusion-free survey). It also emits the advisory **`gaps-negative-claim-unreconciled`** — one per
+gaps-section line that reads as a universal/negative claim ("no/never/only/always … model/study/mouse/
+measured/reproduces") — a non-blocking nudge to reconcile each such gap against the screening log +
+claim store (a gap is an un-grounded, un-audited negative; see *Gaps / open questions* and the
+completeness critic's internal-consistency axis). It is deliberately permissive (false positives are
+fine); it forces the check, it does not make it. It does **not** re-run the claims suite or call any search API — it reads the
 recorded grounding report and the committed artifacts only. **Whether the screening is *honest* and
 coverage is *fair* — beyond the mechanical cross-check — is the completeness critic, not the tool**
 (see above).
