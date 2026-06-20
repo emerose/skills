@@ -179,7 +179,7 @@ def _litreview_advisories(text: str,
 # --------------------------------------------------------------------------- #
 # PROSPERO/PRISMA — protocol validation + screening parse + the funnel/cross-check
 # --------------------------------------------------------------------------- #
-def validate_protocol(review_path: Path, home: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def validate_protocol(review_path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Validate the ``protocol.md`` beside ``review.md``. Returns ``(parsed, findings)`` where
     ``parsed`` is :func:`report.parse_protocol`'s result and ``findings`` carries
     ``missing-protocol`` (file absent) or ``missing-protocol-field`` (a missing/empty front-matter
@@ -396,7 +396,7 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
     advisories.extend(gaps_negative_claim_advisories(text))
 
     # PROSPERO/PRISMA: the committed method + screening artifacts.
-    proto, proto_findings = validate_protocol(rp, home)
+    proto, proto_findings = validate_protocol(rp)
     findings.extend(proto_findings)
     rows, screen_findings = parse_screening(REPORT.litreview_screening_path(rp))
     findings.extend(screen_findings)

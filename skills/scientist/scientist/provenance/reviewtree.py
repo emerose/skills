@@ -380,7 +380,7 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
     paper_claim_index = _paperclaims.load_paper_claims(home)
     all_text = "\n\n".join(n.body for n in nodes.values())
 
-    proto, proto_findings = LITREVIEW.validate_protocol(rp, home)
+    proto, proto_findings = LITREVIEW.validate_protocol(rp)
     findings.extend(proto_findings)
     rows, screen_findings = LITREVIEW.parse_screening(REPORT.litreview_screening_path(rp))
     findings.extend(screen_findings)
