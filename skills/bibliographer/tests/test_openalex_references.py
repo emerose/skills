@@ -273,8 +273,10 @@ def test_cmd_cluster_write_tags(store, monkeypatch, capsys):
                              "references": ["W1", "W2"],
                              "authors": [{"family": "B", "given": "B"}]})
             await bib.cmd_cluster(_cluster_args(write_tags=True), store)
-            return [await store.get_by_citekey("a2024p1"),
-                    await store.get_by_citekey("b2024p2")]
+            # make_citekey keeps only letters from the title word, so "P1"/"P2"
+            # yield "a2024p"/"b2024p" (the trailing digit is dropped).
+            return [await store.get_by_citekey("a2024p"),
+                    await store.get_by_citekey("b2024p")]
         return inner()
 
     recs = _run(store, go)
