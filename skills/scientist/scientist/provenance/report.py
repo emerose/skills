@@ -913,8 +913,8 @@ def claim_robustness_weaknesses(claim: dict[str, Any]) -> list[str]:
             if any(isinstance(s, dict) and str(s.get("mode")) in ("abstract", "title")
                    for s in srcs):
                 weaknesses.append("abstract-only")
-            if any(isinstance(s, dict) and isinstance(s.get("tier"), (int, float))
-                   and int(s.get("tier")) >= _WEAK_LOCATOR_TIER for s in srcs):
+            if any(isinstance(s, dict) and isinstance((tier := s.get("tier")), (int, float))
+                   and int(tier) >= _WEAK_LOCATOR_TIER for s in srcs):
                 weaknesses.append("weak-locator")
     return weaknesses
 
