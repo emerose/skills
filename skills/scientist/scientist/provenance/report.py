@@ -1534,6 +1534,10 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     Citations are native footnotes (hyperlinked, auto-numbered): :func:`render` lets the
     writer typeset them as true bottom-of-page footnotes (native LaTeX ``\\footnote`` for
     PDF, native footnotes for HTML / docx) — locality over a relocated endnotes section.
+    Footnotes are numbered by their rendered *text*, not the cited id, so a note cited more
+    than once — or two ids that resolve to identical text (the same fact asserted as separate
+    claims) — share ONE numbered footnote cited N times, never a run of duplicate identical
+    notes (the content-keyed dedup the old ``endnotes.lua`` did before native footnotes).
 
     The literature cited via ``[lit:]`` is also collected into an auto-generated
     ``# References`` section appended at the end — one entry per distinct paper
@@ -1547,57 +1551,6 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
     text = rp.read_text(encoding="utf-8")
     claim_index = index_claims(home)
     paper_claim_index = _paperclaims.load_paper_claims(home)
-
-    order: list[str] = []
-    num: dict[str, int] = {}           # cid -> 1-based index, first-seen order
-    rorder: list[str] = []
-    rnum: dict[str, int] = {}          # report-cite id -> 1-based index
-    lorder: list[str] = []
-    lnum: dict[str, int] = {}          # lit-cite id -> 1-based index
-    lvorder: list[str] = []
-    lvnum: dict[str, int] = {}         # litreview-cite id -> 1-based index
-
-    def _make_footnote_sub(order_list: list[str], num_dict: dict[str, int], prefix: str):
-        """A footnote-marker substitution: assign each distinct cited id a 1-based,
-        first-seen number (tracked in ``order_list`` / ``num_dict``) and emit the pandoc
-        footnote marker ``[^<prefix>-<n>]``. Identical numbering/order for all three
-        citation families — only the order/num stores and the marker prefix differ."""
-        def _sub(m: re.Match) -> str:
-            cid = m.group(1).strip()
-            if cid not in num_dict:
-                order_list.append(cid)
-                num_dict[cid] = len(order_list)
-            return f"[^{prefix}-{num_dict[cid]}]"
-        return _sub
-
-    _cite_sub = _make_footnote_sub(order, num, "claim")
-    _report_sub = _make_footnote_sub(rorder, rnum, "report")
-    _lit_sub = _make_footnote_sub(lorder, lnum, "lit")
-    _litreview_sub = _make_footnote_sub(lvorder, lvnum, "litreview")
-
-    def _embed_sub(m: re.Match) -> str:
-        path = m.group(1).strip()
-        if re.match(r"^[a-z]+://", path):
-            return m.group(0)
-        ap = Path(path)
-        ap = ap if ap.is_absolute() else (rp.parent / ap)
-        if ap.suffix.lower() == ".csv" and ap.is_file():
-            return _csv_to_md_table(ap)
-        # a figure: rewrite to an absolute path so the renderer finds it
-        alt_m = re.match(r"!\[([^\]]*)\]", m.group(0))
-        alt = alt_m.group(1) if alt_m else ""
-        return f"![{alt}]({ap.resolve().as_posix()})"
-
-    # Bind each note marker to the preceding word: drop any whitespace (incl. a soft line
-    # wrap) immediately before a citation, so the superscript attaches like a footnote mark
-    # rather than drifting onto the next line.
-    body = text
-    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _CITE_RE.pattern, _cite_sub, body)
-    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _REPORT_RE.pattern, _report_sub, body)
-    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _LIT_RE.pattern, _lit_sub, body)
-    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _LITREVIEW_RE.pattern, _litreview_sub, body)
-    # embeds can span only a line each; substitute per match on the citation-substituted text
-    body = _EMBED_RE.sub(_embed_sub, body)
 
     def _report_note_text(cid: str) -> str:
         paths = resolve_report_paths(cid, home)
@@ -1654,10 +1607,71 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
             return f"Literature review: *{title}* — `{cid}`"
         return f"litreview `{cid}` ({'unresolved' if not paths else 'ambiguous'})"
 
-    defs = [f"[^claim-{num[cid]}]: {_note_text(cid)}" for cid in order]
-    defs += [f"[^report-{rnum[cid]}]: {_report_note_text(cid)}" for cid in rorder]
-    defs += [f"[^lit-{lnum[cid]}]: {_lit_note_text(cid)}" for cid in lorder]
-    defs += [f"[^litreview-{lvnum[cid]}]: {_litreview_note_text(cid)}" for cid in lvorder]
+    # Each family numbers its footnotes by the note's *rendered text*, not by the cited id: a
+    # note cited more than once — or two distinct ids that resolve to byte-identical text (the
+    # same fact asserted as separate claims) — shares ONE numbered footnote (citation reuse)
+    # rather than stacking duplicate identical notes. (Restores the content-keyed dedup the old
+    # endnotes.lua did, lost when citations became native per-page footnotes.) Each family's
+    # ``order`` is the distinct note texts in first-seen order — both the marker number and the
+    # footnote definition derive from it. ``lit_cids`` separately keeps the distinct [lit:] ids
+    # (first-seen) for the works-cited list, which must resolve papers per-id.
+    families: dict[str, dict[str, Any]] = {
+        prefix: {"order": [], "num": {}, "text": fn}
+        for prefix, fn in (("claim", _note_text), ("report", _report_note_text),
+                           ("lit", _lit_note_text), ("litreview", _litreview_note_text))
+    }
+    lit_cids: list[str] = []
+
+    def _make_footnote_sub(prefix: str):
+        """A footnote-marker substitution keyed on the note's rendered *text*: assign each
+        distinct text a 1-based, first-seen number and emit ``[^<prefix>-<n>]``. Identical
+        text (a re-cite, or two ids that render the same) reuses its number — one note, N cites."""
+        fam = families[prefix]
+        def _sub(m: re.Match) -> str:
+            cid = m.group(1).strip()
+            if prefix == "lit" and cid not in lit_cids:
+                lit_cids.append(cid)
+            txt = fam["text"](cid)
+            if txt not in fam["num"]:
+                fam["order"].append(txt)
+                fam["num"][txt] = len(fam["order"])
+            return f"[^{prefix}-{fam['num'][txt]}]"
+        return _sub
+
+    _cite_sub = _make_footnote_sub("claim")
+    _report_sub = _make_footnote_sub("report")
+    _lit_sub = _make_footnote_sub("lit")
+    _litreview_sub = _make_footnote_sub("litreview")
+
+    def _embed_sub(m: re.Match) -> str:
+        path = m.group(1).strip()
+        if re.match(r"^[a-z]+://", path):
+            return m.group(0)
+        ap = Path(path)
+        ap = ap if ap.is_absolute() else (rp.parent / ap)
+        if ap.suffix.lower() == ".csv" and ap.is_file():
+            return _csv_to_md_table(ap)
+        # a figure: rewrite to an absolute path so the renderer finds it
+        alt_m = re.match(r"!\[([^\]]*)\]", m.group(0))
+        alt = alt_m.group(1) if alt_m else ""
+        return f"![{alt}]({ap.resolve().as_posix()})"
+
+    # Bind each note marker to the preceding word: drop any whitespace (incl. a soft line
+    # wrap) immediately before a citation, so the superscript attaches like a footnote mark
+    # rather than drifting onto the next line.
+    body = text
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _CITE_RE.pattern, _cite_sub, body)
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _REPORT_RE.pattern, _report_sub, body)
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _LIT_RE.pattern, _lit_sub, body)
+    body = re.sub(r"[^\S\n]*\n?[^\S\n]*" + _LITREVIEW_RE.pattern, _litreview_sub, body)
+    # embeds can span only a line each; substitute per match on the citation-substituted text
+    body = _EMBED_RE.sub(_embed_sub, body)
+
+    # One definition per distinct note text, numbered as the markers were (text == note body).
+    defs: list[str] = []
+    for prefix in ("claim", "report", "lit", "litreview"):
+        fam = families[prefix]
+        defs += [f"[^{prefix}-{fam['num'][t]}]: {t}" for t in fam["order"]]
 
     def _bib_entry(s: dict[str, Any]) -> tuple[tuple, str]:
         # (sort-key, rendered entry) for one cited paper: "Authors (Year). *Title*. Venue. <doi>".
@@ -1694,12 +1708,12 @@ def render_markdown(report_path: Path, home: Path | None = None) -> str:
         # An auto-generated works-cited list for the [lit:]-cited papers. Deferred to the
         # author when the report already has its own References/Bibliography heading; otherwise
         # one entry per distinct paper (by citekey) across every cited literature claim.
-        if not lorder or any(_REFS_HEADING_RE.match(ln)
-                             for _, ln in _iter_lines_outside_fences(text)):
+        if not lit_cids or any(_REFS_HEADING_RE.match(ln)
+                               for _, ln in _iter_lines_outside_fences(text)):
             return ""
         seen: set[str] = set()
         entries: list[tuple[tuple, str]] = []
-        for cid in lorder:
+        for cid in lit_cids:
             cands = resolve_citation(cid, claim_index)
             if len(cands) != 1:
                 # A pre-extracted external claim contributes its own paper to the works-cited list
