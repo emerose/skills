@@ -10,7 +10,7 @@ Run the suite with uv (it pulls the test-time deps without a virtualenv):
     uv run --with pytest --with httpx pytest skills/bibliographer/tests/ -q
 
     # including the store integration test:
-    uv run --with pytest --with httpx --with "libkit>=0.4.0" \
+    uv run --with pytest --with httpx --with "libkit>=0.5.0" \
             --with diskcache --with platformdirs \
             pytest skills/bibliographer/tests/ -q
 """

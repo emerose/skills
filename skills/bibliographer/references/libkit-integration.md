@@ -46,6 +46,22 @@ embeds → stores. Consequences bibliographer is built around:
 - **`bib query`** — `Library.query(text, filters, limit)`: embeds the query and
   runs libkit's hybrid vector + BM25 search over the papers' **chunked contents**,
   returning ranked passages. Use for concepts/passages not in the title/abstract.
+  When no embedder is available it runs `Library.query(text, fts_only=True)`
+  (BM25-only) under a loud `[FTS-only]` banner rather than silently degrading.
+
+## Opening without an embedder (FTS-only reads)
+
+Reads and full-text search never embed, so `BiblioStore.open(..., read_only=True)`
+opens via libkit's **`Library.open_reader`**, which constructs **no** embedder —
+keyless/offline reads (`bib text`, the scientist grounding readers) work with no
+local model and no API key. Only `bib query` passes `want_semantic=True`, which
+*tries* to build the embedder and, on failure, opens FTS-only with
+`store.semantic_available = False` and `store.embedder_reason` set (so the CLI can
+warn with the specific cause + fix). Writable opens still build the embedder
+(ingest embeds) and raise an actionable `EmbedderConfigError` when none exists.
+This FTS-only / no-embedder open path is a libkit ≥0.5.0 capability: the
+eager-embedder behavior was fixed *in libkit* (the generic fix — any read-only
+consumer benefits — belongs upstream), not worked around here.
 
 ## Caching and the bulk import
 

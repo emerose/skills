@@ -21,8 +21,10 @@ dependencies = [
     # alongside pdfplumber/python-docx so the claims path (editable install, no extras)
     # can quote .pptx TC decks without the [reports] extra.
     "python-pptx>=1.0",
-    # store layer (libkit-backed index/search/catalog)
-    "libkit>=0.4.0",
+    # store layer (libkit-backed index/search/catalog). >=0.5.0 for the
+    # FTS-only / no-embedder read path (Library.open_reader) the bibliographer
+    # store uses for keyless literature reads — see grounding/literature.py.
+    "libkit>=0.5.0",
     "platformdirs>=4.0",
     # grounding (claim-grounding + analysis-provenance) core. Scientific deps are
     # version-pinned for fit determinism: a 4-parameter Hill fit (scipy.optimize)
