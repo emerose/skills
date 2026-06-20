@@ -446,6 +446,49 @@ def test_render_markdown_bibliography_defers_to_authored(tmp_path):
     assert "Allele-specific silencing" not in out     # auto entries not injected
 
 
+def _two_lit_claims(tmp_path: Path, stmt_a: str, stmt_b: str) -> None:
+    """A grounding report with two distinct literature claims (same single source)."""
+    prog = tmp_path / "program" / "analysis"
+    prog.mkdir(parents=True, exist_ok=True)
+    src = [{"citekey": "noor2015q", "system": "human", "test": "direct", "primary": True,
+            "group": "noor"}]
+    claims = [
+        {"id": f"claims/test_literature.py::test_{n}", "statement": s, "outcome": "passed",
+         "kind": "lit", "strength": "strong", "caveats": None,
+         "reviewed": {"date": "2026-06-16", "support": True},
+         "evidence": {"lit_sources": src}, "inputs": [], "reconcile": []}
+        for n, s in (("a", stmt_a), ("b", stmt_b))
+    ]
+    (prog / "grounding_report.json").write_text(json.dumps({"claims": claims}), encoding="utf-8")
+
+
+def _two_cite_report(tmp_path: Path) -> Path:
+    d = tmp_path / "program" / "reports" / "lit"
+    d.mkdir(parents=True, exist_ok=True)
+    md = d / "report.md"
+    md.write_text("# Lit\n\nOne [lit:program::test_literature.py::test_a] and "
+                  "two [lit:program::test_literature.py::test_b].\n", encoding="utf-8")
+    return md
+
+
+def test_render_markdown_dedupes_identical_footnotes(tmp_path):
+    # Two distinct lit claims that render to byte-identical note text (same statement, same
+    # source) collapse to ONE numbered footnote, cited twice — not two duplicate notes.
+    _two_lit_claims(tmp_path, "A shared fact.", "A shared fact.")
+    out = R.render_markdown(_two_cite_report(tmp_path), home=tmp_path)
+    assert "[^lit-2]" not in out                       # no second, identical note
+    assert out.count("[^lit-1]") == 3                  # two in-text markers + one definition
+    assert out.count("[^lit-1]: A shared fact.") == 1  # a single definition
+
+
+def test_render_markdown_keeps_distinct_footnotes(tmp_path):
+    # The dedup is content-keyed, not blunt: two claims with different text stay two notes.
+    _two_lit_claims(tmp_path, "First fact.", "Second fact.")
+    out = R.render_markdown(_two_cite_report(tmp_path), home=tmp_path)
+    assert "[^lit-1]: First fact." in out
+    assert "[^lit-2]: Second fact." in out
+
+
 def test_render_pdf_if_pandoc(tmp_path):
     if shutil.which("pandoc") is None:
         pytest.skip("pandoc not installed; render toolchain unavailable")
