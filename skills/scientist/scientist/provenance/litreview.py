@@ -16,7 +16,11 @@ it adds the litreview-specific contract:
 * **structure** — a *gaps / open-questions* section is mandatory (the first place incompleteness
   shows up by its absence); a *contested-status* treatment is reported as a content-based
   **advisory** — satisfied by competing accounts OR an explicit "no genuine controversy" finding,
-  read off the prose, never by a heading title, never blocking;
+  read off the prose, never by a heading title, never blocking. Each gaps-section line that reads as
+  a universal/negative claim ("no/never/only … model/study/mouse/measured/reproduces") raises the
+  non-blocking ``gaps-negative-claim-unreconciled`` advisory — a gap is an un-grounded, un-audited
+  *negative* assertion, so the author is nudged to reconcile it against the screening log + claim
+  store (see ``gaps_negative_claim_advisories`` and references/litreview.md);
 * **PROSPERO/PRISMA discipline** — two committed artifacts beside ``review.md`` make the survey's
   *method and screening* auditable, replacing the old hand-tagged ``@must_confront`` obligation set
   (show your work, don't tag which findings matter):
@@ -91,6 +95,53 @@ def _gaps_section_lines(text: str) -> set[int]:
                 in_gaps = False
         if in_gaps:
             out.add(i)
+    return out
+
+
+# Universal-negative gaps lint — the highest-risk, lowest-grounded sentence in a survey.
+# A gap is a checkable NEGATIVE claim ("the screened-in literature does not contain X"). It carries
+# no [lit:] citation, so nothing pins it to the claim store; the audit otherwise checks only that a
+# gaps section EXISTS, never its content; and the completeness critic historically checked
+# conflict-SURVIVAL, not internal CONSISTENCY. So a universal/negative gap ("no model does X",
+# "never measured", "only", "always") — the same class as the meta-claim tripwire ("first to", "no
+# study has") and the easiest to overstate — can directly contradict a cited paper-claim and still
+# pass everything. This deterministic, ADVISORY lint flags each such line so the author is forced to
+# reconcile it against the screening log + claim store. False positives are fine (over-flagging an
+# innocuous "only" just prompts a quick check); the goal is to make the negative claim un-skippable.
+_NEG_TRIGGER_RE = re.compile(
+    r"\b(no|never|none|not\s+been|lacks?|only|always|every|nor|without)\b", re.IGNORECASE)
+_NEG_SUBJECT_RE = re.compile(
+    r"\b(stud(?:y|ies)|model|mouse|mice|measured|reproduc\w*|exist\w*|replicat\w*|"
+    r"data|evidence|characteri[sz]\w*|assay\w*)\b", re.IGNORECASE)
+
+
+def gaps_negative_claim_advisories(text: str) -> list[dict[str, Any]]:
+    """Flag every gaps-section line that reads as a universal/negative claim ("no/never/only/always …
+    study|model|mouse|measured|reproduc|exists"). Each emits a non-blocking
+    ``gaps-negative-claim-unreconciled`` advisory: a gap is a checkable *negative* assertion about
+    the screened-in literature and the author must reconcile it against ``screening.jsonl`` + the
+    claim store before it ships — if a screened-in paper's claims contradict or scope the absence,
+    the gap is wrong or must be narrowed. Deliberately permissive (advisory, not a gate): the point
+    is to force the reconciliation, not to adjudicate it (that is the completeness critic's
+    internal-consistency axis — see references/litreview.md)."""
+    gaps = _gaps_section_lines(text)
+    lines = text.splitlines()
+    out: list[dict[str, Any]] = []
+    for i in sorted(gaps):
+        line = lines[i - 1]
+        if _ANY_HEADING_RE.match(line) or not line.strip():
+            continue                                  # skip the gaps heading + blank lines
+        if _NEG_TRIGGER_RE.search(line) and _NEG_SUBJECT_RE.search(line):
+            snippet = line.strip().lstrip("-*+ ").strip()
+            if len(snippet) > 120:
+                snippet = snippet[:117] + "…"
+            out.append({
+                "kind": "gaps-negative-claim-unreconciled", "line": i, "text": snippet,
+                "detail": f"gaps line reads as a universal/negative claim ({snippet!r}) — reconcile "
+                          "it against the screening log + claim store: if a screened-in paper's "
+                          "claims contradict or scope this absence, the gap is wrong or must be "
+                          "narrowed (same class as the 'no study has' meta-claim tripwire; it "
+                          "carries no [lit:] citation, so nothing else pins it)"})
     return out
 
 
@@ -331,6 +382,9 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
             "kind": "missing-gaps-section", "line": 0,
             "detail": "a litreview must close with a gaps / open-questions section — what the "
                       "literature does NOT settle (its analog of a report's assumptions section)"})
+    # gaps are un-grounded, un-audited negative claims: flag each universal/negative gaps line so the
+    # author reconciles it against the screening log + claim store (advisory; see references).
+    advisories.extend(gaps_negative_claim_advisories(text))
 
     # PROSPERO/PRISMA: the committed method + screening artifacts.
     proto, proto_findings = validate_protocol(rp, home)
