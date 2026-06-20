@@ -402,6 +402,8 @@ bib dedupe     # report probable duplicate groups (review, then `bib rm`)
 bib check      # missing files, changed file bytes, orphan files, citation-only/unverified records
 bib audit      # deeper review: misfiling, thin metadata, content-vs-title mismatch (a worklist)
 bib audit --json   # structured worklist to drive fixes (incl. a parallel-agent pass)
+bib compact --dry-run   # report catalog.duckdb size + bloat estimate (change nothing)
+bib compact             # reclaim that bloat by rewriting the store (rebuilds a compact HNSW/FTS index)
 ```
 
 `dedupe`, `check`, and `audit` only report; they never delete. Run `audit`
@@ -410,11 +412,31 @@ periodically (especially after a big import) as a hygiene step — see
 fanning out parallel agents to verify each document's *content* against its stored
 metadata. Empty folders under `papers/` are pruned automatically after every command.
 
+**`bib compact` — reclaim catalog.duckdb disk bloat.** libkit keeps everything
+(documents, chunks, the VSS **HNSW** index, the FTS snapshot) in one DuckDB file,
+and **DuckDB never shrinks a file in place** — deletes/updates free blocks *inside*
+the file but never return them to the OS, and the experimental persistent HNSW
+index re-appends on every checkpoint under churn. So the file balloons far past its
+logical size (observed in production: **225 GB for ~1,700 papers**), and
+`VACUUM`/`CHECKPOINT` reclaim ~nothing because the bloat is *live* index pages, not
+free blocks. The only fix that actually shrinks the file is rewriting it fresh:
+`compact` rebuilds the catalog with DuckDB's `COPY FROM DATABASE` (which rebuilds a
+compact HNSW + FTS index), **verifies** the new file (row counts match, both
+indexes present, a sample vector query returns) and only then atomically swaps it
+in, backing the old file up to `catalog.duckdb.bloated-bak` first (removed on
+success; `--keep-backup` keeps it). It refuses while a writer holds libkit's write
+lock (and takes that lock itself for the duration), so don't run it concurrently
+with an `add`/`import`/`refresh`. Run it periodically and after big churn (a large
+`import`, bulk `rm`, mass `refresh`). `--dry-run` reports the current size and a
+bloat estimate (used/free blocks) and changes nothing; re-running an already-compact
+library is a safe no-op (reclaims ~0). The mechanism and the measured comparison of
+alternatives live in [references/libkit-integration.md](references/libkit-integration.md).
+
 ## Machine-readable output
 
 `list`, `search`, `show`, `add`, `import`, `enrich`, `query`, `discover`,
 `backfill`, `refresh`, `refs`, `gaps`, `cluster`, `outliers`, `dedupe`, `check`,
-and `audit` take `--json`. Prefer it when
+`audit`, and `compact` take `--json`. Prefer it when
 you need to parse results, count, or feed another step. `discover --json` emits
 `{"results": [...], "sources": {name: count|error}, "added": {...}}`; `backfill
 --json` emits `{"checked": N, "fetched": [...], "remaining": [...]}`; `refresh
@@ -423,6 +445,9 @@ you need to parse results, count, or feed another step. `discover --json` emits
 `gaps --json` emits `{"candidates": [...], "min_citing": N}`; `cluster --json` emits
 `{"clusters": [...], "unclustered": [...], "min_shared": N, "tags_written": N|null}`;
 `outliers --json` emits `{"checked": N, "isolated": [...], "no_references": N, "min_shared": N}`.
+`compact --json` emits `{"size_before", "size_after", "reclaimed", "documents",
+"chunks", "elapsed_s", "backup", ...}` (and, for `--dry-run`, `{"size_before",
+"block_stats", "reclaimable_hint", "would_do", "writer_active"}` with no `size_after`).
 
 ## Two ways to call it: CLI or Python — your choice
 
