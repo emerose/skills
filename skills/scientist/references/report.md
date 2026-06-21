@@ -296,7 +296,8 @@ which is exactly how a false "single most-quoted result" once shipped GROUNDED. 
 as a **`@kind("bibliometric")`** claim:
 
 ```python
-from scientist.grounding import kind, strength, reviewed, cited_by
+from grounding import kind, strength, reviewed          # the grounding core
+from scientist.grounding import cited_by                 # scientist's literature layer
 
 @kind("bibliometric")
 @strength("moderate")

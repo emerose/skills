@@ -1,60 +1,21 @@
-"""scientist.grounding — claim-grounding + analysis-provenance for the scientist skill.
+"""scientist.grounding — scientist's grounding-layer additions, on top of the pytest-grounding package.
 
-The capture core, tracked loaders, quote-matching, judgment markers and the pytest plugin now
-come from the standalone **grounding** package (``pip install pytest-grounding``). This package
-is a thin **façade** over it that adds scientist's own layers and re-exports the combined
-surface, so existing ``from scientist.grounding import …`` call sites keep working unchanged:
+The claim-grounding **core** lives in the standalone ``grounding`` package
+(``pip install pytest-grounding``) — import it **directly**, there is no façade here::
 
-    grounding package  →  capture (Capture/record/current_capture/registry), tracked loaders
-                          (load/data/doc/DocRef), statement()/evidence()/uses(), the markers
-                          (strength/caveats/kind/reviewed), the bypass guard, quote matching.
-    scientist adds     →  literature grounding (paper/source/converge + the support-verdict
-                          cache), the analysis-derivation recorder, and the experiment-aware
-                          companion plugin (see plugin.py).
+    from grounding import statement, evidence, uses, load, data, doc, DocRef, \
+                          strength, caveats, kind, reviewed, Capture, record, current_capture
 
-**Statements:** a claim records its proposition with ``statement(...)`` (from the grounding
-package), ideally computed from the data so it can't drift. The plugin no longer reads the
-docstring as the statement — call ``statement()`` (the docstring is reviewer notes).
+This package holds only scientist's own layers and exposes them:
+
+  * **literature** grounding — ``paper()``/``source()``/``converge()`` + the support-verdict cache,
+  * the analysis-**derivation** recorder,
+  * (``plugin.py``) the experiment-aware companion pytest plugin (the grounding package's plugin
+    is the single capture + report engine; this one only adds the ``experiment`` fixture, the
+    judgment cache, and a couple of guard tweaks).
 """
 from __future__ import annotations
 
-# --------------------------------------------------------------------------- #
-# The grounding core (pytest-grounding) — re-exported verbatim.
-# --------------------------------------------------------------------------- #
-from grounding import (  # noqa: F401
-    Capture,
-    DocRef,
-    EmptyExtraction,
-    UnsupportedDocFormat,
-    TRACKED_SUFFIXES,
-    current_capture,
-    record,
-    registry,
-    load,
-    data,
-    doc,
-    evidence,
-    statement,
-    uses,
-    strength,
-    caveats,
-    kind,
-    reviewed,
-    install_guard,
-    match_phrase,
-    sha256,
-    collapse_ws,
-    fold_match,
-)
-# The active-capture ContextVar — scientist's derivation recorder pushes its own Capture onto
-# it so `experiments` table reads are captured during a derivation (same mechanism the plugin
-# uses for claims). Private in the library; reached here because scientist is its first-party
-# companion, pinned to a known version.
-from grounding._capture import _CURRENT  # noqa: F401
-
-# --------------------------------------------------------------------------- #
-# scientist's own layers — kept here, layered on the core above.
-# --------------------------------------------------------------------------- #
 from .judgments import JudgmentCache, JUDGMENT_CACHE_NAME  # noqa: F401
 from .literature import (  # noqa: F401
     LiteratureError, PaperRef, paper, source, converge, metric, cited_by,
@@ -66,24 +27,20 @@ from .derivation import (  # noqa: F401
 )
 
 __all__ = [
-    # core (from the grounding package)
-    "load", "data", "doc", "DocRef", "UnsupportedDocFormat", "EmptyExtraction",
-    "statement", "evidence", "uses", "cross", "record",
-    "Capture", "current_capture", "registry", "TRACKED_SUFFIXES",
-    "strength", "caveats", "kind", "reviewed",
-    "install_guard", "match_phrase", "sha256", "collapse_ws", "fold_match",
     # literature
     "paper", "source", "converge", "metric", "cited_by", "PaperRef", "LiteratureError",
     "JudgmentCache", "JUDGMENT_CACHE_NAME", "set_judgment_cache", "current_judgment_cache",
     # derivation
     "derivation", "Derivation", "DerivationAudit", "audit_derivations", "current_audit",
+    # compatibility shim
+    "cross",
 ]
 
 
 # --------------------------------------------------------------------------- #
 # Literature support-verdict cache — read on the pytest path (the companion plugin loads it),
 # written by the refresh step (`sci judge`). source(paraphrase=…) consults it; NEVER calls a
-# model (none exists in the tool). An absent file → empty cache → needs-judgment (non-blocking).
+# model. An absent file → empty cache → needs-judgment (non-blocking).
 # --------------------------------------------------------------------------- #
 _JUDGMENT_CACHE: "JudgmentCache | None" = None
 
@@ -100,12 +57,10 @@ def current_judgment_cache() -> "JudgmentCache | None":
 
 # --------------------------------------------------------------------------- #
 # cross() — compatibility passthrough. It previously declared an intentional cross-experiment
-# dependency so the (now-removed) reconcile lint wouldn't flag it. The lint is gone with the
-# move to the grounding plugin; this keeps existing ``other = cross(k1_xxxxxx)`` call sites
-# working by returning the study unchanged.
+# dependency for the (now-removed) reconcile lint; it now returns the study unchanged so older
+# ``other = cross(k1_xxxxxx)`` call sites keep working. Cross-experiment composition still works
+# via plain imports + ``uses`` (from the grounding package).
 # --------------------------------------------------------------------------- #
 def cross(study):
-    """Compatibility shim: return ``study`` unchanged. (The cross-experiment reconcile lint it
-    once fed no longer exists; cross-experiment composition still works via plain imports +
-    ``uses``.)"""
+    """Compatibility shim: return ``study`` unchanged."""
     return study

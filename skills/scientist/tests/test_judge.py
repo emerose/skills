@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from grounding import Capture
+from grounding._capture import _CURRENT
 from scientist import grounding
 from scientist.grounding import judgments as J
 from scientist.grounding import refresh as REFRESH
@@ -40,7 +42,7 @@ class FakePaper:
         # mirror the real PaperRef.contains: fold both sides so a markdown / whitespace /
         # dash variant of a quote matches the stored (Markdown) text.
         if normalize_ws:
-            from scientist.grounding.normalize import fold_match
+            from grounding import fold_match
             return fold_match(phrase) in fold_match(self.text)
         return phrase in self.text
 
@@ -59,12 +61,12 @@ def fake_paper(monkeypatch):
 
 @pytest.fixture
 def capture():
-    cap = grounding.Capture(claim_id="test::lit")
-    tok = grounding._CURRENT.set(cap)
+    cap = Capture(claim_id="test::lit")
+    tok = _CURRENT.set(cap)
     try:
         yield cap
     finally:
-        grounding._CURRENT.reset(tok)
+        _CURRENT.reset(tok)
         grounding.set_judgment_cache(None)
 
 

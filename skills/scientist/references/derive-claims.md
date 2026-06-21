@@ -85,7 +85,8 @@ Request the `experiment` fixture (ships with the plugin; resolves the Study from
 
 ```python
 import pytest
-from scientist.grounding import statement, strength, caveats, kind, evidence, uses
+from grounding import statement, strength, caveats, kind, evidence, uses, doc  # the grounding core
+# literature helpers (paper/source/converge) live in scientist: from scientist.grounding import source
 
 @kind("result")                                   # result | design | external | interpretive
 @strength("strong")                               # strong | moderate | weak | unverifiable | ...

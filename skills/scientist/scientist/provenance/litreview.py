@@ -620,13 +620,15 @@ def scaffold(home: Path, slug: str, *, title: str | None = None,
             f"slug hyphens→underscores). Author each load-bearing assertion as a grounded [lit:]\n"
             f"claim per references/report.md. Run with --grounding-out to emit the grounding report\n"
             f'the audit reads.\n"""\n'
-            f"from scientist.grounding import kind, strength, source  # noqa: F401\n\n\n"
+            f"from grounding import kind, strength, statement  # noqa: F401\n"
+            f"from scientist.grounding import source  # noqa: F401\n\n\n"
             f"# @kind"
             f'("literature")\n'
             f"# @strength"
             f'("moderate")\n'
             f"# def test_example_finding():\n"
-            f'#     """A one-line statement of the surveyed assertion."""\n'
+            f'#     """Reviewer note: scope / why this paper backs the assertion."""\n'
+            f'#     statement("what the claim asserts")\n'
             f"#     source(citekey=\"author2020\", quote=\"verbatim span from the paper\",\n"
             f"#            paraphrase=\"what the claim asserts\")\n"),
     }

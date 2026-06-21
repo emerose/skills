@@ -27,8 +27,8 @@ from datetime import date
 from pathlib import Path
 
 from ..provenance import record_provenance as _record_provenance
-from ._text import _sha256
-from grounding import install_guard
+from grounding import Capture, install_guard, sha256 as _sha256
+from grounding._capture import _CURRENT
 
 
 # --------------------------------------------------------------------------- #
@@ -102,8 +102,6 @@ class Derivation:
     """
 
     def __init__(self, study, recipe):
-        from . import Capture
-
         self.study = study
         self.exp = Path(study.path)
         self.recipe = Path(recipe).resolve()
@@ -115,8 +113,6 @@ class Derivation:
         self.audit = _AUDIT.get()
 
     def __enter__(self) -> "Derivation":
-        from . import _CURRENT
-
         install_guard()
         self._tok = _CURRENT.set(self.cap)
         base = (self.audit.scratch if self.audit is not None else self.exp / "analysis")
@@ -127,8 +123,6 @@ class Derivation:
         return self
 
     def __exit__(self, *exc) -> None:
-        from . import _CURRENT
-
         _CURRENT.reset(self._tok)
         if self.audit is not None:
             # Audit mode: surface the captured inputs (for the reads-only-data check);
