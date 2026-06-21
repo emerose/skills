@@ -9,6 +9,7 @@
 #   "pdfplumber>=0.11",
 #   "libkit>=0.4.0",
 #   "platformdirs>=4.0",
+#   "pytest-grounding>=0.0.3",
 # ]
 # ///
 """scientist CLI — zero-install entry point for the whole skill.

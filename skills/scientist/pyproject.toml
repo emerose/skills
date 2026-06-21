@@ -35,6 +35,10 @@ dependencies = [
     "scipy==1.14.1",
     "matplotlib==3.9.2",
     "pytest>=8.0",
+    # The claim-grounding + analysis-provenance core (capture, tracked loaders, the pytest
+    # plugin, quote matching). scientist.grounding is a thin façade over this; its companion
+    # plugin coexists with the grounding plugin (which owns --grounding-out + the report).
+    "pytest-grounding>=0.0.3",
 ]
 
 [project.optional-dependencies]

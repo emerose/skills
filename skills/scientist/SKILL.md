@@ -70,7 +70,8 @@ Private CRO vocabulary (your real vendor names): [references/vocab.example.yml](
   README` is **one DAG in one place**, and a single audit can walk it.
 - **Faithful vs. derived.** `data/` is a strict, grounded *superset* of `raw/` with **no
   computation**. Any mean/SEM/%-knockdown/fit belongs in `analysis/`, never in `data/`.
-- **Claims are pytest tests.** docstring = the statement · node id = the stable id · markers =
+- **Claims are pytest tests.** `statement(...)` = the proposition (ideally computed from the data) ·
+  docstring = reviewer notes · node id = the stable id · markers =
   strength/kind/caveats · `assert` = the grounding/drift check. Running the claims captures
   provenance automatically **and indexes each claim into libkit as searchable, grounded evidence**
   (carrying its outcome + strength, so a contradicted or weak claim is never surfaced as fact).

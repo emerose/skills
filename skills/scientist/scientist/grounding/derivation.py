@@ -28,7 +28,7 @@ from pathlib import Path
 
 from ..provenance import record_provenance as _record_provenance
 from ._text import _sha256
-from .bypass_guard import install_guard
+from grounding import install_guard
 
 
 # --------------------------------------------------------------------------- #

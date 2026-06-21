@@ -4,9 +4,9 @@ Maintains the link between what the experiment *claims* and the data that justif
 `raw → data → analysis → claims` DAG to find where grounding breaks. Three layers: per-artifact
 **provenance review**, **staleness/structural audit**, and end-to-end **traceability** (`sci trace`).
 
-> review/audit/check/fingerprint/trace run via `sci` (this skill's CLI); program rollup + drift via
-> `skills/scientist/scripts/rollup.py` and `pytest --check-drift` (these fold into `sci` in a later
-> stage). `sci trace` ties the provenance DAG and the grounding report together — see "Trace" below.
+> review/audit/check/fingerprint/trace run via `sci` (this skill's CLI); program rollup via
+> `skills/scientist/scripts/rollup.py` (folds into `sci` in a later stage). `sci trace` ties the
+> provenance DAG and the grounding report together — see "Trace" below.
 
 ## Provenance: the one ledger
 
@@ -199,25 +199,23 @@ Run the topic-scoped form after a sweep; treat a pile of recently-banked, on-top
 prompt to write the claims the sweep earned. The bibliographer CLI is found via `--bib`,
 `$SCIENTIST_BIB_CMD`, the sibling `bib.py`, or `bib` on PATH (it needs `$BIBLIOGRAPHER_HOME`).
 
-## Claims: grounding report, rollup, drift
+## Claims: grounding report + rollup
 
-Running the pytest claims emits `grounding_report.{md,json}` (per claim: `{id, statement, outcome, kind,
-strength, caveats, evidence, inputs+shas, reconcile, drift?}`).
+Running the pytest claims emits `grounding_report.{md,json}` (per claim: `{id, statement, notes,
+outcome, kind, strength, caveats, evidence, inputs+shas, advisories}`). Input *drift* (a recorded
+input's bytes no longer match its sha) is surfaced by `sci trace`/`sci audit` against the report.
 
 ```bash
-pytest <…>/analysis/claims --check-drift        # flag stale claims (input changed since @strength set)
-SCIENTIST_HOME=… rollup.py [--out DIR] [--no-drift]   # PROGRAM-WIDE rollup
+SCIENTIST_HOME=… rollup.py [--out DIR]            # PROGRAM-WIDE rollup
 ```
 
 - **Program rollup** runs *every* `<exp>/analysis/claims` in one session (so cross-experiment
-  `cross()`/`uses()` links resolve) and aggregates into `program_evidence.{md,json}`: counts by
-  outcome/kind/strength, a per-experiment table, the **cross-experiment claim graph** (every claim whose
-  evidence spans >1 experiment), and the stale-claim list. The substrate for a semantic audit of the
-  program's stated conclusions.
-- **Drift (`--check-drift`)** — for each claim, finds the commit that last set its `@strength` marker
-  (`git blame`) and flags the claim **stale** if any captured input changed since then → re-judge.
-- **Temporal ledger = git.** Editing a `@strength` or a statement across commits is a belief change;
-  `git blame` + the commit message is the "as-of" rationale. No YAML.
+  `uses()` links resolve) and aggregates into `program_evidence.{md,json}`: counts by
+  outcome/kind/strength, a per-experiment table, and the **cross-experiment claim graph** (every claim
+  whose evidence spans >1 experiment). The substrate for a semantic audit of the program's stated
+  conclusions.
+- **Temporal ledger = git.** Editing a `@strength` or a `statement(...)` across commits is a belief
+  change; `git blame` + the commit message is the "as-of" rationale. No YAML.
 
 **Claims feed the store.** After running the claims, `sci index-claims <exp>` indexes each claim from the
 grounding report into libkit as a `kind=claim` card (statement embedded; outcome + strength + claim kind

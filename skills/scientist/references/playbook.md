@@ -71,11 +71,11 @@ Smoke test: `python -c "from scientist.experiments import k1_000000 as k; print(
 - Reuse derivation helpers via **`experiment.derive.fn(experiment)`** (loads
   `analysis/derive.py` collision-free) — never `sys.path.insert` + `import derive` (every
   experiment's file is named `derive`, so they collide in `sys.modules` when run together).
-- Cross-experiment claims import another study and wrap it in `cross(...)`:
-  `from scientist.experiments import k1_000000; other = cross(k1_000000)`.
-- `pytest "<exp>/analysis/claims"` → check the grounding report renders and the reconcile
-  lint is quiet (no empty claims / undeclared reads / bypasses). Add `--check-drift` to
-  flag claims whose inputs changed since their `@strength` was last set.
+- Cross-experiment claims import another study directly:
+  `from scientist.experiments import k1_000000; other = k1_000000` (reads captured, sha-pinned).
+- `pytest "<exp>/analysis/claims"` → check the grounding report renders and there are no
+  bypass-guard advisories (untracked reads). Each claim records its proposition with
+  `statement(...)`; a claim with none is flagged advisory.
 
 ## 4. De-overloading `extract.py` (only if a derived table lives in it)
 

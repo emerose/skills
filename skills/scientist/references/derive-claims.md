@@ -22,8 +22,7 @@ temporal history. Closes the pipeline `raw → data → analysis → claims`.
   report PDF/docx **or a .pptx deck**; `DocRef.text()`/`.contains()` extract + quote-match it),
   `evidence(**kv)`, `uses(claim_id)` (compose, transitive provenance), `cross(study)`,
   `derivation(study, __file__)`, and the `@strength`/`@caveats`/`@kind` markers. The plugin captures
-  provenance per claim, **bypass-guards** untracked reads, runs a **reconcile lint**, and emits the
-  **grounding report**.
+  provenance per claim, **bypass-guards** untracked reads, and emits the **grounding report**.
 
 ### Cross-experiment: the `program` accessor & canonical ids
 
@@ -86,24 +85,30 @@ Request the `experiment` fixture (ships with the plugin; resolves the Study from
 
 ```python
 import pytest
-from scientist.grounding import strength, caveats, kind, evidence, uses
+from scientist.grounding import statement, strength, caveats, kind, evidence, uses
 
 @kind("result")                                   # result | design | external | interpretive
 @strength("strong")                               # strong | moderate | weak | unverifiable | ...
 @caveats("single positive-control series; n=2 wells at the top dose")
 def test_pos_ctrl_below_criterion(experiment):
-    "Positive-control guide ctrl-1 ~45% knockdown at the 100 nM top dose — below the >60% criterion."
+    """ctrl-1 positive control vs the >60% knockdown criterion at the 100 nM top dose.
+    Reviewer note: n=2 wells; the criterion is the assay's prespecified acceptance bar."""
     q = experiment.assay_summary                   # tracked read (captured as provenance)
     kd = q[(q["guide_id"]=="ctrl-1") & (q["conc_nm"]==100)]["pct_kd"].mean()
+    statement(f"Positive-control guide ctrl-1 reached ~{kd:.0f}% knockdown at the 100 nM "
+              f"top dose — below the >60% criterion.")
     evidence(kd_pct=round(kd,1), criterion_pct=60)
     assert kd == pytest.approx(45, abs=3) and kd < 60
 ```
 
-- **docstring** = statement · **node id** = stable id · **`experiment` (+ reads)** = inputs · **body**
-  = justification · **assert** = grounding/drift check · **markers** = the non-binary judgment (kept
-  *out* of the assert).
+- **`statement(...)`** = the proposition — record it explicitly, ideally **computed from the data**
+  (as above) so the claim can't state a number its data doesn't produce. **docstring** = reviewer
+  notes (method/scope/gotchas) · **node id** = stable id · **`experiment` (+ reads)** = inputs ·
+  **body** = justification · **assert** = grounding/drift check · **markers** = the non-binary
+  judgment (kept *out* of the assert). A claim with no `statement()` is flagged advisory.
 - **bulk** via `@pytest.mark.parametrize`. **compose** via `uses("other_claim_id")`. **cross-experiment**:
-  `from scientist.experiments import k1_000000; other = cross(k1_000000)` (reads captured, sha-pinned).
+  `from scientist.experiments import k1_000000; other = k1_000000` (reads captured, sha-pinned;
+  `cross(other)` still works as a no-op passthrough for older claims).
 - **lifecycle** = pytest states: `@pytest.mark.xfail(strict=True)` = contradicted but on record;
   `pytest.skip(reason=…)` = unverifiable.
 - **identifiers**: id columns that only look numeric (leading zeros) are preserved as **strings** —
@@ -120,8 +125,9 @@ def test_pos_ctrl_below_criterion(experiment):
 @kind("external")
 @strength("strong")                                    # signed report → strong is OK
 def test_report_no_mortality(experiment):
-    "The signed CRL report states: 'no mortality was observed...'."
+    """Quote from the signed CRL report (mortality section)."""   # docstring = reviewer note
     ref = doc(os.path.join(experiment.path, REPORT))
+    statement("The signed CRL report states that no mortality was observed.")
     assert ref.contains("no mortality was observed")
 ```
 
@@ -196,7 +202,6 @@ Claims auto-load the plugin via the `pytest11` entry point; run them zero-instal
 ```
 uv run --with-editable skills/scientist pytest "<exp>/analysis/claims"                 # one experiment
 uv run --with-editable skills/scientist pytest <exp1>/analysis/claims <exp2>/... --grounding-out DIR   # combined
-uv run --with-editable skills/scientist pytest <…>/analysis/claims --check-drift       # also flag stale claims
 ```
 
 Program-wide rollup: `SCIENTIST_HOME=… uv run --with-editable skills/scientist python skills/scientist/scripts/rollup.py`.
