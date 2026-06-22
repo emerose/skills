@@ -14,14 +14,14 @@ the extraction discipline (this module is only the store + the offline checks).
 
 Today an external ``[lit:]`` citation is authored *lazily* per report — every citing report
 re-reads the paper to re-derive the same statement, spending the writer budget twice. This
-front-loads that work: a paper's claim set is extracted **once** into scientist's own store and
+front-loads that work: a paper's claim set is extracted **once** into research's own store and
 an ``[lit:]`` citation resolves to a pre-extracted paper-claim. (Full design:
 ``SPEC-litreview-phase2.md``.)
 
 ## Architecture (hard constraints, from the SPEC)
 
-* **Scientist-side, scientist's OWN store.** The extractor *reads* the PDF from bibliographer's
-  library (via the pure-Python readers scientist already has — :mod:`scientist.grounding`'s
+* **Research-side, research's OWN store.** The extractor *reads* the PDF from bibliographer's
+  library (via the pure-Python readers research already has — :mod:`research`'s
   :class:`PaperRef`) and *writes* here. It **never writes bibliographer's DB**; bib is a
   read-only source of PDFs.
 * **Grep-able per-paper JSONL is the source of truth.** One ``<citekey>.jsonl`` per source
@@ -50,7 +50,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-# The library-wide directory holding one JSONL per source paper, at the scientist home root
+# The library-wide directory holding one JSONL per source paper, at the data-tree home root
 # (paper-claims are shared across every review/report in the program — SPEC §3 / §7.2).
 PAPER_CLAIMS_DIRNAME = "paper-claims"
 

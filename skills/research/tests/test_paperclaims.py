@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from research import paperclaims as PC
-from research import report as REPORT
+from reportkit import report as REPORT
 
 
 # --------------------------------------------------------------------------- #

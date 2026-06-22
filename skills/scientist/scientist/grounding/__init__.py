@@ -27,18 +27,4 @@ from .derivation import (  # noqa: F401
 __all__ = [
     # derivation
     "derivation", "Derivation", "DerivationAudit", "audit_derivations", "current_audit",
-    # compatibility shim
-    "cross",
 ]
-
-
-# --------------------------------------------------------------------------- #
-# cross() — compatibility passthrough. It previously declared an intentional cross-experiment
-# dependency for the (now-removed) reconcile lint; it now returns the study unchanged so older
-# ``other = cross(k1_xxxxxx)`` call sites keep working. Cross-experiment composition still works
-# via plain imports + ``uses`` (from the grounding package). This is about cross-EXPERIMENT claims,
-# not literature — so it stays in scientist.
-# --------------------------------------------------------------------------- #
-def cross(study):
-    """Compatibility shim: return ``study`` unchanged."""
-    return study

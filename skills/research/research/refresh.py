@@ -1,4 +1,4 @@
-"""scientist.grounding.refresh — the literature-verdict worklist + record step (``res judge``).
+"""research.refresh — the literature-verdict worklist + record step (``res judge``).
 
 **No model lives here — or anywhere in ``sci``.** The orchestrating agent is already an LLM that
 read the paper; the entailment verdict is produced by that agent (ideally a *fresh-context judge
@@ -10,12 +10,12 @@ only the two deterministic halves of the loop:
     (``res judge --list``.) This is what the judge subagent reads.
   * :func:`record_verdicts` — ingest the caller-supplied verdicts ``{citekey, paraphrase,
     supported, rationale}`` and write them into the verdict cache
-    (:mod:`scientist.grounding.judgments`), pinning each with an ``evidence_sha`` the tool
+    (:mod:`research.judgments`), pinning each with an ``evidence_sha`` the tool
     **recomputes itself** from the report's stored span — so a caller cannot record a verdict
     against a stale or wrong span. (``res judge --record``.)
 
 Determinism discipline (unchanged): the verdict cache is pure stdlib; the pytest path
-(``source()``) and the audit (``provenance.report.lit_verdict``) only READ it. This module only
+(``source()``) and the audit (``research.literature_cites.lit_verdict``) only READ it. This module only
 WRITES it. There is no model client to import.
 """
 from __future__ import annotations
@@ -136,7 +136,7 @@ def record_verdicts(report_path: Path | str, records: list[dict[str, Any]],
     ever attach to the exact span the report carries now. A record is rejected when its
     ``(citekey, paraphrase)`` no longer resolves to a source, or when it echoes an ``evidence_sha``
     that no longer matches the current span (the worklist span the caller judged went stale).
-    ``judge_id`` (default :data:`scientist.grounding.judgments.DEFAULT_JUDGE_ID`) is stamped as
+    ``judge_id`` (default :data:`research.judgments.DEFAULT_JUDGE_ID`) is stamped as
     metadata.
 
     Returns ``{report, cache, recorded, rejected, details}``."""

@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 
 import scientist.provenance as P
-from scientist.provenance import report as R
+from reportkit import report as R
 from scientist.provenance import trace as T
 
 

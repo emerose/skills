@@ -75,7 +75,7 @@ from scientist import extraction as EXT  # noqa: E402
 from scientist.cli_utils import emit, resolve_home  # noqa: E402
 from scientist.provenance import trace as TRACE  # noqa: E402
 from scientist.provenance import reproduce as REPRODUCE  # noqa: E402
-from scientist.provenance import report as REPORT  # noqa: E402
+from reportkit import report as REPORT  # noqa: E402  (the generic grounded-report engine)
 from scientist.store import cli as STORE_CLI  # noqa: E402
 from scientist.store import _meta as STORE_META  # noqa: E402
 

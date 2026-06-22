@@ -1,7 +1,7 @@
 """The literature citation layer for the report engine — ``[lit:]`` and ``[litreview:]``.
 
 The generic report engine (:mod:`reportkit.report`) natively knows ``[claim:]`` /
-``[report:]`` / embeds. This module is scientist's *literature* citation layer, plugged into
+``[report:]`` / embeds. This module is research's *literature* citation layer, plugged into
 the engine through the citation-resolver registry (:func:`reportkit.report.register_citation`):
 
 * ``[lit:<id>]`` — grounds a third-party statement on a ``kind=literature`` /
@@ -13,16 +13,13 @@ the engine through the citation-resolver registry (:func:`reportkit.report.regis
 
 Each scheme registers (at import) its regex, an audit resolver, render hooks (footnote text +
 works-cited entries), an audit-output renderer, and — for ``[lit:]`` — opts into the
-prose-quantity advisory pool. Importing this module is what *activates* those schemes; it is
-imported on scientist's normal report paths (the :mod:`provenance.report` shim, which
-:mod:`provenance.litreview` / :mod:`provenance.reviewtree` / ``sci`` all import), so the
-resolvers are registered whenever scientist audits a report.
+prose-quantity advisory pool. **Importing this module is what *activates* those schemes** — the
+``research`` package imports it on load (see ``research/__init__``), so the resolvers are
+registered for any consumer of the research skill (``res``, the claims suite, and scientist's
+``sci report`` composition seam). The engine stays domain-generic and never imports this layer;
+the layer plugs into it from research.
 
-This is the seam the scientist/research split turns on: in a later phase this whole module
-moves to a ``research`` skill that registers the same schemes, with no change to the engine.
-
-Stdlib + PyYAML. The literature verdict helpers + labels were lifted verbatim from the old
-``provenance.report`` (a test asserts behavior is unchanged)."""
+Stdlib + PyYAML."""
 
 from __future__ import annotations
 
@@ -88,7 +85,7 @@ def _short_authors(authors_text: str) -> str:
 
 
 # Locator ladder → max eligible strength for a *machine-judged* literature source (mirrors
-# scientist.grounding.source). A source's tier caps the claim's strength; the audit enforces the
+# research.literature.source). A source's tier caps the claim's strength; the audit enforces the
 # ceiling so a paragraph-spanning chunk locator can't be sold as a tier-1 "strong" quote.
 _LIT_TIER_CEILING = {1: "strong", 2: "moderate", 3: "weak"}
 _LIT_STRENGTH_RANK = {"weak": 1, "moderate": 2, "strong": 3}
@@ -190,7 +187,7 @@ def lit_review_sha(claim: dict[str, Any]) -> str | None:
 
 # --------------------------------------------------------------------------- #
 # Bibliometric claims — a claim ABOUT the literature (e.g. "most-cited"), grounded on a stored
-# OpenAlex metric via scientist.grounding.metric()/cited_by(), not a quote. The quote-in-paper
+# OpenAlex metric via research.literature.metric()/cited_by(), not a quote. The quote-in-paper
 # verdict (lit_verdict) cannot represent it, so it gets its own verdict + staleness pin. A [lit:]
 # citation dispatches here when the cited claim's kind is "bibliometric" (see the citation loop).
 # --------------------------------------------------------------------------- #
@@ -373,7 +370,7 @@ def litreview_screening_path(review_path: Path) -> Path:
 def parse_protocol(protocol_path: Path) -> dict[str, Any]:
     """Parse a litreview's ``protocol.md`` into ``{present, front_matter, headings}`` —
     ``headings`` is ``{lower-cased-title: body}``. Store-free, PyYAML + stdlib. Validation
-    (which fields are required + non-empty) lives in :mod:`provenance.litreview`."""
+    (which fields are required + non-empty) lives in :mod:`research.litreview`."""
     p = Path(protocol_path)
     if not p.is_file():
         return {"present": False, "front_matter": {}, "headings": {}}

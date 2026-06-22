@@ -32,8 +32,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from .. import cli_utils  # noqa: F401  (kept for back-compat imports of store.cli.cli_utils)
-from ..cli_utils import die, emit_json  # re-exported for existing call sites
+from ..cli_utils import die, emit_json
 
 from . import _audit, _files, _generate, _intake, _meta, _pr  # noqa: F401  (re-exported)
 from ._store import STORE_DIRNAME, Store, EmbedderConfigError
@@ -292,7 +291,7 @@ async def _run_index_report(args: argparse.Namespace, card: dict[str, Any]) -> N
 
 def index_report(args: argparse.Namespace, card: dict[str, Any]) -> int:
     """Open the libkit store and upsert a ``kind=report`` document from a prepared ``card``
-    dict (built store-free by ``provenance.report`` + ``sci report``). Sync wrapper."""
+    dict (built store-free by ``reportkit.report`` + ``sci report``). Sync wrapper."""
     try:
         asyncio.run(_run_index_report(args, card))
     except KeyboardInterrupt:

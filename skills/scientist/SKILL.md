@@ -105,14 +105,17 @@ callable both ways. Pick per task:
   yourself piping a validator's prose to `grep`/`head`/`tail` to find out "is it broken,
   and which findings?", that's the signal to call the function instead (or pass `--json`)
   and branch on the structured result.
-- **Python** (`from scientist.provenance import report, trace, coverage, litreview`) —
-  best for **composition**: looping a check over many reports/experiments, or branching on
-  fields without re-parsing text. These functions **return dicts** (the same payloads the
-  CLI prints under `--json`); a paired `render_*` turns one into the human text.
+- **Python** (`from scientist.provenance import trace`; the generic report engine is
+  `from reportkit import report`) — best for **composition**: looping a check over many
+  reports/experiments, or branching on fields without re-parsing text. These functions
+  **return dicts** (the same payloads the CLI prints under `--json`); a paired `render_*`
+  turns one into the human text. (Literature reviews / paper-claims / coverage live in the
+  separate `research` skill — `from research import litreview, coverage`.)
 
 ```python
 from pathlib import Path
-from scientist.provenance import report, trace
+from reportkit import report
+from scientist.provenance import trace
 
 res = report.audit(Path("program/reports/foo/report.md"), home=Path("/data"))
 # res -> {report, scope, exp_id, citations, embeds, report_cites, findings, status}

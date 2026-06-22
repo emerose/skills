@@ -13,7 +13,7 @@ from grounding._capture import _CURRENT
 import research as grounding
 from research import judgments as J
 from research import refresh as REFRESH
-from research import report as R
+from reportkit import report as R
 
 
 # --------------------------------------------------------------------------- #

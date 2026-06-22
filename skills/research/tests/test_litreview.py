@@ -1,5 +1,5 @@
-"""The litreview phase — ``provenance.litreview`` (``sci litreview``) and the protocol-keyed
-``stale-litreview`` pin in ``provenance.report``.
+"""The litreview phase — ``research.litreview`` (``res litreview``) and the protocol-keyed
+``stale-litreview`` pin in the ``[litreview:]`` citation layer.
 
 A *litreview* (``kind=litreview``) is a neutral, thesis-independent survey of the third-party
 literature on one sub-question. Phase 1 of the litreview redesign replaces the hand-tagged
@@ -23,7 +23,8 @@ from pathlib import Path
 
 import research as grounding
 from research import litreview as LR
-from research import report as R
+from reportkit import report as R
+from research import literature_cites as LIT
 
 
 # --------------------------------------------------------------------------- #
@@ -487,8 +488,8 @@ def test_write_litreview_pins_records_surfaced_pin(tmp_path):
     res = R.audit(report, home=tmp_path)
     lrc = res["litreview_cites"][0]
     assert lrc.get("pin_unrecorded") is True
-    R.write_litreview_pins(report, {lrc["id"]: lrc["pin"]})
-    pins = R.litreview_pins(report.read_text())
+    LIT.write_litreview_pins(report, {lrc["id"]: lrc["pin"]})
+    pins = LIT.litreview_pins(report.read_text())
     assert pins[lrc["id"]] == lrc["pin"]
     res2 = R.audit(report, home=tmp_path)
     lrc2 = res2["litreview_cites"][0]
@@ -562,7 +563,7 @@ def test_scaffold_lays_out_all_artifacts(tmp_path):
     assert prompt.is_file() and module.is_file()
     assert res["module"].endswith("claims/test_litreview_it_aso_biodistribution.py")
     assert len(res["created"]) == 5 and res["skipped"] == []
-    assert R.litreview_module_path(review, tmp_path) == module
+    assert LIT.litreview_module_path(review, tmp_path) == module
     # the protocol stub carries the four required headings + the front-matter keys.
     pbody = protocol.read_text()
     for heading in ("Question & scope", "Search queries", "Inclusion criteria", "Exclusion criteria"):

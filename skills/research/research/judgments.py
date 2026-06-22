@@ -1,4 +1,4 @@
-"""scientist.grounding.judgments — the literature support-verdict cache (pure, offline).
+"""research.judgments — the literature support-verdict cache (pure, offline).
 
 A *literature* claim's deterministic tripwire is the verbatim quote (``source(quote=…)``):
 present in the cited paper's text or not, every audit, no model. The separable part is the
@@ -12,10 +12,10 @@ The orchestrating agent (an LLM that already read the paper, ideally via a fresh
 subagent for independence) produces the verdict; ``res judge`` only lists the work and records the
 verdict it is handed.
 
-  * The verdict is WRITTEN by the record step (``scientist.grounding.refresh.record_verdicts`` /
+  * The verdict is WRITTEN by the record step (``research.refresh.record_verdicts`` /
     ``res judge --record``), which ingests caller-supplied verdicts and pins each one with an
     ``evidence_sha`` the tool recomputes itself.
-  * The pytest path (``source()``) and the audit (``provenance.report.lit_verdict``) only ever
+  * The pytest path (``source()``) and the audit (``research.literature_cites.lit_verdict``) only ever
     READ this cache — a plain JSON file, a pure function of bytes. No network, no key, no model.
 
 This module is pure stdlib and safe to import on the pytest path.

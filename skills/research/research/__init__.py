@@ -60,6 +60,11 @@ from .literature import (  # noqa: E402,F401
     _load_paper, _credibility_from_rec, _import_bibliostore, _load_dotenv_for,
     _bib_home, _record_source, _record_metric, _PAPER_CACHE, _BIBLIOSTORE,
 )
+# Activate the [lit:]/[litreview:] citation layer: importing literature_cites registers those
+# schemes with the shared reportkit engine (register_citation, on import). Doing it here makes
+# `import research` the single activation point — any consumer (res, the claims suite, scientist's
+# `sci report` seam) that touches the research package gets the resolvers, with no façade module.
+from . import literature_cites  # noqa: E402,F401
 
 __all__ = [
     # literature grounding

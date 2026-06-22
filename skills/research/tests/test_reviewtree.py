@@ -271,7 +271,7 @@ def test_linearize_depth_first(tmp_path):
 
 
 def test_render_markdown_resolves_facts(tmp_path):
-    from research import report as REPORT
+    from reportkit import report as REPORT
     rp = _clean_tree(tmp_path)
     md = T.linearize(rp, home=tmp_path)
     tmp_md = rp.parent / "_lin.md"

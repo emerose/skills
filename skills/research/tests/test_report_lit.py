@@ -1,10 +1,11 @@
-"""The ``[lit:]`` citation layer driven through research's ``report`` shim.
+"""The ``[lit:]`` citation layer driven through the report engine.
 
 The GENERIC report engine (parse / audit / render / scope) lives in ``reportkit`` and is tested
-there. What this covers is research's own literature surface, reached through the
-``research.report`` shim: the registered ``[lit:]`` resolvers / verdicts and the auto-generated
-works-cited bibliography + content-keyed footnote dedup. (Split out of scientist's old
-test_report.py when the literature layer moved to research.)
+there. What this covers is research's own literature surface — activated by importing
+``research.literature_cites`` (which registers the ``[lit:]`` / ``[litreview:]`` schemes): the
+``[lit:]`` resolvers / verdicts and the auto-generated works-cited bibliography + content-keyed
+footnote dedup. (Split out of scientist's old test_report.py when the literature layer moved to
+research.)
 
 Pure: synthetic ``program/analysis`` grounding reports in tmp dirs — no keys, no library.
 """
@@ -12,7 +13,8 @@ Pure: synthetic ``program/analysis`` grounding reports in tmp dirs — no keys, 
 import json
 from pathlib import Path
 
-from research import report as R
+from reportkit import report as R
+from research import literature_cites  # noqa: F401  (registers [lit:])
 
 
 def _lit_json(tmp_path: Path, *, node="test_lit", outcome="passed", kind="literature",

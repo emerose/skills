@@ -51,12 +51,12 @@ from pathlib import Path
 # `import research` and its modules resolve. research bootstraps reportkit on its own import.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from research import report as REPORT  # noqa: E402  (registers [lit:]/[litreview:] on import)
-from research import litreview as LITREVIEW  # noqa: E402
+from research import litreview as LITREVIEW  # noqa: E402  (importing research registers [lit:]/[litreview:])
 from research import paperclaims as PAPERCLAIMS  # noqa: E402
 from research import coverage as COVERAGE  # noqa: E402
 from research.cli_utils import emit, resolve_home  # noqa: E402
 
+from reportkit import report as REPORT  # noqa: E402  (the generic engine)
 import reportkit.trace as RKTRACE  # noqa: E402
 
 
