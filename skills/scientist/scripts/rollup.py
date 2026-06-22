@@ -3,18 +3,18 @@
 "state of the evidence" report.
 
 Runs the claims of every ``<exp>/analysis/claims`` under ``$SCIENTIST_HOME`` in a
-single pytest session (so cross-experiment ``cross()``/``uses()`` links resolve), then
-aggregates the combined grounding report into a program-level view:
+single pytest session (so cross-experiment ``uses()`` links resolve), then aggregates
+the combined grounding report into a program-level view:
 
-  * summary — claim/experiment counts, by outcome / kind / strength, drift status
-  * per-experiment table — claims, kinds, outcomes, drift
+  * summary — claim/experiment counts, by outcome / kind / strength
+  * per-experiment table — claims, kinds, outcomes
   * cross-experiment graph — every claim whose evidence spans >1 experiment
-  * full claim index by kind — statement, strength, outcome, evidence, inputs, drift
+  * full claim index by kind — statement, strength, outcome, evidence, inputs
 
 Output: ``program_evidence.md`` + ``program_evidence.json`` in --out (default: cwd).
 
 Usage:
-    SCIENTIST_HOME=… rollup.py [--out DIR] [--no-drift]
+    SCIENTIST_HOME=… rollup.py [--out DIR]
 
 The rollup tool is generic (no experiment-specifics). It is the substrate for the
 semantic audit (checking the program's stated conclusions against these grounded claims).
@@ -53,11 +53,9 @@ def find_claims_dirs(root: Path) -> list[str]:
     return sorted(str(p) for p in dirs)
 
 
-def run_claims(dirs: list[str], out_dir: Path, check_drift: bool) -> dict:
+def run_claims(dirs: list[str], out_dir: Path) -> dict:
     cmd = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q",
            *dirs, "--grounding-out", str(out_dir), "-o", "addopts="]
-    if check_drift:
-        cmd.append("--check-drift")
     # tolerate a non-zero exit (a failed/contradicted claim shouldn't abort the rollup)
     proc = subprocess.run(cmd, capture_output=True, text=True)
     report = out_dir / "grounding_report.json"
@@ -80,10 +78,9 @@ def aggregate(claims: list[dict]) -> dict:
         others = sorted(exps - {home})
         if others:
             cross.append({"id": c["id"], "home": home, "refs": others,
-                          "statement": c["statement"], "kind": c["kind"],
+                          "statement": c.get("statement"), "kind": c["kind"],
                           "outcome": c["outcome"], "strength": c["strength"]})
 
-    drift = [c for c in claims if isinstance(c.get("drift"), dict) and c["drift"].get("stale")]
     return {
         "n_experiments": len(by_exp),
         "n_claims": len(claims),
@@ -96,7 +93,6 @@ def aggregate(claims: list[dict]) -> dict:
             "outcomes": dict(Counter(c["outcome"] for c in cs)),
         } for e, cs in sorted(by_exp.items())},
         "cross_experiment": cross,
-        "drift_stale": [{"id": c["id"], "changed": c["drift"]["changed_inputs"]} for c in drift],
         "claims": claims,
     }
 
@@ -104,15 +100,7 @@ def aggregate(claims: list[dict]) -> dict:
 _OUT = {"passed": "✅", "failed": "❌", "xfail": "⊘", "xpass": "⚠️", "skipped": "…"}
 
 
-def _short(p: str) -> str:
-    parts = Path(p).parts
-    for i, part in enumerate(parts):
-        if part.upper().startswith("K1-"):
-            return "/".join(parts[i:])
-    return Path(p).name
-
-
-def render_md(agg: dict, drift_checked: bool) -> str:
+def render_md(agg: dict) -> str:
     L = ["# Program evidence — grounding rollup", ""]
     L.append(f"**{agg['n_claims']} claims across {agg['n_experiments']} experiments.**")
     L.append("")
@@ -126,13 +114,6 @@ def render_md(agg: dict, drift_checked: bool) -> str:
         s = f"{strs[i][0]} | {strs[i][1]}" if i < len(strs) else " | "
         L.append(f"| {o} | | {k} | | {s} |")
     L.append("")
-    if drift_checked:
-        stale = agg["drift_stale"]
-        L.append(f"**Drift:** {len(stale)} claim(s) stale (inputs changed since the @strength commit)."
-                 + ("" if not stale else " ⚠️ re-judge:"))
-        for s in stale:
-            L.append(f"- `{s['id'].split('::')[-1]}` — {', '.join(_short(c) for c in s['changed'])}")
-        L.append("")
 
     L.append("## By experiment")
     L.append("| experiment | claims | kinds | outcomes |")
@@ -149,7 +130,7 @@ def render_md(agg: dict, drift_checked: bool) -> str:
     for c in agg["cross_experiment"]:
         L.append(f"- **{c['home']} → {', '.join(c['refs'])}** "
                  f"({_OUT.get(c['outcome'], c['outcome'])} {c['kind']}/{c['strength']}) "
-                 f"`{c['id'].split('::')[-1]}`<br>{c['statement']}")
+                 f"`{c['id'].split('::')[-1]}`<br>{c.get('statement')}")
     L.append("")
 
     L.append("## All claims by kind")
@@ -160,12 +141,9 @@ def render_md(agg: dict, drift_checked: bool) -> str:
         L.append(f"### {kind} ({len(by_kind[kind])})")
         for c in by_kind[kind]:
             ev = ", ".join(f"`{k}={v}`" for k, v in list(c.get("evidence", {}).items())[:4])
-            dr = ""
-            if drift_checked and isinstance(c.get("drift"), dict) and c["drift"].get("checked"):
-                dr = " · ⚠️stale" if c["drift"].get("stale") else " · fresh"
             L.append(f"- {_OUT.get(c['outcome'], c['outcome'])} **{_exp_of(c['id'])}** "
-                     f"`{c['id'].split('::')[-1]}` · _{c['strength']}_{dr}<br>"
-                     f"{c['statement']}" + (f"<br><sub>{ev}</sub>" if ev else ""))
+                     f"`{c['id'].split('::')[-1]}` · _{c['strength']}_<br>"
+                     f"{c.get('statement')}" + (f"<br><sub>{ev}</sub>" if ev else ""))
         L.append("")
     return "\n".join(L) + "\n"
 
@@ -173,7 +151,6 @@ def render_md(agg: dict, drift_checked: bool) -> str:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=".", help="output dir for program_evidence.{md,json}")
-    ap.add_argument("--no-drift", action="store_true", help="skip the git drift check (faster)")
     args = ap.parse_args()
 
     # SCIENTIST_HOME is the data-tree root.
@@ -189,16 +166,14 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
-        run = run_claims(dirs, Path(tmp), check_drift=not args.no_drift)
+        run = run_claims(dirs, Path(tmp))
     agg = aggregate(run["claims"])
     (out / "program_evidence.json").write_text(json.dumps(agg, indent=2, ensure_ascii=False),
                                                 encoding="utf-8")
-    (out / "program_evidence.md").write_text(render_md(agg, drift_checked=not args.no_drift),
-                                             encoding="utf-8")
+    (out / "program_evidence.md").write_text(render_md(agg), encoding="utf-8")
     print(f"  {run['pytest_summary']}", file=sys.stderr)
     print(f"  {agg['n_claims']} claims · {agg['n_experiments']} experiments · "
-          f"{len(agg['cross_experiment'])} cross-experiment · "
-          f"{len(agg['drift_stale'])} stale", file=sys.stderr)
+          f"{len(agg['cross_experiment'])} cross-experiment", file=sys.stderr)
     print(out / "program_evidence.md")
 
 

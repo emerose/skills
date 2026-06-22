@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .judgments import evidence_sha as _evidence_sha
-from ._text import _sha256, _match_phrase
+from grounding import sha256 as _sha256, match_phrase as _match_phrase
 
 
 class LiteratureError(RuntimeError):
@@ -300,7 +300,7 @@ def paper(citekey: str, *, allow_retracted: bool = False) -> PaperRef:
     a literature claim must not ground on retracted work. Pass ``allow_retracted=True`` *only* to
     deliberately discuss the retraction itself. (The flag is as fresh as the last `bib add`/
     enrich; the check stays offline/deterministic by reading the stored value, not the network.)"""
-    from . import record
+    from grounding import record
 
     ref = _load_paper(citekey)
     if ref.is_retracted and not allow_retracted:
@@ -428,7 +428,7 @@ def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = N
 
 
 def _record_source(rec: dict) -> None:
-    from . import current_capture
+    from grounding import current_capture
 
     cap = current_capture()
     if cap is not None:
@@ -506,7 +506,7 @@ def cited_by(citekey: str) -> int:
 
 
 def _record_metric(rec: dict) -> None:
-    from . import current_capture
+    from grounding import current_capture
 
     cap = current_capture()
     if cap is not None:

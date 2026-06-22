@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from grounding import Capture
+from grounding._capture import _CURRENT
 from scientist import grounding
 from scientist.grounding import LiteratureError, PaperRef, cited_by, metric
 from scientist.provenance import report as R
@@ -38,8 +40,8 @@ def _seed(citekey: str, *, credibility: dict, text: str = "some text") -> PaperR
 
 def _in_capture():
     """Activate a fresh capture (as the plugin does per claim) and return it."""
-    cap = grounding.Capture(claim_id="t")
-    grounding._CURRENT.set(cap)
+    cap = Capture(claim_id="t")
+    _CURRENT.set(cap)
     return cap
 
 

@@ -1,82 +1,76 @@
-"""pytest plugin — collect claims, capture provenance, emit the grounding report.
+"""scientist.grounding.plugin — the scientist-specific COMPANION to the grounding plugin.
 
-A *claim* is a pytest test: its docstring is the statement, its node id is the stable
-id, the fixtures it requests are its declared inputs, its body is the justification,
-and its assert is the grounding/drift check. Markers carry the non-binary judgment
-(``strength``/``caveats``/``kind``); lifecycle rides pytest states (``xfail`` =
-contradicted/retracted, ``skip`` = unverifiable).
+The standalone **grounding** package (pip: pytest-grounding) ships the single capture + report
+engine: it owns ``--grounding-out``/``--grounding-fresh``, the per-claim :class:`Capture`, the
+bypass guard, the judgment markers, and ``grounding_report.{json,md}``. This companion adds
+ONLY scientist's extras and deliberately does **not** redefine those options, so the two
+plugins coexist with no conflict:
 
-This plugin:
-  * registers the markers (no "unknown mark" warnings),
-  * wraps each test in a :class:`scientist.grounding.Capture` (autouse fixture) so every
-    ``scientist.experiments``/``load``/``doc`` read is recorded, and installs the bypass guard,
-  * runs the reconcile lint (declared fixtures vs captured inputs),
-  * collects ``{id, statement, outcome, evidence, inputs+shas, strength, caveats,
-    kind}`` per claim and writes ``grounding_report.md`` + ``.json``.
+  * the zero-boilerplate ``experiment`` fixture (the :class:`Study` resolved from the test's
+    path, so no per-experiment conftest is needed),
+  * loading the literature support-verdict cache (so ``source(paraphrase=…)`` can read it),
+    plus the ``--judge-cache`` option,
 
-Auto-loaded via the ``pytest11`` entry point (see pyproject.toml), so a bare
-``pytest analysis/claims/`` Just Works once the package is installed.
+and, at import time, two adjustments so the library's bypass guard covers the scientist tree
+exactly as before:
+
+  * extend the guard's tracked suffixes with GraphPad Prism ``.pzfx``,
+  * bridge ``GROUNDING_ROOT`` ← ``SCIENTIST_HOME`` (the library guard roots at the former;
+    scientist's data tree is the latter).
+
+Auto-loaded via the ``pytest11`` entry point alongside the grounding plugin.
+
+Dropped in the move to the grounding plugin (were advisory/unused-downstream): the
+docstring-as-statement behavior (call ``statement()`` now), the K1 ``reconcile`` lint, and the
+``--check-drift`` git-blame drift check.
 """
 from __future__ import annotations
 
-import json
+import os
 from pathlib import Path
 
+import grounding
 import pytest
 
-from .. import grounding
+from . import JUDGMENT_CACHE_NAME, JudgmentCache, set_judgment_cache
 
-_MARKERS = {
-    "strength": "strength(level): how strongly the evidence supports the claim",
-    "caveats": "caveats(text): scope/limits to keep in mind",
-    "kind": "kind(category): result|design|external|interpretive|literature|bibliometric",
-    "reviewed": "reviewed(**verdict): agent support-review of a literature claim",
-}
-
-
-def pytest_configure(config):
-    for name, help_ in _MARKERS.items():
-        config.addinivalue_line("markers", help_)
-    grounding.install_guard()
-    config._grounding_records = []
-    # Load the literature support-verdict cache (read-only on this path) so a
-    # source(paraphrase=…) can pin its cached, key-matched verdict. The cache is WRITTEN only by
-    # the record step (`sci judge --record`); no model is ever invoked. An absent file → an empty
-    # cache → every machine source reports needs-judgment (non-blocking).
-    grounding.set_judgment_cache(grounding.JudgmentCache.load(_judge_cache_path(config)))
-
-
-def _judge_cache_path(config):
-    """Where the literature verdict cache lives: ``--judge-cache``, else ``$SCIENTIST_JUDGE_CACHE``,
-    else ``<--grounding-out or rootdir>/lit_judgments.json`` (next to the grounding report)."""
-    import os
-
-    explicit = config.getoption("--judge-cache", default=None) or os.environ.get("SCIENTIST_JUDGE_CACHE")
-    if explicit:
-        return Path(explicit)
-    out = config.getoption("--grounding-out", default=None) or config.rootpath
-    return Path(out) / grounding.JUDGMENT_CACHE_NAME
+# --- import-time guard adjustments (run once, before any pytest_configure) ----------------- #
+# scientist tracks GraphPad Prism XML alongside the library's generic data/doc formats, so an
+# untracked .pzfx read is flagged by the bypass guard. TRACKED_SUFFIXES is the shared set the
+# guard consults; mutating it here extends coverage for the whole session.
+grounding.TRACKED_SUFFIXES.add(".pzfx")
+# The library's bypass guard roots at $GROUNDING_ROOT; scientist's data tree is $SCIENTIST_HOME.
+# Bridge them so reads under the data tree are guarded exactly as before.
+if os.environ.get("SCIENTIST_HOME") and not os.environ.get("GROUNDING_ROOT"):
+    os.environ["GROUNDING_ROOT"] = os.environ["SCIENTIST_HOME"]
 
 
 def pytest_addoption(parser):
+    # Reuse the library plugin's "grounding" option group; add ONLY scientist's own option.
     g = parser.getgroup("grounding")
-    g.addoption("--grounding-out", action="store", default=None,
-                help="directory for grounding_report.{md,json} (default: rootdir)")
-    g.addoption("--grounding-fresh", "--no-merge", action="store_true", default=False,
-                dest="grounding_fresh",
-                help="ignore any existing grounding_report.json and write ONLY this run's "
-                     "records (clean slate). Default is to MERGE this run's claims into the "
-                     "existing report at test-file granularity, so a partial run "
-                     "(e.g. one claims file) updates just its own files and leaves every "
-                     "other module's claims intact — avoiding spurious cross-report BROKEN.")
-    g.addoption("--check-drift", action="store_true", default=False,
-                help="flag claims whose captured inputs changed since the commit that "
-                     "last set their @strength marker (git-based; needs SCIENTIST_HOME "
-                     "to be the data repo). Off by default to keep runs fast + git-free.")
     g.addoption("--judge-cache", action="store", default=None,
                 help="literature support-verdict cache (default: <grounding-out>/"
                      "lit_judgments.json). READ here; written only by `sci judge`. The model "
                      "is never invoked on this path.")
+
+
+def pytest_configure(config):
+    # Load the literature support-verdict cache (read-only on this path) so a
+    # source(paraphrase=…) can pin its cached, key-matched verdict. Written only by
+    # `sci judge --record`; no model is ever invoked. Absent file → empty cache → every
+    # machine source reports needs-judgment (non-blocking).
+    set_judgment_cache(JudgmentCache.load(_judge_cache_path(config)))
+
+
+def _judge_cache_path(config) -> Path:
+    """Where the literature verdict cache lives: ``--judge-cache``, else
+    ``$SCIENTIST_JUDGE_CACHE``, else ``<--grounding-out or rootdir>/lit_judgments.json`` (next
+    to the grounding report). ``--grounding-out`` is defined by the grounding plugin."""
+    explicit = config.getoption("--judge-cache", default=None) or os.environ.get("SCIENTIST_JUDGE_CACHE")
+    if explicit:
+        return Path(explicit)
+    out = config.getoption("--grounding-out", default=None) or config.rootpath
+    return Path(out) / JUDGMENT_CACHE_NAME
 
 
 # --------------------------------------------------------------------------- #
@@ -84,8 +78,8 @@ def pytest_addoption(parser):
 # --------------------------------------------------------------------------- #
 def _home_exp(node_path) -> str | None:
     """The K1-NNNNNN experiment code whose tree this test file lives in (its
-    ``analysis/claims/`` dir is under ``<exp>/``). Found by walking up to the folder
-    that holds an ``experiment.yml`` and is named ``K1-...``."""
+    ``analysis/claims/`` dir is under ``<exp>/``). Found by walking up to the folder that holds
+    an ``experiment.yml`` and is named ``K1-...``."""
     p = Path(str(node_path))
     for parent in p.parents:
         if parent.name.upper().startswith("K1-") and (parent / "experiment.yml").is_file():
@@ -95,10 +89,10 @@ def _home_exp(node_path) -> str | None:
 
 @pytest.fixture
 def experiment(request):
-    """The :class:`Study` whose ``analysis/claims/`` this test lives in — resolved from
-    the test file's path, so **no per-experiment conftest is needed**. Use as
-    ``def test_x(experiment): ...``. (Cross-experiment claims still import a specific
-    other study via ``from scientist.experiments import k1_NNNNNN``.)"""
+    """The :class:`Study` whose ``analysis/claims/`` this test lives in — resolved from the
+    test file's path, so **no per-experiment conftest is needed**. Use as
+    ``def test_x(experiment): ...``. (Cross-experiment claims still import a specific other
+    study via ``from scientist.experiments import k1_NNNNNN``.)"""
     from .. import experiments as _exp
     code = _home_exp(request.node.path)
     if code is None:
@@ -106,323 +100,3 @@ def experiment(request):
             f"no enclosing K1-* experiment for {request.node.path} "
             f"(is the claim under <exp>/analysis/claims/ next to an experiment.yml?)")
     return getattr(_exp, code.lower().replace("-", "_"))   # cached Study
-
-
-# --------------------------------------------------------------------------- #
-# Per-claim capture
-# --------------------------------------------------------------------------- #
-@pytest.fixture(autouse=True)
-def _grounding_capture(request):
-    """Set up a fresh capture for each claim and attach it to the item so the report
-    hook can read it. ``declared`` = the experiment codes the claim is expected to
-    touch: its home experiment (from the test path) + any explicitly-named
-    ``k1_NNNNNN`` fixtures (cross-experiment claims)."""
-    cap = grounding.Capture(claim_id=request.node.nodeid)
-    exps = set()
-    home = _home_exp(request.node.path)
-    if home:
-        exps.add(home)
-    for f in request.fixturenames:
-        if f.lower().startswith("k1_"):
-            exps.add(f.upper().replace("_", "-"))
-    cap.declared = exps
-    token = grounding._CURRENT.set(cap)
-    request.node._grounding_cap = cap
-    try:
-        yield cap
-    finally:
-        grounding._CURRENT.reset(token)
-
-
-def _marker_val(item, name, default=None):
-    m = item.get_closest_marker(name)
-    if m is None:
-        return default
-    return m.args[0] if m.args else default
-
-
-def _marker_kwargs(item, name):
-    """The kwargs dict of a marker (for ``@reviewed(support=..., ...)``), or None if absent."""
-    m = item.get_closest_marker(name)
-    return dict(m.kwargs) if m is not None else None
-
-
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_makereport(item, call):
-    out = yield
-    rep = out.get_result()
-    if rep.when != "call":
-        return
-    cap = getattr(item, "_grounding_cap", None)
-    # outcome: passed | failed | xfail | xpass | skipped
-    outcome = rep.outcome
-    if hasattr(rep, "wasxfail"):
-        outcome = "xpass" if rep.passed else "xfail"
-    elif rep.skipped and call.excinfo and call.excinfo.errisinstance(pytest.xfail.Exception):
-        outcome = "xfail"
-
-    statement = (item.function.__doc__ or "").strip() if hasattr(item, "function") else ""
-    evidence = dict(cap.evidence) if cap else {}
-    inputs = list(cap.inputs) if cap else []
-
-    # reconcile lint: the claim's experiment was declared but nothing read from it, or
-    # files were read from an experiment the claim didn't declare (undeclared input).
-    # Skipped claims read nothing by design (unverifiable-from-this-data), so the
-    # "empty claim?" check doesn't apply — don't cry wolf on them.
-    reconcile = _reconcile(cap, skipped=(outcome == "skipped")) if cap else []
-
-    rec = {
-        "id": item.nodeid,
-        "statement": statement,
-        "outcome": outcome,
-        "kind": _marker_val(item, "kind", "unspecified"),
-        "strength": _marker_val(item, "strength", "unspecified"),
-        "caveats": _marker_val(item, "caveats"),
-        "reviewed": _marker_kwargs(item, "reviewed"),
-        "evidence": evidence,
-        "inputs": inputs,
-        "bypassed": list(cap.bypassed) if cap else [],
-        "reconcile": reconcile,
-        "longrepr": str(rep.longrepr) if rep.failed and not getattr(rep, "wasxfail", None) else None,
-    }
-    if cap is not None and item.config.getoption("--check-drift"):
-        rec["drift"] = _compute_drift(item, cap)
-    item.config._grounding_records.append(rec)
-    grounding.registry[item.nodeid] = rec  # enables uses(claim_id) for later claims
-
-
-# --------------------------------------------------------------------------- #
-# Drift — did a claim's inputs change since its belief (@strength) was last set?
-# --------------------------------------------------------------------------- #
-def _git(root, *args):
-    import subprocess
-    try:
-        return subprocess.run(["git", "-C", str(root), *args],
-                              capture_output=True, text=True, timeout=20)
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def _strength_line(item) -> tuple | None:
-    """(repo-relative test file, 1-based line of the @strength marker) for this claim,
-    or the def line if it has no @strength. None if the source can't be located."""
-    import inspect
-    try:
-        src_lines, start = inspect.getsourcelines(item.function)
-    except (OSError, TypeError):
-        return None
-    off = next((i for i, ln in enumerate(src_lines) if ln.lstrip().startswith("@strength")), None)
-    line = start + (off if off is not None else 0)
-    return item.function.__code__.co_filename, line
-
-
-def _compute_drift(item, cap) -> dict:
-    """Compare each captured input to its state at the commit that last set this claim's
-    @strength marker. Any changed input => the evidence moved since the belief was
-    affirmed => stale (re-judge). Pure git; degrades gracefully when unavailable."""
-    root = grounding._data_root()
-    if root is None or not (Path(root) / ".git").exists():
-        return {"checked": False, "note": "SCIENTIST_HOME is not a git repo"}
-    loc = _strength_line(item)
-    if loc is None:
-        return {"checked": False, "note": "claim source unavailable"}
-    src_file, line = loc
-    try:
-        rel_file = Path(src_file).resolve().relative_to(Path(root).resolve())
-    except ValueError:
-        return {"checked": False, "note": "claim file outside SCIENTIST_HOME"}
-    blame = _git(root, "blame", "-L", f"{line},{line}", "--porcelain", "--", str(rel_file))
-    if blame is None or blame.returncode != 0 or not blame.stdout:
-        return {"checked": False, "note": "git blame failed"}
-    commit = blame.stdout.split(None, 1)[0]
-    if set(commit) == {"0"}:
-        return {"checked": True, "stale": False, "strength_commit": None,
-                "changed_inputs": [], "note": "@strength edited but not yet committed"}
-    changed = []
-    for i in cap.inputs:
-        try:
-            rel = Path(i["path"]).resolve().relative_to(Path(root).resolve())
-        except ValueError:
-            continue
-        diff = _git(root, "diff", "--quiet", commit, "--", str(rel))
-        if diff is not None and diff.returncode == 1:   # 1 = differs from that commit
-            changed.append(str(rel))
-    return {"checked": True, "stale": bool(changed),
-            "strength_commit": commit[:10], "changed_inputs": changed}
-
-
-def _reconcile(cap: grounding.Capture, skipped: bool = False) -> list[str]:
-    """Warn when the claim's declared experiments != the experiments it actually read
-    from. ``cap.declared`` already holds experiment codes (home + named fixtures).
-    Cheap, advisory. A ``skipped`` claim reads nothing by design, so the "empty claim?"
-    half is suppressed for it (an undeclared-read or bypass would still be flagged)."""
-    msgs = []
-    declared_exps = set(cap.declared)
-    captured_exps = set()
-    for i in cap.inputs:
-        for part in Path(i["path"]).parts:
-            if part.upper().startswith("K1-"):
-                captured_exps.add(part.split(" ")[0].upper())
-    if not skipped:
-        for e in declared_exps - captured_exps:
-            msgs.append(f"claim is in/declares {e} but read no file from it (empty claim?)")
-    for e in captured_exps - declared_exps:
-        msgs.append(f"read files from {e} but the claim didn't declare it "
-                    f"(undeclared cross-experiment input — name it via a k1_{e[3:]} fixture)")
-    if cap.bypassed:
-        msgs.append(f"{len(cap.bypassed)} untracked read(s) caught by the bypass guard")
-    return msgs
-
-
-# --------------------------------------------------------------------------- #
-# Grounding report
-# --------------------------------------------------------------------------- #
-def _json_default(o):
-    """JSON fallback for evidence values that are numpy/pandas scalars or arrays.
-    Claim bodies often pass ``df[col].nunique()`` (numpy int64), ``float(...)`` aside —
-    coerce those to native types so the report export never fails on a stray numpy type."""
-    if hasattr(o, "item"):           # numpy scalar (int64/float64/bool_) -> python scalar
-        try:
-            return o.item()
-        except (ValueError, TypeError):
-            pass
-    if hasattr(o, "tolist"):         # numpy array / pandas Index/Series -> list
-        return o.tolist()
-    return str(o)                    # last resort: a readable string
-
-
-_OUTCOME_LABEL = {
-    "passed": "✅ grounded", "failed": "❌ DRIFT", "xfail": "⊘ contradicted",
-    "xpass": "⚠️ unexpectedly grounded", "skipped": "… unverifiable",
-}
-
-
-def _test_file_of(record: dict) -> str:
-    """The test-file component of a claim record's id, used as the merge grain.
-
-    A claim ``id`` is a pytest nodeid: ``<path/to/test_file.py>::<node>`` (possibly with
-    parametrization brackets on the node). The path may carry an experiment prefix —
-    ``program/claims/test_x.py::test_y`` or ``K1-230102 .../analysis/claims/test_x.py::test_y``
-    — but the **file** is always everything before the first ``::``. We normalize on the
-    path's basename (``test_x.py``) so the grain is "which test module produced this claim",
-    independent of where the run was invoked from (the same file can appear under different
-    leading paths depending on rootdir). Records with no resolvable file fall back to the
-    whole id, so they merge only with themselves (never silently colliding)."""
-    cid = record.get("id") or ""
-    head = cid.split("::", 1)[0]
-    name = Path(head).name
-    return name or cid
-
-
-def _merge_records(prior: list[dict], current: list[dict]) -> list[dict]:
-    """Union prior and current claim records at **test-file granularity**, sorted by id.
-
-    Drop every prior record whose test-file is among the files this run produced (so an
-    add/edit/delete *within* a file we ran is reflected exactly), then add all of this
-    run's records, and **preserve** prior records from files this run did not touch. A
-    whole-suite run produces every file → replaces everything → identical to a plain
-    overwrite. A test file deleted and never re-run leaves harmless orphans here; a fresh
-    full run (or ``--grounding-fresh``) clears them."""
-    current_files = {_test_file_of(r) for r in current}
-    kept = [r for r in prior if _test_file_of(r) not in current_files]
-    merged = kept + list(current)
-    return sorted(merged, key=lambda r: r.get("id") or "")
-
-
-def _load_prior_records(path: Path) -> list[dict]:
-    """Prior ``claims`` records from an existing grounding_report.json, or ``[]`` if the file
-    is absent or corrupt. Never raises — a partial run must not be blocked by a bad report."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        claims = data.get("claims", [])
-        return [c for c in claims if isinstance(c, dict)]
-    except (OSError, ValueError, AttributeError, TypeError):
-        return []
-
-
-def pytest_sessionfinish(session):
-    config = session.config
-    records = getattr(config, "_grounding_records", [])
-    if not records:
-        return
-    out_dir = Path(config.getoption("--grounding-out") or config.rootpath)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    json_path = out_dir / "grounding_report.json"
-
-    fresh = config.getoption("grounding_fresh", default=False)
-    if fresh:
-        merged = sorted(records, key=lambda r: r.get("id") or "")
-    else:
-        merged = _merge_records(_load_prior_records(json_path), records)
-
-    json_path.write_text(
-        json.dumps({"claims": merged}, indent=2, ensure_ascii=False, default=_json_default),
-        encoding="utf-8")
-    (out_dir / "grounding_report.md").write_text(_render_md(merged), encoding="utf-8")
-    config._grounding_report_path = out_dir / "grounding_report.md"
-
-
-def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    p = getattr(config, "_grounding_report_path", None)
-    if p is not None:
-        terminalreporter.write_sep("-", "grounding report")
-        terminalreporter.write_line(f"  {p}")
-
-
-def _short(path: str) -> str:
-    """Trim a long absolute path to <experiment>/<rest> for the report."""
-    parts = Path(path).parts
-    for i, part in enumerate(parts):
-        if part.upper().startswith("K1-"):
-            return "/".join(parts[i:])
-    return Path(path).name
-
-
-def _render_md(records: list[dict]) -> str:
-    from collections import Counter
-    tally = Counter(r["outcome"] for r in records)
-    lines = ["# Grounding report", ""]
-    lines.append("| outcome | n |")
-    lines.append("|---|---|")
-    for k, v in tally.items():
-        lines.append(f"| {_OUTCOME_LABEL.get(k, k)} | {v} |")
-    lines.append("")
-    by_kind: dict[str, list[dict]] = {}
-    for r in records:
-        by_kind.setdefault(r["kind"], []).append(r)
-    for kind in sorted(by_kind):
-        lines.append(f"## kind: {kind}")
-        lines.append("")
-        for r in by_kind[kind]:
-            lines.append(f"### {_OUTCOME_LABEL.get(r['outcome'], r['outcome'])} — `{r['id'].split('::')[-1]}`")
-            if r["statement"]:
-                lines.append(f"> {r['statement']}")
-            meta = f"**strength:** {r['strength']}"
-            if r["caveats"]:
-                meta += f" · **caveats:** {r['caveats']}"
-            lines.append("")
-            lines.append(meta)
-            if r["evidence"]:
-                ev = ", ".join(f"`{k}={v}`" for k, v in r["evidence"].items())
-                lines.append(f"\n**evidence:** {ev}")
-            if r["inputs"]:
-                lines.append("\n**inputs:**")
-                for i in r["inputs"]:
-                    via = "" if i["via"] == "tracked" else f" _({i['via']})_"
-                    lines.append(f"- `{i['kind']}` {_short(i['path'])} — `{i['sha256'][:12]}`{via}")
-            if r["reconcile"]:
-                lines.append("\n**reconcile:** " + "; ".join(r["reconcile"]))
-            d = r.get("drift")
-            if d and d.get("checked"):
-                if d.get("stale"):
-                    lines.append(f"\n**⚠️ drift:** inputs changed since the @strength commit "
-                                 f"`{d['strength_commit']}` — re-judge: "
-                                 + ", ".join(f"`{_short(c)}`" for c in d["changed_inputs"]))
-                else:
-                    note = d.get("note")
-                    lines.append(f"\n**drift:** ✓ fresh"
-                                 + (f" ({note})" if note else f" (vs `{d.get('strength_commit')}`)"))
-            if r["longrepr"]:
-                lines.append(f"\n```\n{r['longrepr'][:800]}\n```")
-            lines.append("")
-    return "\n".join(lines) + "\n"

@@ -22,7 +22,6 @@ import json
 from pathlib import Path
 
 from scientist import grounding
-from scientist.grounding import plugin as PLUGIN
 from scientist.provenance import litreview as LR
 from scientist.provenance import report as R
 
@@ -153,7 +152,10 @@ def _report_md(prog: Path, body: str, slug: str = "dosing") -> Path:
 def test_must_confront_marker_is_removed():
     assert "must_confront" not in grounding.__all__
     assert not hasattr(grounding, "must_confront")
-    assert "must_confront" not in PLUGIN._MARKERS
+    # Markers are now registered by the grounding package's plugin (scientist's companion
+    # plugin, PLUGIN, no longer owns the marker set); must_confront is not among them.
+    import grounding.plugin as _gplugin
+    assert "must_confront" not in _gplugin._MARKERS
 
 
 # --------------------------------------------------------------------------- #

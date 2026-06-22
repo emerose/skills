@@ -26,7 +26,7 @@ from typing import Any, Callable
 
 from ..provenance import claims_of, load_report
 from .judgments import (JudgmentCache, JUDGMENT_CACHE_NAME, DEFAULT_JUDGE_ID, evidence_sha)
-from .normalize import fold_match
+from grounding import fold_match
 
 
 def _now_iso() -> str:

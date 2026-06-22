@@ -266,6 +266,12 @@ def reproduce(exp_dir: Path, repo_root: Path | None = None, *,
     # so a synthetic/off-tree experiment audits without a globally-configured home.
     prev_home = os.environ.get("SCIENTIST_HOME")
     os.environ["SCIENTIST_HOME"] = str(home)
+    # Root the bypass guard at the data tree for this re-run so an out-of-data/ read is flagged
+    # (the grounding guard roots at GROUNDING_ROOT, not SCIENTIST_HOME). Save/restore the prior
+    # root so a reproduce called inside a pytest session leaves the session's root intact.
+    from grounding import guard as _grounding_guard
+    _prev_root = _grounding_guard._ROOT
+    _grounding_guard.set_root(home)
     try:
         code = "program" if is_program else exp.name.split(" ")[0].lower().replace("-", "_")
         try:
@@ -296,6 +302,7 @@ def reproduce(exp_dir: Path, repo_root: Path | None = None, *,
             os.environ.pop("SCIENTIST_HOME", None)
         else:
             os.environ["SCIENTIST_HOME"] = prev_home
+        _grounding_guard.set_root(_prev_root)
 
     # --- reads-only-data ---
     off_data = _off_data_reads(captured_inputs, exp, home, program=is_program)

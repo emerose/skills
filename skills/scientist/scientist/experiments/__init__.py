@@ -23,7 +23,7 @@ import os
 import re
 from pathlib import Path
 
-from .. import grounding
+import grounding
 
 __all__ = ["Study", "Program", "program", "canonical", "root", "resolve"]
 
@@ -173,7 +173,7 @@ class Study:
         """``experiment.yml`` as a dict (recorded as a provenance input)."""
         import yaml
         p = self.path / "experiment.yml"
-        sha = grounding._sha256(p.read_bytes())
+        sha = grounding.sha256(p.read_bytes())
         grounding.record("meta", p, sha)
         return yaml.safe_load(p.read_text(encoding="utf-8"))
 
@@ -264,7 +264,7 @@ class Program:
         if self._conv is None:
             import yaml
             p = self.path / "conventions.yml"
-            grounding.record("reference", p, grounding._sha256(p.read_bytes()))
+            grounding.record("reference", p, grounding.sha256(p.read_bytes()))
             self._conv = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         return self._conv
 

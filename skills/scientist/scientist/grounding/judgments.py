@@ -31,7 +31,7 @@ Each verdict answers one entailment question, keyed by the pair ``(evidence_sha,
     folded with the SAME normalization quote-matching uses (NFKC, Unicode-dash fold, strip Markdown
     ``*``/``_``, collapse whitespace) BEFORE hashing, so two quotes the matcher treats as the same
     evidence (e.g. ``*Ube3a*…`` vs ``Ube3a…``) share one cache identity → one verdict (see
-    :func:`evidence_sha` and ``grounding.normalize``).
+    :func:`evidence_sha` and ``grounding.fold_match`` from the pytest-grounding package).
   * ``paraphrase``  — the claim's paraphrase of that span (the human-authored anchor).
 
 The stored entry is machine-pinned and inspectable, so a green claim is never an opaque "the LLM
@@ -61,7 +61,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .normalize import fold_match as _fold_match
+from grounding import fold_match as _fold_match
 
 # The sidecar the record step writes and the pytest/audit paths read. Lives next to the
 # grounding report it serves (e.g. ``program/analysis/lit_judgments.json``) — a machine-owned

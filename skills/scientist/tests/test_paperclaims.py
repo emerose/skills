@@ -54,7 +54,7 @@ class _FakePaper:
 
     def __init__(self, text: str, *, title: str = "T", year: str = "2015",
                  doi: str = "10.1234/abc", mode: str = "fulltext"):
-        from scientist.grounding._text import _match_phrase
+        from grounding import match_phrase as _match_phrase
         self._text = text
         self._match = _match_phrase
         self.title, self.year, self.doi, self.mode = title, year, doi, mode
