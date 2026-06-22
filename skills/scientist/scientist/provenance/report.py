@@ -93,6 +93,59 @@ _LITREVIEW_RE = re.compile(r"\[litreview:\s*([^\[\]]+?)\s*\]")
 # An experiment folder id prefix (K1-YYMMXX …), to derive an exp_id from a folder name.
 _EXP_ID_RE = re.compile(r"^\s*(K1-[A-Za-z0-9]+)")
 
+
+# --------------------------------------------------------------------------- #
+# citation-resolver registry
+# --------------------------------------------------------------------------- #
+# The generic report engine natively knows three citation kinds — ``[claim:]`` (a grounded
+# internal claim), ``[report:]`` (a lemma sub-report), and ``![..](..)`` embeds — plus all the
+# render/quality machinery around them. Every OTHER citation scheme (today: the literature layer's
+# ``[lit:]`` and ``[litreview:]``) plugs in through this registry rather than as a hardcoded branch:
+# a scheme registers its regex (so :func:`parse_report` discovers its citations) and a resolver (so
+# :func:`audit` dispatches them). This is the seam that lets the literature resolvers move out to a
+# separate ``research`` skill later — for now they still LIVE in this module (see the literature
+# section below) and are merely *registered* at module load instead of inlined into ``audit``.
+class _CitationScheme:
+    """One pluggable citation scheme. ``scheme`` is its name (``lit``/``litreview``); ``regex``
+    finds its inline citations (capture group 1 = the cited id); ``parse_key`` is the key under
+    which :func:`parse_report` collects them and :func:`audit` returns their records; ``resolve``
+    audits them — ``resolve(cites, ctx) -> (records, findings, advisories)`` with the SAME record /
+    finding / advisory shapes ``audit`` produced inline before the registry."""
+    __slots__ = ("scheme", "regex", "parse_key", "resolve")
+
+    def __init__(self, scheme: str, regex: "re.Pattern[str]", parse_key: str, resolve: Any):
+        self.scheme = scheme
+        self.regex = regex
+        self.parse_key = parse_key
+        self.resolve = resolve
+
+
+_CITATION_RESOLVERS: dict[str, _CitationScheme] = {}
+
+
+def register_citation(scheme: str, *, regex: "re.Pattern[str]", parse_key: str,
+                      resolve: Any) -> None:
+    """Register a pluggable citation scheme (see :class:`_CitationScheme`). Idempotent by
+    ``scheme`` name. The built-in ``[claim:]`` / ``[report:]`` / embed kinds are NOT registered
+    here — the engine resolves those natively; this is for the literature layer
+    (``[lit:]`` / ``[litreview:]``) and anything a downstream skill adds."""
+    _CITATION_RESOLVERS[scheme] = _CitationScheme(scheme, regex, parse_key, resolve)
+
+
+class _AuditContext:
+    """The read-only context an :func:`audit` citation resolver needs: the resolved data ``home``,
+    the report ``text`` (for front-matter pins), and the prebuilt ``claim_index`` /
+    ``paper_claim_index`` (built once per audit and shared across resolvers)."""
+    __slots__ = ("home", "text", "claim_index", "paper_claim_index")
+
+    def __init__(self, home: Path, text: str, claim_index: dict[str, dict[str, Any]],
+                 paper_claim_index: dict[str, Any]):
+        self.home = home
+        self.text = text
+        self.claim_index = claim_index
+        self.paper_claim_index = paper_claim_index
+
+
 # --------------------------------------------------------------------------- #
 # claim_id formatting (kept in sync with store._meta.claim_id_for — replicated
 # here so the provenance layer stays store-free, like trace/reproduce)
@@ -182,26 +235,31 @@ def parse_report(text: str) -> dict[str, list[dict[str, Any]]]:
     Markdown, each with its 1-based line number. Citations/embeds inside fenced code
     blocks (```` ``` ````) are skipped so an example in a code block isn't audited.
 
-    Returns ``{"citations": [{id, line}], "embeds": [{target, line}]}``.
+    The engine parses ``[claim:]`` / ``[report:]`` citations and embeds natively; every other
+    citation scheme (``[lit:]`` / ``[litreview:]`` and anything else registered via
+    :func:`register_citation`) is discovered from :data:`_CITATION_RESOLVERS`, each collected under
+    its scheme's ``parse_key``.
+
+    Returns ``{"citations": [{id, line}], "embeds": [{target, line}],
+    "report_cites": [...], <scheme parse_key>: [...], ...}``.
     """
     citations: list[dict[str, Any]] = []
     embeds: list[dict[str, Any]] = []
     report_cites: list[dict[str, Any]] = []
-    lit_cites: list[dict[str, Any]] = []
-    litreview_cites: list[dict[str, Any]] = []
+    scheme_cites: dict[str, list[dict[str, Any]]] = {
+        sch.parse_key: [] for sch in _CITATION_RESOLVERS.values()}
     for n, line in _iter_lines_outside_fences(text):
         for m in _CITE_RE.finditer(line):
             citations.append({"id": m.group(1).strip(), "line": n})
         for m in _REPORT_RE.finditer(line):
             report_cites.append({"id": m.group(1).strip(), "line": n})
-        for m in _LIT_RE.finditer(line):
-            lit_cites.append({"id": m.group(1).strip(), "line": n})
-        for m in _LITREVIEW_RE.finditer(line):
-            litreview_cites.append({"id": m.group(1).strip(), "line": n})
+        for sch in _CITATION_RESOLVERS.values():
+            for m in sch.regex.finditer(line):
+                scheme_cites[sch.parse_key].append({"id": m.group(1).strip(), "line": n})
         for m in _EMBED_RE.finditer(line):
             embeds.append({"target": m.group(1).strip(), "line": n})
     return {"citations": citations, "embeds": embeds, "report_cites": report_cites,
-            "lit_cites": lit_cites, "litreview_cites": litreview_cites}
+            **scheme_cites}
 
 
 def parse_sections(text: str) -> dict[str, Any]:
@@ -1198,6 +1256,171 @@ def write_litreview_pins(report_path: Path, surfaced: dict[str, str]) -> dict[st
     return merged
 
 
+# --------------------------------------------------------------------------- #
+# registered citation resolvers (the literature layer) — see register_citation /
+# _CitationScheme. These still LIVE here for now; the registry seam is what lets them move to a
+# ``research`` skill later. Each takes the scheme's parsed citations + the shared _AuditContext and
+# returns ``(records, findings, advisories)`` — the SAME shapes ``audit`` built inline before.
+# --------------------------------------------------------------------------- #
+def _resolve_lit_citations(
+        cites: list[dict[str, Any]], ctx: _AuditContext
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Resolve ``[lit:<id>]`` citations against internal literature/bibliometric claims and the
+    pre-extracted paper-claims store (grounding on a paper in the bibliographer library)."""
+    claim_index = ctx.claim_index
+    paper_claim_index = ctx.paper_claim_index
+    findings: list[dict[str, Any]] = []
+    lit_cites: list[dict[str, Any]] = []
+    metric_advisories: list[dict[str, Any]] = []   # bibliometric as_of freshness nudges (non-blocking)
+    for lc in cites:
+        cid, line = lc["id"], lc["line"]
+        rec = {"id": cid, "line": line}
+        cands = resolve_citation(cid, claim_index)
+        if not cands and cid in paper_claim_index:
+            # Pre-extracted external claim (Phase 2): resolves to a paper-claim in the store, not
+            # an internal literature claim. ATTRIBUTED — kept visually distinct from a grounded
+            # cite (rec["attributed"] flags the render path).
+            pc = paper_claim_index[cid]
+            rec["attributed"] = True
+            rec["claim_id"] = cid
+            rec["citekey"] = pc.get("citekey")
+            rec["strength"] = pc.get("strength")
+            rec["paraphrase"] = pc.get("paraphrase")
+            rec["statement"] = pc.get("paraphrase")
+            verdict, detail = paper_claim_verdict(pc)
+            rec["verdict"] = verdict
+            if verdict != "attributed":
+                findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cid,
+                                 "detail": detail})
+            lit_cites.append(rec)
+            continue
+        if not cands:
+            rec["verdict"] = "missing"
+            findings.append({"kind": "missing-lit", "line": line, "cite": cid,
+                             "detail": "no literature claim or paper-claim has this id; write the "
+                                       "[lit:] claim or extract the paper "
+                                       "(`sci paper-claims scaffold <citekey>`)"})
+        elif len(cands) > 1:
+            rec["verdict"] = "ambiguous"
+            rec["candidates"] = cands
+            findings.append({"kind": "ambiguous-lit", "line": line, "cite": cid,
+                             "detail": f"matches {len(cands)} claims — qualify it: {cands}"})
+        else:
+            claim = claim_index[cands[0]]
+            rec["claim_id"] = cands[0]
+            rec["strength"] = claim.get("strength")
+            rec["statement"] = claim.get("statement")
+            rec["reviewed"] = claim.get("reviewed")
+            if str(claim.get("kind")) == "bibliometric":
+                # A claim ABOUT the literature (most-cited, …) grounded on a stored OpenAlex metric,
+                # not a quote — its own verdict + staleness pin (over the metric values + as_of).
+                rec["metric_sources"] = (claim.get("evidence") or {}).get("metric_sources", [])
+                verdict, detail = bibliometric_verdict(claim)
+                if verdict == "backed":
+                    cur = metric_review_sha(claim)
+                    stamped = (claim.get("reviewed") or {}).get("sha")
+                    rec["review_sha"] = cur
+                    if stamped and cur and not str(cur).startswith(str(stamped)):
+                        verdict, detail = ("stale-review",
+                                           "the bibliometric values/as_of moved materially since the "
+                                           f"review (stamp={str(stamped)[:12]}, now={cur[:12]}) — "
+                                           "re-vet and re-stamp @reviewed(sha=…)")
+                    elif not stamped:
+                        rec["review_unpinned"] = True   # advisory, non-blocking
+                    metric_advisories.extend(
+                        _metric_asof_advisories(rec["metric_sources"], cid, line))
+                rec["verdict"] = verdict
+                if verdict != "backed":
+                    findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cands[0],
+                                     "detail": detail})
+                lit_cites.append(rec)
+                continue
+            verdict, detail = lit_verdict(claim)
+            rec["sources"] = (claim.get("evidence") or {}).get("lit_sources", [])
+            # re-validation (LEGACY @reviewed path only): if the review was pinned
+            # (@reviewed(sha=…)) and a cited paper's text has since changed, the review is stale →
+            # re-read and re-stamp (blocking). Machine-judged claims pin staleness via the verdict
+            # cache key (judge_status=stale → stale-judgment), so skip this for them.
+            if verdict == "backed" and not _machine_lit_sources(claim):
+                cur = lit_review_sha(claim)
+                stamped = (claim.get("reviewed") or {}).get("sha")
+                rec["review_sha"] = cur
+                if stamped and cur and not str(cur).startswith(str(stamped)):
+                    verdict, detail = ("stale-review",
+                                       "a cited paper's library text changed since the review "
+                                       f"(stamp={str(stamped)[:12]}, now={cur[:12]}) — re-read and re-stamp")
+                elif not stamped:
+                    rec["review_unpinned"] = True   # advisory, non-blocking
+            rec["verdict"] = verdict
+            if verdict != "backed":
+                findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cands[0],
+                                 "detail": detail})
+        lit_cites.append(rec)
+    return lit_cites, findings, metric_advisories
+
+
+def _resolve_litreview_citations(
+        cites: list[dict[str, Any]], ctx: _AuditContext
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Resolve ``[litreview:<id>]`` citations + the protocol-keyed staleness pin.
+
+    A ``[litreview:<id>]`` grounds a topic on a neutral survey (kind=litreview). The integrity it
+    carries is the survey's own (its committed PROSPERO/PRISMA protocol + screening, audited by
+    ``sci litreview``); the consuming report's only mechanical obligation is to stay PINNED to the
+    survey's registered search method, so a re-sweep that changed the queries/snapshot/sources
+    forces a re-examination here. There is NO omissions gate — coverage is the survey-side
+    completeness critic's job, against the screening log (see references/litreview.md)."""
+    home = ctx.home
+    pins = litreview_pins(ctx.text)
+    findings: list[dict[str, Any]] = []
+    litreview_cites: list[dict[str, Any]] = []
+    for lrc in cites:
+        cid, line = lrc["id"], lrc["line"]
+        rec = {"id": cid, "line": line}
+        paths = resolve_litreview_paths(cid, home)
+        if not paths:
+            rec["verdict"] = "missing"
+            findings.append({"kind": "missing-litreview", "line": line, "cite": cid,
+                             "detail": "no litreview with this id; write the litreview first"})
+        elif len(paths) > 1:
+            rec["verdict"] = "ambiguous"
+            findings.append({"kind": "ambiguous-litreview", "line": line, "cite": cid,
+                             "detail": f"matches {len(paths)} litreviews — qualify with <scope>::<slug>"})
+        else:
+            target = paths[0].resolve()
+            rec["litreview"] = _rel_or_name(target, home)
+            rec["verdict"] = "backed"
+            # staleness pin: did the survey's registered search method (protocol queries + as_of +
+            # sources) change since this report last re-examined it?
+            cur_pin = litreview_protocol_pin_sha(target)
+            rec["pin"] = cur_pin[:12]
+            recorded = pins.get(cid)
+            if recorded:
+                rec["recorded_pin"] = str(recorded)
+                if not cur_pin.startswith(str(recorded)):
+                    rec["verdict"] = "stale-litreview"
+                    findings.append({
+                        "kind": "stale-litreview", "line": line, "cite": cid,
+                        "detail": "the litreview's search protocol (queries / as_of / sources) "
+                                  f"changed since pinned (pin={str(recorded)[:12]}, "
+                                  f"now={cur_pin[:12]}) — re-examine the survey, then re-pin "
+                                  "litreview_pins in the front matter"})
+            else:
+                rec["pin_unrecorded"] = True         # advisory nudge (non-blocking)
+        litreview_cites.append(rec)
+    return litreview_cites, findings, []
+
+
+# Register the literature layer's citation schemes. These resolvers live above, in this module, for
+# now; registering them (rather than hardcoding their branches in audit/parse_report) is the seam
+# that lets them move to a ``research`` skill later. Registration order is the audit dispatch order
+# and the result-key order (lit before litreview), matching the pre-registry behavior.
+register_citation("lit", regex=_LIT_RE, parse_key="lit_cites",
+                  resolve=_resolve_lit_citations)
+register_citation("litreview", regex=_LITREVIEW_RE, parse_key="litreview_cites",
+                  resolve=_resolve_litreview_citations)
+
+
 def audit(report_path: Path, home: Path | None = None,
           _seen: frozenset[str] | None = None) -> dict[str, Any]:
     """Mechanically validate a report's citations, embeds, and report-citations.
@@ -1221,7 +1444,8 @@ def audit(report_path: Path, home: Path | None = None,
     claim_index = index_claims(home)
     artifact_index = index_analysis_artifacts(home)
     # Pre-extracted external claims (Phase 2): an [lit:<id>] that names no internal claim resolves
-    # here, against the per-paper paper-claims/*.jsonl store. Loaded once, in memory; no DB.
+    # against the per-paper paper-claims/*.jsonl store (used by the registered [lit:] resolver).
+    # Loaded once, in memory; no DB.
     paper_claim_index = _paperclaims.load_paper_claims(home)
 
     findings: list[dict[str, Any]] = []
@@ -1327,145 +1551,29 @@ def audit(report_path: Path, home: Path | None = None,
                                      "detail": "cited report is itself BROKEN — fix it first"})
         report_cites.append(rec)
 
-    # ---- literature citations (grounding on a paper in the bibliographer library) -------- #
-    lit_cites: list[dict[str, Any]] = []
-    metric_advisories: list[dict[str, Any]] = []   # bibliometric as_of freshness nudges (non-blocking)
-    for lc in parsed.get("lit_cites", []):
-        cid, line = lc["id"], lc["line"]
-        rec = {"id": cid, "line": line}
-        cands = resolve_citation(cid, claim_index)
-        if not cands and cid in paper_claim_index:
-            # Pre-extracted external claim (Phase 2): resolves to a paper-claim in the store, not
-            # an internal literature claim. ATTRIBUTED — kept visually distinct from a grounded
-            # cite (rec["attributed"] flags the render path).
-            pc = paper_claim_index[cid]
-            rec["attributed"] = True
-            rec["claim_id"] = cid
-            rec["citekey"] = pc.get("citekey")
-            rec["strength"] = pc.get("strength")
-            rec["paraphrase"] = pc.get("paraphrase")
-            rec["statement"] = pc.get("paraphrase")
-            verdict, detail = paper_claim_verdict(pc)
-            rec["verdict"] = verdict
-            if verdict != "attributed":
-                findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cid,
-                                 "detail": detail})
-            lit_cites.append(rec)
-            continue
-        if not cands:
-            rec["verdict"] = "missing"
-            findings.append({"kind": "missing-lit", "line": line, "cite": cid,
-                             "detail": "no literature claim or paper-claim has this id; write the "
-                                       "[lit:] claim or extract the paper "
-                                       "(`sci paper-claims scaffold <citekey>`)"})
-        elif len(cands) > 1:
-            rec["verdict"] = "ambiguous"
-            rec["candidates"] = cands
-            findings.append({"kind": "ambiguous-lit", "line": line, "cite": cid,
-                             "detail": f"matches {len(cands)} claims — qualify it: {cands}"})
-        else:
-            claim = claim_index[cands[0]]
-            rec["claim_id"] = cands[0]
-            rec["strength"] = claim.get("strength")
-            rec["statement"] = claim.get("statement")
-            rec["reviewed"] = claim.get("reviewed")
-            if str(claim.get("kind")) == "bibliometric":
-                # A claim ABOUT the literature (most-cited, …) grounded on a stored OpenAlex metric,
-                # not a quote — its own verdict + staleness pin (over the metric values + as_of).
-                rec["metric_sources"] = (claim.get("evidence") or {}).get("metric_sources", [])
-                verdict, detail = bibliometric_verdict(claim)
-                if verdict == "backed":
-                    cur = metric_review_sha(claim)
-                    stamped = (claim.get("reviewed") or {}).get("sha")
-                    rec["review_sha"] = cur
-                    if stamped and cur and not str(cur).startswith(str(stamped)):
-                        verdict, detail = ("stale-review",
-                                           "the bibliometric values/as_of moved materially since the "
-                                           f"review (stamp={str(stamped)[:12]}, now={cur[:12]}) — "
-                                           "re-vet and re-stamp @reviewed(sha=…)")
-                    elif not stamped:
-                        rec["review_unpinned"] = True   # advisory, non-blocking
-                    metric_advisories.extend(
-                        _metric_asof_advisories(rec["metric_sources"], cid, line))
-                rec["verdict"] = verdict
-                if verdict != "backed":
-                    findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cands[0],
-                                     "detail": detail})
-                lit_cites.append(rec)
-                continue
-            verdict, detail = lit_verdict(claim)
-            rec["sources"] = (claim.get("evidence") or {}).get("lit_sources", [])
-            # re-validation (LEGACY @reviewed path only): if the review was pinned
-            # (@reviewed(sha=…)) and a cited paper's text has since changed, the review is stale →
-            # re-read and re-stamp (blocking). Machine-judged claims pin staleness via the verdict
-            # cache key (judge_status=stale → stale-judgment), so skip this for them.
-            if verdict == "backed" and not _machine_lit_sources(claim):
-                cur = lit_review_sha(claim)
-                stamped = (claim.get("reviewed") or {}).get("sha")
-                rec["review_sha"] = cur
-                if stamped and cur and not str(cur).startswith(str(stamped)):
-                    verdict, detail = ("stale-review",
-                                       "a cited paper's library text changed since the review "
-                                       f"(stamp={str(stamped)[:12]}, now={cur[:12]}) — re-read and re-stamp")
-                elif not stamped:
-                    rec["review_unpinned"] = True   # advisory, non-blocking
-            rec["verdict"] = verdict
-            if verdict != "backed":
-                findings.append({"kind": f"{verdict}-lit", "line": line, "cite": cands[0],
-                                 "detail": detail})
-        lit_cites.append(rec)
-
-    # ---- litreview citations + the protocol-keyed staleness pin ------------- #
-    # A [litreview:<id>] grounds a topic on a neutral survey (kind=litreview). The integrity it
-    # carries is the survey's own (its committed PROSPERO/PRISMA protocol + screening, audited by
-    # `sci litreview`); the consuming report's only mechanical obligation is to stay PINNED to the
-    # survey's registered search method, so a re-sweep that changed the queries/snapshot/sources
-    # forces a re-examination here. There is NO omissions gate — coverage is the survey-side
-    # completeness critic's job, against the screening log (see references/litreview.md).
-    pins = litreview_pins(text)
-
-    litreview_cites: list[dict[str, Any]] = []
-    for lrc in parsed.get("litreview_cites", []):
-        cid, line = lrc["id"], lrc["line"]
-        rec = {"id": cid, "line": line}
-        paths = resolve_litreview_paths(cid, home)
-        if not paths:
-            rec["verdict"] = "missing"
-            findings.append({"kind": "missing-litreview", "line": line, "cite": cid,
-                             "detail": "no litreview with this id; write the litreview first"})
-        elif len(paths) > 1:
-            rec["verdict"] = "ambiguous"
-            findings.append({"kind": "ambiguous-litreview", "line": line, "cite": cid,
-                             "detail": f"matches {len(paths)} litreviews — qualify with <scope>::<slug>"})
-        else:
-            target = paths[0].resolve()
-            rec["litreview"] = _rel_or_name(target, home)
-            rec["verdict"] = "backed"
-            # staleness pin: did the survey's registered search method (protocol queries + as_of +
-            # sources) change since this report last re-examined it?
-            cur_pin = litreview_protocol_pin_sha(target)
-            rec["pin"] = cur_pin[:12]
-            recorded = pins.get(cid)
-            if recorded:
-                rec["recorded_pin"] = str(recorded)
-                if not cur_pin.startswith(str(recorded)):
-                    rec["verdict"] = "stale-litreview"
-                    findings.append({
-                        "kind": "stale-litreview", "line": line, "cite": cid,
-                        "detail": "the litreview's search protocol (queries / as_of / sources) "
-                                  f"changed since pinned (pin={str(recorded)[:12]}, "
-                                  f"now={cur_pin[:12]}) — re-examine the survey, then re-pin "
-                                  "litreview_pins in the front matter"})
-            else:
-                rec["pin_unrecorded"] = True         # advisory nudge (non-blocking)
-        litreview_cites.append(rec)
+    # ---- registered citation schemes (the literature layer: [lit:], [litreview:]) -------- #
+    # Everything beyond the engine's native [claim:]/[report:]/embed kinds is dispatched through the
+    # citation-resolver registry. Each scheme's resolver returns its records (keyed by the scheme's
+    # parse_key — lit_cites / litreview_cites), its blocking findings, and any non-blocking
+    # advisories (the bibliometric as_of freshness nudges). Dispatch order is registration order
+    # (lit before litreview), so findings/result-keys stay in the pre-registry order.
+    ctx = _AuditContext(home, text, claim_index, paper_claim_index)
+    scheme_records: dict[str, list[dict[str, Any]]] = {}
+    scheme_advisories: list[dict[str, Any]] = []
+    for sch in _CITATION_RESOLVERS.values():
+        recs, scheme_findings, scheme_adv = sch.resolve(parsed.get(sch.parse_key, []), ctx)
+        scheme_records[sch.parse_key] = recs
+        findings.extend(scheme_findings)
+        scheme_advisories.extend(scheme_adv)
 
     # Non-blocking: recall aids for the §3 review subagent, NOT part of the GROUNDED gate.
     # unsupported-quantity catches a number no cited claim asserts; weak-load-bearing catches a
     # bound backed only by non-robust claim(s) — incommensurate evidence the prose may not hedge.
+    # scheme_advisories carries the registered resolvers' nudges (bibliometric as_of), kept last to
+    # match the pre-registry order (prose + incommensurate + metric).
     advisories = (prose_quantity_advisories(text, claim_index)
                   + incommensurate_evidence_advisories(text, claim_index)
-                  + metric_advisories)
+                  + scheme_advisories)
 
     status = "GROUNDED" if not findings else "BROKEN"
     return {
@@ -1476,8 +1584,7 @@ def audit(report_path: Path, home: Path | None = None,
         "citations": citations,
         "embeds": embeds,
         "report_cites": report_cites,
-        "lit_cites": lit_cites,
-        "litreview_cites": litreview_cites,
+        **scheme_records,
         "findings": findings,
         "advisories": advisories,
         "warnings": stale_grounding_warnings(home),
