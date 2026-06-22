@@ -15,6 +15,7 @@ an arxiv.org/doi.org URL, or a PDF path — `add` figures out which:
 ```bash
 bib add 10.1038/nphys1170                  # DOI       -> Crossref
 bib add arXiv:1706.03762                    # arXiv id  -> arXiv API
+bib add PMID:8627575                        # PMID      -> Crossref/PubMed (DOI optional)
 bib add PMC9283931                          # PMCID     -> NCBI -> Crossref
 bib add https://arxiv.org/abs/1810.04805    # URL is parsed for you
 bib add ~/Downloads/paper.pdf               # PDF: sniffs DOI/arXiv/PMC id from filename+text
@@ -43,7 +44,17 @@ Notes that matter when adding:
   `bib refresh`. See [schema.md](schema.md).
 - `add` takes **several identifiers in one call** — `bib add <DOI> <PMID> …` —
   which is how you bank the keepers from a `discover` sweep. An already-present
-  paper is skipped and reported, not an error, so sweep overlap never aborts the batch.
+  paper is skipped and reported, not an error, so sweep overlap never aborts the
+  batch — and the same holds for a **transient resolve failure**: one id that
+  errors (e.g. a Semantic Scholar 429) is reported on its own line and the rest
+  of the batch is still banked. The end-of-run summary counts `… N failed`, and
+  `--json` lists each failure as a `{"status": "error", "identifier", "error"}`
+  row alongside the added/duplicate rows.
+- A **PMID/PMCID resolves even without a DOI**: `add` tries DOI→Crossref first,
+  then PubMed directly (NCBI ESummary for title/authors/year/venue, EFetch for
+  the abstract), and only then Semantic Scholar. So a DOI-less PubMed paper banks
+  from PubMed's own metadata and never hard-depends on S2's throttled
+  `/paper/{id}` lookup endpoint.
 
 ## Discovering papers on a topic — `discover`
 

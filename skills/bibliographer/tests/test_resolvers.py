@@ -296,3 +296,128 @@ def test_acquire_oa_uses_authorms_pow_when_not_in_oa_subset(monkeypatch, tmp_pat
     src = asyncio.run(R.acquire_oa_pdf(rec, dest, _FakeClient(handler)))
     assert src == "pmc_authorms"
     assert dest.read_bytes().startswith(b"%PDF-")
+
+
+# --------------------------------------------------------------------------- #
+# PubMed metadata resolver (Bug 1: a DOI-less PMID must not depend on S2)
+# --------------------------------------------------------------------------- #
+# A trimmed real ESummary item for an old, DOI-less PubMed record.
+_ESUMMARY_ITEM = {
+    "uid": "8627575",
+    "pubdate": "1996 Mar 15",
+    "source": "J Biol Chem",
+    "fulljournalname": "The Journal of biological chemistry",
+    "title": "Pharmacokinetic properties of an antisense oligonucleotide.",
+    "volume": "271",
+    "issue": "11",
+    "pages": "6131-6139",
+    "authors": [
+        {"name": "Crooke ST", "authtype": "Author"},
+        {"name": "van der Berg JA", "authtype": "Author"},
+        {"name": "ISIS Consortium", "authtype": "CollectiveName"},
+    ],
+    "articleids": [{"idtype": "pubmed", "value": "8627575"}],
+}
+
+_ESUMMARY_BODY = json.dumps({"result": {"8627575": _ESUMMARY_ITEM, "uids": ["8627575"]}}).encode()
+_EFETCH_BODY = (
+    b"<PubmedArticleSet><PubmedArticle><MedlineCitation><Article><Abstract>"
+    b'<AbstractText Label="BACKGROUND">An oligo was dosed.</AbstractText>'
+    b'<AbstractText Label="RESULTS">It cleared fast.</AbstractText>'
+    b"</Abstract></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>"
+)
+
+
+def test_from_pubmed_normalizes_doi_less_record():
+    rec = R._from_pubmed(_ESUMMARY_ITEM)
+    assert rec["title"].startswith("Pharmacokinetic properties")
+    assert rec["year"] == 1996
+    assert rec["venue"] == "The Journal of biological chemistry"
+    assert rec["pmid"] == "8627575"
+    assert rec["volume"] == "271" and rec["issue"] == "11" and rec["pages"] == "6131-6139"
+    assert rec["source"] == "pubmed"
+    assert "doi" not in rec  # genuinely DOI-less
+    # surname-first split, CollectiveName dropped
+    assert rec["authors"][0] == {"family": "Crooke", "given": "ST"}
+    assert rec["authors"][1] == {"family": "van der Berg", "given": "JA"}
+    assert len(rec["authors"]) == 2
+
+
+def test_fetch_pubmed_abstract_joins_labeled_sections(monkeypatch):
+    _no_cache(monkeypatch)
+    client = _FakeClient(lambda url, params: _FakeResp(200, _EFETCH_BODY, "application/xml"))
+    abstract = asyncio.run(R.fetch_pubmed_abstract("8627575", client))
+    assert abstract == "BACKGROUND: An oligo was dosed. RESULTS: It cleared fast."
+
+
+def test_fetch_pubmed_combines_esummary_and_efetch(monkeypatch):
+    _no_cache(monkeypatch)
+
+    def handler(url, params):
+        if "esummary" in url:
+            return _FakeResp(200, _ESUMMARY_BODY, "application/json")
+        if "efetch" in url:
+            return _FakeResp(200, _EFETCH_BODY, "application/xml")
+        return _FakeResp(404, b"", "text/plain")
+
+    rec = asyncio.run(R.fetch_pubmed("8627575", _FakeClient(handler)))
+    assert rec["title"].startswith("Pharmacokinetic")
+    assert rec["abstract"].startswith("BACKGROUND:")
+
+
+def test_fetch_pubmed_esummary_raises_on_missing_record(monkeypatch):
+    _no_cache(monkeypatch)
+    body = json.dumps({"result": {"uids": []}}).encode()
+    client = _FakeClient(lambda url, params: _FakeResp(200, body, "application/json"))
+    try:
+        asyncio.run(R.fetch_pubmed_esummary("999", client))
+        assert False, "expected ResolveError"
+    except R.ResolveError:
+        pass
+
+
+def test_resolve_doi_less_pmid_falls_back_to_pubmed_when_s2_429s(monkeypatch):
+    """Headline Bug 1: a DOI-less PMID banks from PubMed even while S2 /paper/{id} 429s."""
+    _no_cache(monkeypatch)
+    seen = {"s2": 0}
+
+    def handler(url, params):
+        if "idconv" in url:  # no DOI for this old record, but echoes the pmid
+            return _FakeResp(200, json.dumps({"records": [{"pmid": "8627575"}]}).encode(),
+                             "application/json")
+        if "esummary" in url:
+            return _FakeResp(200, _ESUMMARY_BODY, "application/json")
+        if "efetch" in url:
+            return _FakeResp(200, _EFETCH_BODY, "application/xml")
+        if "semanticscholar.org" in url:  # the throttled lookup endpoint
+            seen["s2"] += 1
+            return _FakeResp(429, b"", "text/plain")
+        return _FakeResp(404, b"", "text/plain")
+
+    rec = asyncio.run(R.resolve("PMID:8627575", client=_FakeClient(handler)))
+    assert rec["pmid"] == "8627575"
+    assert rec["title"].startswith("Pharmacokinetic")
+    assert rec["source"] == "pubmed"
+    assert seen["s2"] == 0  # PubMed satisfied it; S2 was never consulted
+
+
+def test_resolve_pmid_uses_s2_only_when_pubmed_also_fails(monkeypatch):
+    """S2 remains the last-resort fallback when both Crossref and PubMed yield nothing."""
+    _no_cache(monkeypatch)
+
+    def handler(url, params):
+        if "idconv" in url:
+            return _FakeResp(200, json.dumps({"records": [{"pmid": "8627575"}]}).encode(),
+                             "application/json")
+        if "esummary" in url:  # PubMed down
+            return _FakeResp(500, b"", "text/plain")
+        if "semanticscholar.org" in url:
+            return _FakeResp(200, json.dumps({
+                "paperId": "p1", "title": "From S2", "year": 1996,
+                "externalIds": {"PubMed": "8627575"},
+            }).encode(), "application/json")
+        return _FakeResp(404, b"", "text/plain")
+
+    rec = asyncio.run(R.resolve("PMID:8627575", client=_FakeClient(handler)))
+    assert rec["title"] == "From S2"
+    assert rec["source"] == "semantic_scholar"
