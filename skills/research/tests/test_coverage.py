@@ -3,7 +3,7 @@
 Pure-data tests of the set-difference and recency filter; the bib-CLI glue lives in sci.py.
 """
 
-from scientist.provenance import coverage as C
+from research import coverage as C
 
 
 def _claim(*citekeys, kind="literature"):

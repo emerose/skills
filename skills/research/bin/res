@@ -1,0 +1,7 @@
+#!/bin/sh
+# Launcher shim for the research CLI: put this `bin/` dir on $PATH (or symlink this
+# file into one) and run `res …` from anywhere — no absolute `uv run --script <path>`.
+# It resolves the real script relative to itself and execs it; the script's own
+# `#!/usr/bin/env -S uv run --script` shebang pulls its PEP-723 deps on each run.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+exec "$here/../scripts/res.py" "$@"

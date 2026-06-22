@@ -368,10 +368,53 @@ def stale_grounding_warnings(home: Path) -> list[dict[str, Any]]:
                 continue
         if newer:
             out.append({
+                "kind": "stale-grounding",
                 "report": _rel_or_name(report_path, home),
                 "modules": [_rel_or_name(p, home) for p in newer],
                 "detail": "grounding may be stale — re-run pytest --grounding-out "
                           "(a claim module is newer than the recorded grounding report)"})
+    return out
+
+
+# A citation-like ``[<scheme>: …]`` token: a lowercase scheme name, a colon, then a
+# bracket-free id. The shape the built-in [claim:]/[report:] citations and any registered
+# scheme share — used to spot a cited scheme that has *no* registered resolver.
+_SCHEME_TOKEN_RE = re.compile(r"\[([a-z][a-z0-9_-]*)\s*:\s*[^\[\]]+\]")
+# URL schemes a bare ``[http://…]`` / ``[mailto:…]`` would otherwise trip on — never a citation.
+_URL_SCHEMES = frozenset({"http", "https", "ftp", "ftps", "mailto", "file", "data", "tel"})
+
+
+def unregistered_scheme_warnings(text: str) -> list[dict[str, Any]]:
+    """Each citation-like ``[<scheme>:…]`` token whose ``<scheme>`` is neither a built-in
+    (``claim`` / ``report``) nor a registered resolver — surfaced as a NON-blocking warning so
+    the citation is not silently dropped from the audit.
+
+    The engine natively resolves ``[claim:]`` / ``[report:]`` and dispatches every other scheme
+    through :data:`_CITATION_RESOLVERS`; a token like ``[lit:…]`` with no resolver registered (the
+    literature layer lives in the separate ``research`` skill, not installed) would otherwise just
+    not match any parser and vanish from the audit with no signal. This is that forward-flag: one
+    warning per distinct unknown scheme (at its first line), telling the caller the citation went
+    unaudited — and, for the literature schemes, that installing ``research`` registers them.
+
+    Warn, never block (the GROUNDED gate is unchanged): a scheme the host hasn't installed is a
+    setup gap, not a broken citation. URL-ish schemes (``http``/``mailto``/…) are excluded so a
+    bare bracketed link isn't mistaken for a citation."""
+    known = {"claim", "report"} | set(_CITATION_RESOLVERS)
+    first_line: dict[str, int] = {}
+    for n, line in _iter_lines_outside_fences(text):
+        for m in _SCHEME_TOKEN_RE.finditer(line):
+            scheme = m.group(1)
+            if scheme in known or scheme in _URL_SCHEMES or scheme in first_line:
+                continue
+            first_line[scheme] = n
+    out: list[dict[str, Any]] = []
+    for scheme, line in sorted(first_line.items(), key=lambda kv: (kv[1], kv[0])):
+        hint = (" — install the research skill to register it"
+                if scheme in ("lit", "litreview") else "")
+        out.append({
+            "kind": "unregistered-scheme", "scheme": scheme, "line": line,
+            "detail": f"[{scheme}:…] cited but no resolver is registered for scheme "
+                      f"'{scheme}'{hint}; the citation is not audited"})
     return out
 
 
@@ -1036,7 +1079,10 @@ def audit(report_path: Path, home: Path | None = None,
         **scheme_records,
         "findings": findings,
         "advisories": advisories,
-        "warnings": stale_grounding_warnings(home),
+        # Non-blocking warnings: stale grounding (a claim module newer than its report) +
+        # any cited [<scheme>:…] whose resolver isn't registered (e.g. [lit:] with the research
+        # skill not installed) — the latter so the citation isn't silently dropped.
+        "warnings": stale_grounding_warnings(home) + unregistered_scheme_warnings(text),
         "status": status,
     }
 
@@ -1529,7 +1575,8 @@ def render_audit(result: dict[str, Any]) -> str:
              + (f", {result['exp_id']}" if result.get("exp_id") else "") + ")"]
     for w in result.get("warnings", []):
         mods = ", ".join(w.get("modules", []))
-        lines.append(f"  ⚠ stale-grounding: {w['detail']}" + (f" [{mods}]" if mods else ""))
+        lines.append(f"  ⚠ {w.get('kind', 'warning')}: {w['detail']}"
+                     + (f" [{mods}]" if mods else ""))
     for c in result["citations"]:
         mark = _CITE_MARK.get(c["verdict"], c["verdict"])
         tail = ""

@@ -15,9 +15,10 @@ import pytest
 
 from grounding import Capture
 from grounding._capture import _CURRENT
-from scientist import grounding
-from scientist.grounding import LiteratureError, PaperRef, cited_by, metric
-from scientist.provenance import report as R
+import research as grounding
+from research import LiteratureError, PaperRef, cited_by, metric
+from reportkit import report as R
+from research import literature_cites as LIT
 
 
 # --------------------------------------------------------------------------- #
@@ -91,8 +92,8 @@ def test_credibility_surfaces_as_of():
 # --------------------------------------------------------------------------- #
 def test_bucket_metric_tolerates_small_drift():
     # +1 must NOT change the 2-sig-fig bucket (no churn), a material jump must
-    assert R._bucket_metric(202) == R._bucket_metric(203) == "200"
-    assert R._bucket_metric(202) != R._bucket_metric(260)
+    assert LIT._bucket_metric(202) == LIT._bucket_metric(203) == "200"
+    assert LIT._bucket_metric(202) != LIT._bucket_metric(260)
 
 
 def _claim(node="test_x", *, value=202, value2=31, as_of="2026-06", support=True,
@@ -109,25 +110,25 @@ def _claim(node="test_x", *, value=202, value2=31, as_of="2026-06", support=True
 
 
 def test_metric_review_sha_stable_under_tolerance_changes_on_material():
-    base = R.metric_review_sha(_claim(value=202))
-    assert base == R.metric_review_sha(_claim(value=203))        # +1 → same pin (bucketed)
-    assert base != R.metric_review_sha(_claim(value=260))        # material → new pin
-    assert base != R.metric_review_sha(_claim(as_of="2027-01"))  # refreshed snapshot → new pin
+    base = LIT.metric_review_sha(_claim(value=202))
+    assert base == LIT.metric_review_sha(_claim(value=203))        # +1 → same pin (bucketed)
+    assert base != LIT.metric_review_sha(_claim(value=260))        # material → new pin
+    assert base != LIT.metric_review_sha(_claim(as_of="2027-01"))  # refreshed snapshot → new pin
 
 
 def test_bibliometric_verdict_paths():
-    assert R.bibliometric_verdict(_claim())[0] == "backed"
-    assert R.bibliometric_verdict(_claim(support=None))[0] == "needs-review"
-    assert R.bibliometric_verdict(_claim(support=False))[0] == "unsupported"
-    assert R.bibliometric_verdict(_claim(sources=False))[0] == "no-metric"
-    assert R.bibliometric_verdict(_claim(outcome="failed"))[0] == "broken"
-    assert R.bibliometric_verdict(_claim(kind="literature"))[0] == "wrong-kind"
+    assert LIT.bibliometric_verdict(_claim())[0] == "backed"
+    assert LIT.bibliometric_verdict(_claim(support=None))[0] == "needs-review"
+    assert LIT.bibliometric_verdict(_claim(support=False))[0] == "unsupported"
+    assert LIT.bibliometric_verdict(_claim(sources=False))[0] == "no-metric"
+    assert LIT.bibliometric_verdict(_claim(outcome="failed"))[0] == "broken"
+    assert LIT.bibliometric_verdict(_claim(kind="literature"))[0] == "wrong-kind"
 
 
 def test_asof_age_days():
-    assert R._asof_age_days("not-a-date") is None
-    assert R._asof_age_days("2000-01-01") > 365        # clearly old
-    assert R._asof_age_days("1999") > 365
+    assert LIT._asof_age_days("not-a-date") is None
+    assert LIT._asof_age_days("2000-01-01") > 365        # clearly old
+    assert LIT._asof_age_days("1999") > 365
 
 
 # --------------------------------------------------------------------------- #
@@ -160,7 +161,7 @@ The most-cited result is not the depth datum [lit:test_most_cited].
 
 def test_report_backs_pinned_bibliometric_claim(tmp_path):
     claim = _claim("test_most_cited")
-    claim["reviewed"]["sha"] = R.metric_review_sha(claim)[:12]   # correctly pinned
+    claim["reviewed"]["sha"] = LIT.metric_review_sha(claim)[:12]   # correctly pinned
     prog = _program(tmp_path, claim)
     report = _report_md(prog, _BODY)
     res = R.audit(report, home=tmp_path)
@@ -190,7 +191,7 @@ def test_report_flags_stale_pin(tmp_path):
 
 def test_report_asof_unknown_is_advisory_not_blocking(tmp_path):
     claim = _claim("test_most_cited", as_of=None)               # no as_of recorded
-    claim["reviewed"]["sha"] = R.metric_review_sha(claim)[:12]
+    claim["reviewed"]["sha"] = LIT.metric_review_sha(claim)[:12]
     prog = _program(tmp_path, claim)
     report = _report_md(prog, _BODY)
     res = R.audit(report, home=tmp_path)

@@ -1,7 +1,7 @@
 """The literature citation layer for the report engine — ``[lit:]`` and ``[litreview:]``.
 
 The generic report engine (:mod:`reportkit.report`) natively knows ``[claim:]`` /
-``[report:]`` / embeds. This module is scientist's *literature* citation layer, plugged into
+``[report:]`` / embeds. This module is research's *literature* citation layer, plugged into
 the engine through the citation-resolver registry (:func:`reportkit.report.register_citation`):
 
 * ``[lit:<id>]`` — grounds a third-party statement on a ``kind=literature`` /
@@ -13,16 +13,13 @@ the engine through the citation-resolver registry (:func:`reportkit.report.regis
 
 Each scheme registers (at import) its regex, an audit resolver, render hooks (footnote text +
 works-cited entries), an audit-output renderer, and — for ``[lit:]`` — opts into the
-prose-quantity advisory pool. Importing this module is what *activates* those schemes; it is
-imported on scientist's normal report paths (the :mod:`provenance.report` shim, which
-:mod:`provenance.litreview` / :mod:`provenance.reviewtree` / ``sci`` all import), so the
-resolvers are registered whenever scientist audits a report.
+prose-quantity advisory pool. **Importing this module is what *activates* those schemes** — the
+``research`` package imports it on load (see ``research/__init__``), so the resolvers are
+registered for any consumer of the research skill (``res``, the claims suite, and scientist's
+``sci report`` composition seam). The engine stays domain-generic and never imports this layer;
+the layer plugs into it from research.
 
-This is the seam the scientist/research split turns on: in a later phase this whole module
-moves to a ``research`` skill that registers the same schemes, with no change to the engine.
-
-Stdlib + PyYAML. The literature verdict helpers + labels were lifted verbatim from the old
-``provenance.report`` (a test asserts behavior is unchanged)."""
+Stdlib + PyYAML."""
 
 from __future__ import annotations
 
@@ -88,7 +85,7 @@ def _short_authors(authors_text: str) -> str:
 
 
 # Locator ladder → max eligible strength for a *machine-judged* literature source (mirrors
-# scientist.grounding.source). A source's tier caps the claim's strength; the audit enforces the
+# research.literature.source). A source's tier caps the claim's strength; the audit enforces the
 # ceiling so a paragraph-spanning chunk locator can't be sold as a tier-1 "strong" quote.
 _LIT_TIER_CEILING = {1: "strong", 2: "moderate", 3: "weak"}
 _LIT_STRENGTH_RANK = {"weak": 1, "moderate": 2, "strong": 3}
@@ -117,7 +114,7 @@ def lit_verdict(claim: dict[str, Any]) -> tuple[str, str | None]:
     one of two ways, and this function consumes both with the SAME downstream shape:
 
     * **machine-judged** (``source(paraphrase=…)``) — a re-runnable, cache-pinned entailment
-      verdict the orchestrating agent records via ``sci judge --record``. ``needs-judgment`` (not
+      verdict the orchestrating agent records via ``res judge --record``. ``needs-judgment`` (not
       yet judged / paraphrase edited) and ``stale-judgment`` (quote / paraphrase / span drifted
       since judged) are the executable analogue of ``needs-review`` / ``stale-review``; an
       ``unsupported`` judgment blocks.
@@ -142,11 +139,11 @@ def lit_verdict(claim: dict[str, Any]) -> tuple[str, str | None]:
                               "the verbatim quote is not in the cited paper")
         if any(s.get("judge_status") == "stale" for s in machine):
             return ("stale-judgment", "the quote / paraphrase / span drifted since the verdict "
-                                      "was cached — re-run `sci judge` to re-judge and re-record")
+                                      "was cached — re-run `res judge` to re-judge and re-record")
         if any(s.get("judge_status") != "fresh" or "supported" not in s for s in machine):
-            return ("needs-judgment", "no cached support verdict yet — run `sci judge --list`, "
+            return ("needs-judgment", "no cached support verdict yet — run `res judge --list`, "
                                       "judge whether the span supports the paraphrase, and "
-                                      "`sci judge --record`")
+                                      "`res judge --record`")
         if any(not s.get("supported") for s in machine):
             return ("unsupported", "the support judge found the paraphrase NOT supported by the "
                                    "cited span")
@@ -190,7 +187,7 @@ def lit_review_sha(claim: dict[str, Any]) -> str | None:
 
 # --------------------------------------------------------------------------- #
 # Bibliometric claims — a claim ABOUT the literature (e.g. "most-cited"), grounded on a stored
-# OpenAlex metric via scientist.grounding.metric()/cited_by(), not a quote. The quote-in-paper
+# OpenAlex metric via research.literature.metric()/cited_by(), not a quote. The quote-in-paper
 # verdict (lit_verdict) cannot represent it, so it gets its own verdict + staleness pin. A [lit:]
 # citation dispatches here when the cited claim's kind is "bibliometric" (see the citation loop).
 # --------------------------------------------------------------------------- #
@@ -235,7 +232,7 @@ def paper_claim_verdict(pc: dict[str, Any]) -> tuple[str, str | None]:
     rather than an internal literature claim. A paper-claim is ATTRIBUTED — pinned to what the
     paper says — so its audit is structural, not a re-run: it must be ``kind="attributed"`` and
     carry a non-empty ``evidence_sha`` (the integrity pin). The full quote-integrity re-check (the
-    quote still located in the retained PDF) is ``sci paper-claims verify`` — offline here, the
+    quote still located in the retained PDF) is ``res paper-claims verify`` — offline here, the
     audit only confirms the record exists and is well-formed enough to cite. Returns
     ``("attributed", None)`` when it backs the cite, else a blocking ``(verdict, detail)``."""
     if str(pc.get("kind")) != _paperclaims.KIND:
@@ -243,7 +240,7 @@ def paper_claim_verdict(pc: dict[str, Any]) -> tuple[str, str | None]:
                                   f"'{_paperclaims.KIND}' — re-extract; never launder attribution")
     if not str(pc.get("evidence_sha") or "").strip():
         return ("no-evidence-sha", "paper-claim has no evidence_sha (the integrity pin) — "
-                                   "re-run the extractor / `sci paper-claims validate`")
+                                   "re-run the extractor / `res paper-claims validate`")
     return ("attributed", None)
 
 
@@ -373,7 +370,7 @@ def litreview_screening_path(review_path: Path) -> Path:
 def parse_protocol(protocol_path: Path) -> dict[str, Any]:
     """Parse a litreview's ``protocol.md`` into ``{present, front_matter, headings}`` —
     ``headings`` is ``{lower-cased-title: body}``. Store-free, PyYAML + stdlib. Validation
-    (which fields are required + non-empty) lives in :mod:`provenance.litreview`."""
+    (which fields are required + non-empty) lives in :mod:`research.litreview`."""
     p = Path(protocol_path)
     if not p.is_file():
         return {"present": False, "front_matter": {}, "headings": {}}
@@ -520,7 +517,7 @@ def _resolve_lit_citations(
             findings.append({"kind": "missing-lit", "line": line, "cite": cid,
                              "detail": "no literature claim or paper-claim has this id; write the "
                                        "[lit:] claim or extract the paper "
-                                       "(`sci paper-claims scaffold <citekey>`)"})
+                                       "(`res paper-claims scaffold <citekey>`)"})
         elif len(cands) > 1:
             rec["verdict"] = "ambiguous"
             rec["candidates"] = cands
@@ -587,7 +584,7 @@ def _resolve_litreview_citations(
 
     A ``[litreview:<id>]`` grounds a topic on a neutral survey (kind=litreview). The integrity it
     carries is the survey's own (its committed PROSPERO/PRISMA protocol + screening, audited by
-    ``sci litreview``); the consuming report's only mechanical obligation is to stay PINNED to the
+    ``res litreview``); the consuming report's only mechanical obligation is to stay PINNED to the
     survey's registered search method, so a re-sweep that changed the queries/snapshot/sources
     forces a re-examination here. There is NO omissions gate — coverage is the survey-side
     completeness critic's job, against the screening log (see references/litreview.md)."""
@@ -748,8 +745,8 @@ def _lit_bib_entries(cids: list[str], rctx: _RenderContext) -> list[tuple[tuple,
 # The audit-output mark per [lit:] verdict (the literature analogue of reportkit's _CITE_MARK).
 _LIT_MARK = {"backed": "✅ backed", "attributed": "📄 attributed",
              "needs-review": "❌ needs-review",
-             "needs-judgment": "❌ needs-judgment (run `sci judge`)",
-             "stale-judgment": "❌ stale-judgment (re-run `sci judge`)",
+             "needs-judgment": "❌ needs-judgment (run `res judge`)",
+             "stale-judgment": "❌ stale-judgment (re-run `res judge`)",
              "over-strength": "❌ over-strength (exceeds locator ceiling)",
              "unsupported": "❌ unsupported", "broken": "❌ broken (quote absent)",
              "wrong-kind": "❌ wrong-kind", "missing": "❌ missing", "ambiguous": "❌ ambiguous",

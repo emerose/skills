@@ -1,4 +1,4 @@
-"""scientist.grounding.refresh — the literature-verdict worklist + record step (``sci judge``).
+"""research.refresh — the literature-verdict worklist + record step (``res judge``).
 
 **No model lives here — or anywhere in ``sci``.** The orchestrating agent is already an LLM that
 read the paper; the entailment verdict is produced by that agent (ideally a *fresh-context judge
@@ -7,15 +7,15 @@ only the two deterministic halves of the loop:
 
   * :func:`worklist` — surface the literature sources whose support verdict is **missing or stale**,
     each with the ``span_text`` the judge must read and the ``paraphrase`` it must weigh.
-    (``sci judge --list``.) This is what the judge subagent reads.
+    (``res judge --list``.) This is what the judge subagent reads.
   * :func:`record_verdicts` — ingest the caller-supplied verdicts ``{citekey, paraphrase,
     supported, rationale}`` and write them into the verdict cache
-    (:mod:`scientist.grounding.judgments`), pinning each with an ``evidence_sha`` the tool
+    (:mod:`research.judgments`), pinning each with an ``evidence_sha`` the tool
     **recomputes itself** from the report's stored span — so a caller cannot record a verdict
-    against a stale or wrong span. (``sci judge --record``.)
+    against a stale or wrong span. (``res judge --record``.)
 
 Determinism discipline (unchanged): the verdict cache is pure stdlib; the pytest path
-(``source()``) and the audit (``provenance.report.lit_verdict``) only READ it. This module only
+(``source()``) and the audit (``research.literature_cites.lit_verdict``) only READ it. This module only
 WRITES it. There is no model client to import.
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from ..provenance import claims_of, load_report
+from reportkit._grounding_io import claims_of, load_report
 from .judgments import (JudgmentCache, JUDGMENT_CACHE_NAME, DEFAULT_JUDGE_ID, evidence_sha)
 from grounding import fold_match
 
@@ -78,7 +78,7 @@ def _cache_path_for(report_path: Path | str, cache_path: Path | str | None) -> P
 def worklist(report_path: Path | str, cache_path: Path | str | None = None, *,
              library_resolver: Callable[[dict], str] | None = None,
              force: bool = False) -> dict[str, Any]:
-    """Surface the literature sources whose support verdict is missing or stale (``sci judge
+    """Surface the literature sources whose support verdict is missing or stale (``res judge
     --list``).
 
     For each machine-judged source whose cache entry is *miss* or *stale* (or every one, when
@@ -126,7 +126,7 @@ def record_verdicts(report_path: Path | str, records: list[dict[str, Any]],
                     cache_path: Path | str | None = None, *,
                     judge_id: str | None = None,
                     library_resolver: Callable[[dict], str] | None = None) -> dict[str, Any]:
-    """Ingest caller-supplied verdicts and write them into the verdict cache (``sci judge
+    """Ingest caller-supplied verdicts and write them into the verdict cache (``res judge
     --record``).
 
     Each record is ``{citekey, paraphrase, supported, rationale}`` (plus an optional
@@ -136,7 +136,7 @@ def record_verdicts(report_path: Path | str, records: list[dict[str, Any]],
     ever attach to the exact span the report carries now. A record is rejected when its
     ``(citekey, paraphrase)`` no longer resolves to a source, or when it echoes an ``evidence_sha``
     that no longer matches the current span (the worklist span the caller judged went stale).
-    ``judge_id`` (default :data:`scientist.grounding.judgments.DEFAULT_JUDGE_ID`) is stamped as
+    ``judge_id`` (default :data:`research.judgments.DEFAULT_JUDGE_ID`) is stamped as
     metadata.
 
     Returns ``{report, cache, recorded, rejected, details}``."""
@@ -285,7 +285,7 @@ def render_worklist(result: dict[str, Any]) -> str:
                      f"{it['paraphrase']!r}")
     if items:
         lines.append("  → a fresh-context judge subagent decides supported/unsupported for each, "
-                     "then `sci judge --record`")
+                     "then `res judge --record`")
     return "\n".join(lines)
 
 

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-import scientist.grounding as grounding
-from scientist.grounding import literature
+import research as grounding
+from research import literature
 
 
 def test_env_var_wins(monkeypatch, tmp_path):

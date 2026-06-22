@@ -395,8 +395,8 @@ from scientist.experiments import program, k1_230101, k1_230202
 
 def main():
     with grounding.derivation(program, __file__) as d:   # `program` is the study handle
-        a = grounding.cross(k1_230101).analysis.kd_summary
-        b = grounding.cross(k1_230202).analysis.kd_summary
+        a = k1_230101.analysis.kd_summary                # cross-experiment: just import + read
+        b = k1_230202.analysis.kd_summary
         d.write_table("kd_compare.csv", compare(a, b))
         d.write_fig("kd_compare.png", plot(a, b))
 ```

@@ -1,4 +1,4 @@
-"""The litreview phase — ``sci litreview`` (audit / ingest-discover / render / trace / delta).
+"""The litreview phase — ``res litreview`` (audit / ingest-discover / render / trace / delta).
 
 A *litreview* (``kind=litreview``) is a neutral, thesis-independent survey of the **third-party
 literature** on one sub-question: an organized, assessed map of what the field reports, how strong
@@ -6,10 +6,11 @@ each piece is, and where it disagrees or is silent. It draws **no program conclu
 argues toward a recommendation; a litreview only lays out the evidence a report argues *from*. See
 ``references/litreview.md`` for the full discipline.
 
-This module is the litreview's **own** audit. It is store-free and **reuses**
-:mod:`provenance.report` wholesale: a ``review.md`` is ``[lit:]``-only report-shaped Markdown, so
-citation parsing and the ``[lit:]`` verdict are not re-implemented here. On top of ``report.audit``
-it adds the litreview-specific contract:
+This module is the litreview's **own** audit. It is store-free and **reuses** the report engine
+(:mod:`reportkit.report`) + the ``[lit:]`` citation layer (:mod:`research.literature_cites`)
+wholesale: a ``review.md`` is ``[lit:]``-only report-shaped Markdown, so citation parsing and the
+``[lit:]`` verdict are not re-implemented here. On top of the engine's ``audit`` it adds the
+litreview-specific contract:
 
 * **literature-only** — a ``[claim:]`` (Kicho data), ``[report:]``, or nested ``[litreview:]``
   citation is a blocking finding (Kicho data meets the literature only in the citing report);
@@ -46,7 +47,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from . import report as REPORT
+from reportkit import report as RK
+from . import literature_cites as LIT
 
 # A litreview must close with a gaps / open-questions section. Heading-level (## / ###) only.
 _GAPS_HEADING_RE = re.compile(
@@ -159,10 +161,10 @@ def _litreview_advisories(text: str,
       claims — expected in a survey") is enough."""
     gaps = _gaps_section_lines(text)
     advisories: list[dict[str, Any]] = [
-        a for a in REPORT.prose_quantity_advisories(text, claim_index)
+        a for a in RK.prose_quantity_advisories(text, claim_index)
         if a["line"] not in gaps]
 
-    wlb = REPORT.incommensurate_evidence_advisories(text, claim_index)
+    wlb = RK.incommensurate_evidence_advisories(text, claim_index)
     if wlb:
         cites = sorted({c for a in wlb for c in a.get("cites", [])})
         advisories.append({
@@ -185,13 +187,13 @@ def validate_protocol(review_path: Path) -> tuple[dict[str, Any], list[dict[str,
     ``missing-protocol`` (file absent) or ``missing-protocol-field`` (a missing/empty front-matter
     key or one of the four required headings). Presence + non-emptiness only — whether the criteria
     are *good* is the completeness critic's call, not the tool's."""
-    proto = REPORT.parse_protocol(REPORT.litreview_protocol_path(review_path))
+    proto = LIT.parse_protocol(LIT.litreview_protocol_path(review_path))
     if not proto["present"]:
         return proto, [{
             "kind": "missing-protocol", "line": 0,
             "detail": "no protocol.md beside review.md — pre-register the survey (question & scope, "
                       "search queries, inclusion + exclusion criteria) BEFORE screening; "
-                      "`sci new-litreview` scaffolds it"}]
+                      "`res new-litreview` scaffolds it"}]
 
     findings: list[dict[str, Any]] = []
     fm = proto["front_matter"]
@@ -205,7 +207,7 @@ def validate_protocol(review_path: Path) -> tuple[dict[str, Any], list[dict[str,
                 "kind": "missing-protocol-field", "line": 0, "field": key,
                 "detail": f"protocol.md front matter is missing or empty `{key}` "
                           f"(required: slug, as_of, sources)"})
-    for heading in REPORT._PROTOCOL_HEADINGS:
+    for heading in LIT._PROTOCOL_HEADINGS:
         body = proto["headings"].get(heading.lower())
         if not body or not str(body).strip():
             findings.append({
@@ -233,7 +235,7 @@ def parse_screening(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, An
             "kind": "missing-screening", "line": 0,
             "detail": "no screening.jsonl beside review.md — account for the full retrieved set "
                       "(every candidate → included|excluded-with-reason); seed it with "
-                      "`sci litreview <review.md> --ingest-discover <discover.json>`"}]
+                      "`res litreview <review.md> --ingest-discover <discover.json>`"}]
 
     rows: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
@@ -296,9 +298,9 @@ def _cited_citekeys(text: str, claim_index: dict[str, dict[str, Any]],
     coverage cross-check compares against the ``included`` screening rows."""
     cks: set[str] = set()
     pci = paper_claim_index or {}
-    parsed = REPORT.parse_report(text)
+    parsed = RK.parse_report(text)
     for lc in parsed.get("lit_cites", []):
-        cands = REPORT.resolve_citation(lc["id"], claim_index)
+        cands = RK.resolve_citation(lc["id"], claim_index)
         if len(cands) != 1:
             pc = pci.get(lc["id"].strip())
             if pc is not None and str(pc.get("citekey") or "").strip():
@@ -354,16 +356,16 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
     ``[litreview:]`` child edges) is dispatched to :func:`reviewtree.audit`. A flat ``review.md``
     (the degenerate one-node tree) stays on the unchanged path below — no migration."""
     rp = Path(review_path).resolve()
-    home = REPORT._resolve_home(home, rp)
+    home = RK._resolve_home(home, rp)
 
     from . import reviewtree as TREE
     if TREE.is_tree(rp):
         return TREE.audit(rp, home=home)
 
-    base = REPORT.audit(rp, home=home)
+    base = RK.audit(rp, home=home)
     text = rp.read_text(encoding="utf-8")
     findings: list[dict[str, Any]] = list(base["findings"])
-    claim_index = REPORT.index_claims(home)
+    claim_index = RK.index_claims(home)
     # Litreview-tuned recall aids (NOT base's report-tuned advisories): suppress weak-load-bearing
     # to a single summary line, and exempt the gaps section from unsupported-quantity. See
     # _litreview_advisories. `sci report` keeps the report behavior (base.audit's advisories).
@@ -398,10 +400,10 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
     # PROSPERO/PRISMA: the committed method + screening artifacts.
     proto, proto_findings = validate_protocol(rp)
     findings.extend(proto_findings)
-    rows, screen_findings = parse_screening(REPORT.litreview_screening_path(rp))
+    rows, screen_findings = parse_screening(LIT.litreview_screening_path(rp))
     findings.extend(screen_findings)
     funnel = prisma_funnel(rows)
-    paper_claim_index = REPORT._paperclaims.load_paper_claims(home)
+    paper_claim_index = LIT._paperclaims.load_paper_claims(home)
     cov_findings, cov_advisories = _coverage_crosscheck(text, claim_index, rows, paper_claim_index)
     findings.extend(cov_findings)
     advisories.extend(cov_advisories)
@@ -436,8 +438,8 @@ def ingest_discover(review_path: Path, discover_path: Path, *, home: Path | None
     whose id is already present is skipped. ``sci`` never calls the search API; a re-discover is
     re-fed through here. Returns ``{appended, skipped_duplicate, skipped_no_id, screening}``."""
     rp = Path(review_path).resolve()
-    home = REPORT._resolve_home(home, rp)
-    screening = REPORT.litreview_screening_path(rp)
+    home = RK._resolve_home(home, rp)
+    screening = LIT.litreview_screening_path(rp)
 
     data = json.loads(Path(discover_path).read_text(encoding="utf-8"))
     results = data.get("results", []) if isinstance(data, dict) else []
@@ -495,7 +497,7 @@ def ingest_discover(review_path: Path, discover_path: Path, *, home: Path | None
 
     return {"appended": len(appended), "skipped_duplicate": skipped_dup,
             "skipped_no_id": skipped_no_id,
-            "screening": REPORT._rel_or_name(screening, home)}
+            "screening": RK._rel_or_name(screening, home)}
 
 
 # --------------------------------------------------------------------------- #
@@ -512,17 +514,17 @@ def delta(review_path: Path, baseline: Path, home: Path | None = None) -> dict[s
     citing report relies on is what escalates to the fresh-context judge; an empty delta means
     nothing for a citing report to re-examine."""
     rp = Path(review_path).resolve()
-    home = REPORT._resolve_home(home, rp)
-    prefix = REPORT.litreview_module_prefix(rp, home)
+    home = RK._resolve_home(home, rp)
+    prefix = LIT.litreview_module_prefix(rp, home)
     scope_id = prefix.split("::", 1)[0]
-    cur = {cid: c for cid, c in REPORT.index_claims(home).items() if cid.startswith(prefix)}
+    cur = {cid: c for cid, c in RK.index_claims(home).items() if cid.startswith(prefix)}
 
     base: dict[str, dict[str, Any]] = {}
     data = json.loads(Path(baseline).read_text(encoding="utf-8"))
     for c in data.get("claims", []) if isinstance(data, dict) else []:
         if not isinstance(c, dict):
             continue
-        fid = REPORT.claim_id_for(scope_id, c.get("id") or "")
+        fid = RK.claim_id_for(scope_id, c.get("id") or "")
         if fid.startswith(prefix):
             base[fid] = c
 
@@ -531,7 +533,7 @@ def delta(review_path: Path, baseline: Path, home: Path | None = None) -> dict[s
         "added": sorted(cur_ids - base_ids),
         "removed": sorted(base_ids - cur_ids),
         "drifted": sorted(cid for cid in (cur_ids & base_ids)
-                          if REPORT._claim_drift_sig(cur[cid]) != REPORT._claim_drift_sig(base[cid])),
+                          if LIT._claim_drift_sig(cur[cid]) != LIT._claim_drift_sig(base[cid])),
     }
 
 
@@ -540,7 +542,7 @@ def render_delta(d: dict[str, Any]) -> str:
     out = []
     for label, ids in rows:
         if ids:
-            out.append(f"  {label}: " + ", ".join(REPORT._short_claim_id(c) for c in ids))
+            out.append(f"  {label}: " + ", ".join(RK._short_claim_id(c) for c in ids))
     if not out:
         return "no change (nothing for a citing report to re-examine)"
     head = "litreview delta — escalate to the delta-judge if any cited claim moved:"
@@ -548,7 +550,7 @@ def render_delta(d: dict[str, Any]) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# scaffold — `sci new-litreview`
+# scaffold — `res new-litreview`
 # --------------------------------------------------------------------------- #
 def scaffold(home: Path, slug: str, *, title: str | None = None,
              scope: str = "program") -> dict[str, Any]:
@@ -612,7 +614,7 @@ def scaffold(home: Path, slug: str, *, title: str | None = None,
             f"## Sub-question\n\n## Must cover\n\n## Search & screening\n"
             f"Pre-register the method in `protocol.md` first. Run `bib discover` per the\n"
             f"bibliographer literature-search protocol, then seed the PRISMA log:\n"
-            f"`sci litreview <review.md> --ingest-discover <discover.json>`. Screen each candidate\n"
+            f"`res litreview <review.md> --ingest-discover <discover.json>`. Screen each candidate\n"
             f"to included|excluded(+reason) by hand in `screening.jsonl`.\n"),
         module: (
             f'"""[lit:] claim module for litreview `{slug}`.\n\n'
@@ -621,7 +623,7 @@ def scaffold(home: Path, slug: str, *, title: str | None = None,
             f"claim per references/report.md. Run with --grounding-out to emit the grounding report\n"
             f'the audit reads.\n"""\n'
             f"from grounding import kind, strength, statement  # noqa: F401\n"
-            f"from scientist.grounding import source  # noqa: F401\n\n\n"
+            f"from research import source  # noqa: F401\n\n\n"
             f"# @kind"
             f'("literature")\n'
             f"# @strength"
@@ -637,13 +639,13 @@ def scaffold(home: Path, slug: str, *, title: str | None = None,
     skipped: list[str] = []
     for path, content in stubs.items():
         if path.exists():
-            skipped.append(REPORT._rel_or_name(path, home))
+            skipped.append(RK._rel_or_name(path, home))
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        created.append(REPORT._rel_or_name(path, home))
+        created.append(RK._rel_or_name(path, home))
     return {"slug": slug, "scope": scope, "created": created, "skipped": skipped,
-            "module": REPORT._rel_or_name(module, home)}
+            "module": RK._rel_or_name(module, home)}
 
 
 def render_audit(result: dict[str, Any]) -> str:
@@ -653,7 +655,7 @@ def render_audit(result: dict[str, Any]) -> str:
     if result.get("tree"):
         from . import reviewtree as TREE
         return TREE.render_audit(result)
-    out = REPORT.render_audit(result)
+    out = RK.render_audit(result)
     proto = "present" if result.get("protocol_present") else "MISSING"
     f = result.get("funnel") or {}
     by_reason = f.get("excluded_by_reason") or {}

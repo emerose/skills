@@ -1,4 +1,4 @@
-"""scientist.grounding.literature — verify a quote against a paper in the bibliographer library.
+"""research.literature — verify a quote against a paper in the bibliographer library.
 
 A *literature* claim grounds a third-party statement on one or more papers held in the
 bibliographer library (BIBLIOGRAPHER_HOME). The deterministic, re-runnable part is exactly
@@ -28,38 +28,34 @@ _BIBLIOSTORE = None                         # cached BiblioStore class (sibling-
 
 
 def _import_bibliostore():
+    """Resolve the bibliographer ``BiblioStore`` class. Fast path: it's already importable
+    (pip-installed or on ``PYTHONPATH``). Else walk up to a sibling ``bibliographer`` skill and put
+    its package root on ``sys.path``. ``BiblioStore`` exposes ``open``/``get_by_citekey``/
+    ``leading_text``/``chunk_text``/``close`` — the keyless read API this module calls."""
     global _BIBLIOSTORE
     if _BIBLIOSTORE is not None:
         return _BIBLIOSTORE
-    import sys
-    try:                                    # already importable (scripts/ on path)
-        from _store import BiblioStore      # type: ignore
+    try:                                    # already importable (installed / on PYTHONPATH)
+        from bibliographer.store import BiblioStore  # type: ignore
         _BIBLIOSTORE = BiblioStore
         return BiblioStore
-    except Exception:
+    except ImportError:
         pass
+    import sys
     here = Path(__file__).resolve()
-    for anc in here.parents:                # walk up to a sibling bibliographer skill (old layout)
-        cand = anc / "bibliographer" / "scripts" / "_store.py"
-        if cand.is_file():
-            sys.path.insert(0, str(cand.parent))
-            from _store import BiblioStore   # type: ignore
-            _BIBLIOSTORE = BiblioStore
-            return BiblioStore
-    for anc in here.parents:                # walk up to a sibling bibliographer *package* (current layout)
+    for anc in here.parents:                # walk up to a sibling bibliographer package skill
         # The skill root is ``anc/bibliographer`` and the package lives one level deeper at
         # ``anc/bibliographer/bibliographer/store.py``; putting the skill root on sys.path makes
-        # ``import bibliographer`` resolve. The new BiblioStore API (open/get_by_citekey/
-        # leading_text/chunk_text/close) matches what this module already calls.
+        # ``import bibliographer`` resolve.
         skill_root = anc / "bibliographer"
         if (skill_root / "bibliographer" / "store.py").is_file():
             sys.path.insert(0, str(skill_root))
-            from bibliographer.store import BiblioStore   # type: ignore
+            from bibliographer.store import BiblioStore  # type: ignore
             _BIBLIOSTORE = BiblioStore
             return BiblioStore
     raise LiteratureError(
         "can't locate the bibliographer skill to read paper text — install the bibliographer "
-        "skill alongside scientist, or put it on PYTHONPATH.")
+        "skill alongside research, or put it on PYTHONPATH.")
 
 
 # A directory carrying one of these marks the root of the checkout the module lives in.
@@ -319,7 +315,7 @@ def paper(citekey: str, *, allow_retracted: bool = False) -> PaperRef:
 #   tier 3  paraphrase= only      → judge reads the whole document        ("weak" only; costly)
 # A bare quote= with no paraphrase= is the LEGACY path: deterministic quote tripwire + a hand
 # -stamped @reviewed(support=…), unchanged and not machine-judged (no tier).
-# (The tier→strength-ceiling map + its enforcement live in provenance.report, the audit layer.)
+# (The tier→strength-ceiling map + its enforcement live in research.literature_cites, the audit layer.)
 
 
 def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = None,
@@ -334,12 +330,12 @@ def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = N
       and for tier 1.
     - ``paraphrase`` — the claim's reading of the cited span. Opts the source into the
       **re-runnable, cache-pinned entailment check** "does the span fairly support P?": the verdict
-      is produced by the orchestrating agent (``sci judge --list`` surfaces the work; a fresh-context
-      judge subagent decides; ``sci judge --record`` writes it) and cached; this call merely reads
+      is produced by the orchestrating agent (``res judge --list`` surfaces the work; a fresh-context
+      judge subagent decides; ``res judge --record`` writes it) and cached; this call merely reads
       the cached, pin-keyed verdict (``(evidence_sha, paraphrase)``) and asserts *supported* when
       present. No model is ever called here — the claims suite stays offline and deterministic. A
       missing/stale verdict is **non-blocking** (the audit reports ``needs-judgment`` /
-      ``stale-judgment``; run ``sci judge``).
+      ``stale-judgment``; run ``res judge``).
     - ``chunk``      — a libkit chunk index (or iterable of indices): the **tier-2** locator for a
       paragraph-spanning fact with no single quotable sentence. Used with ``paraphrase=`` (no
       ``quote=``); the judged span is the chunk text.
@@ -350,7 +346,7 @@ def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = N
     the *support* judgment is now executable too — a cached ``unsupported`` verdict fails the
     claim on every subsequent run (quote-mining no longer survives)."""
     # Resolve `paper` through the package namespace (not the module-local name) so a test or
-    # caller that monkeypatches ``scientist.grounding.paper`` is honored, exactly as when
+    # caller that monkeypatches ``research.paper`` is honored, exactly as when
     # source() and paper() lived in the same module.
     from . import current_judgment_cache, paper as _paper
 
@@ -417,7 +413,7 @@ def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = N
 
     # Assert on the CACHED, pin-keyed verdict (decision: the support judgment is executable).
     # Graceful when absent/stale: a brand-new or re-judged claim stays needs-/stale-judgment
-    # (non-blocking) until `sci judge --record` runs — never a hard failure on a cache miss.
+    # (non-blocking) until `res judge --record` runs — never a hard failure on a cache miss.
     if status == "fresh":
         assert rec.get("supported"), (
             f"literature paraphrase NOT supported by the cited span in {citekey} "
@@ -467,7 +463,7 @@ def converge(*sources: dict) -> list[dict]:
 #
 # Why no `metric(rel=…)` operator DSL: claims are pytests, so the relation is just Python (`>`,
 # top-k, ratios, membership). `metric()` only captures provenance; correctness is the assert.
-# The captured value+as_of is what `@reviewed(sha=)` pins over (see provenance.report
+# The captured value+as_of is what `@reviewed(sha=)` pins over (see research.literature_cites
 # metric_review_sha) so a refreshed count re-opens review — exactly the "caught for review" guarantee.
 # --------------------------------------------------------------------------- #
 def metric(citekey: str, name: str, *, source: str = "openalex"):
@@ -480,7 +476,7 @@ def metric(citekey: str, name: str, *, source: str = "openalex"):
     ``metric_sources`` (so the claim is citeable, traceable, and stale-able), and returns the value.
 
     The value + ``as_of`` are what the bibliometric review pin is computed over: a refreshed count
-    (a new ``bib enrich``) re-opens the recorded ``@reviewed`` (see provenance.report
+    (a new ``bib enrich``) re-opens the recorded ``@reviewed`` (see research.literature_cites
     :func:`metric_review_sha`). Raises :class:`LiteratureError` if the metric is not in the record
     yet — ``bib enrich <citekey>`` fetches OpenAlex metrics — so a missing metric fails loudly
     rather than silently grounding on ``None``."""

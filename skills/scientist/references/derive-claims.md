@@ -20,7 +20,7 @@ temporal history. Closes the pipeline `raw → data → analysis → claims`.
   `.attrs["source"]`/`["sha256"]`.
 - **`grounding`** — the harness + pytest plugin: `load()/data()` (tracked loader), `doc()` (record a CRO
   report PDF/docx **or a .pptx deck**; `DocRef.text()`/`.contains()` extract + quote-match it),
-  `evidence(**kv)`, `uses(claim_id)` (compose, transitive provenance), `cross(study)`,
+  `evidence(**kv)`, `uses(claim_id)` (compose, transitive provenance),
   `derivation(study, __file__)`, and the `@strength`/`@caveats`/`@kind` markers. The plugin captures
   provenance per claim, **bypass-guards** untracked reads, and emits the **grounding report**.
 
@@ -108,8 +108,7 @@ def test_pos_ctrl_below_criterion(experiment):
   **body** = justification · **assert** = grounding/drift check · **markers** = the non-binary
   judgment (kept *out* of the assert). A claim with no `statement()` is flagged advisory.
 - **bulk** via `@pytest.mark.parametrize`. **compose** via `uses("other_claim_id")`. **cross-experiment**:
-  `from scientist.experiments import k1_000000; other = k1_000000` (reads captured, sha-pinned;
-  `cross(other)` still works as a no-op passthrough for older claims).
+  `from scientist.experiments import k1_000000; other = k1_000000` (reads captured, sha-pinned).
 - **lifecycle** = pytest states: `@pytest.mark.xfail(strict=True)` = contradicted but on record;
   `pytest.skip(reason=…)` = unverifiable.
 - **identifiers**: id columns that only look numeric (leading zeros) are preserved as **strings** —

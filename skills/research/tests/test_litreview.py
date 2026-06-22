@@ -1,5 +1,5 @@
-"""The litreview phase — ``provenance.litreview`` (``sci litreview``) and the protocol-keyed
-``stale-litreview`` pin in ``provenance.report``.
+"""The litreview phase — ``research.litreview`` (``res litreview``) and the protocol-keyed
+``stale-litreview`` pin in the ``[litreview:]`` citation layer.
 
 A *litreview* (``kind=litreview``) is a neutral, thesis-independent survey of the third-party
 literature on one sub-question. Phase 1 of the litreview redesign replaces the hand-tagged
@@ -21,9 +21,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scientist import grounding
-from scientist.provenance import litreview as LR
-from scientist.provenance import report as R
+import research as grounding
+from research import litreview as LR
+from reportkit import report as R
+from research import literature_cites as LIT
 
 
 # --------------------------------------------------------------------------- #
@@ -487,8 +488,8 @@ def test_write_litreview_pins_records_surfaced_pin(tmp_path):
     res = R.audit(report, home=tmp_path)
     lrc = res["litreview_cites"][0]
     assert lrc.get("pin_unrecorded") is True
-    R.write_litreview_pins(report, {lrc["id"]: lrc["pin"]})
-    pins = R.litreview_pins(report.read_text())
+    LIT.write_litreview_pins(report, {lrc["id"]: lrc["pin"]})
+    pins = LIT.litreview_pins(report.read_text())
     assert pins[lrc["id"]] == lrc["pin"]
     res2 = R.audit(report, home=tmp_path)
     lrc2 = res2["litreview_cites"][0]
@@ -533,29 +534,6 @@ def test_delta_no_change_is_empty(tmp_path):
     assert "no change" in LR.render_delta(d)
 
 
-# --------------------------------------------------------------------------- #
-# kind=litreview store card (store-free determinism) — PRISMA funnel block
-# --------------------------------------------------------------------------- #
-def test_litreview_card_markdown_deterministic():
-    from scientist.store import _meta as M
-    card = {
-        "litreview_id": "program::it-biodist", "scope": "program", "slug": "it-biodist",
-        "title": "IT ASO biodistribution", "abstract": "How a lumbar ASO distributes the CNS.",
-        "sections": [{"heading": "Exposure", "summary": "cord highest"}],
-        "funnel": {"identified": 4, "included": 3, "excluded": 1},
-        "cited_claims": ["program::test_litreview_it_biodist.py::test_floor"],
-        "audit_status": "GROUNDED", "path": "program/litreviews/it-biodist/review.md",
-    }
-    md1 = M.litreview_card_markdown(card)
-    md2 = M.litreview_card_markdown(card)
-    assert md1 == md2                                         # deterministic → stable document_id
-    assert md1.startswith("# Literature review: IT ASO biodistribution")
-    assert "## Abstract" in md1
-    assert "## PRISMA funnel" in md1
-    assert "identified: 4" in md1 and "included: 3" in md1
-    assert "## Cites" in md1
-
-
 def test_litreview_cite_renders_as_footnote(tmp_path):
     _full_litreview(tmp_path)
     prog = tmp_path / "program"
@@ -585,7 +563,7 @@ def test_scaffold_lays_out_all_artifacts(tmp_path):
     assert prompt.is_file() and module.is_file()
     assert res["module"].endswith("claims/test_litreview_it_aso_biodistribution.py")
     assert len(res["created"]) == 5 and res["skipped"] == []
-    assert R.litreview_module_path(review, tmp_path) == module
+    assert LIT.litreview_module_path(review, tmp_path) == module
     # the protocol stub carries the four required headings + the front-matter keys.
     pbody = protocol.read_text()
     for heading in ("Question & scope", "Search queries", "Inclusion criteria", "Exclusion criteria"):

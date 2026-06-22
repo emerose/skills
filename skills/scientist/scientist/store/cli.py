@@ -32,8 +32,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from .. import cli_utils  # noqa: F401  (kept for back-compat imports of store.cli.cli_utils)
-from ..cli_utils import die, emit_json  # re-exported for existing call sites
+from ..cli_utils import die, emit_json
 
 from . import _audit, _files, _generate, _intake, _meta, _pr  # noqa: F401  (re-exported)
 from ._store import STORE_DIRNAME, Store, EmbedderConfigError
@@ -84,7 +83,6 @@ from ._cli_audit import (  # noqa: F401
     print_audit_report,
     _staleness_entry,
     _source_files_on_disk,
-    _grounding_report_paths,
 )
 from ._cli_pr import (  # noqa: F401
     cmd_pr,
@@ -168,9 +166,9 @@ def register(sub: argparse._SubParsersAction) -> None:
     sp.add_argument("experiment")
     sp.add_argument("--report", help="grounding_report.json to index "
                     "(default <exp>/analysis/grounding_report.json then <exp>/grounding_report.json)")
-    sp = add("list", "list experiments (default), files, entities, claims, reports, or litreviews")
+    sp = add("list", "list experiments (default), files, entities, claims, or reports")
     sp.add_argument("--kind",
-                    choices=["experiment", "file", "entity", "claim", "report", "litreview"],
+                    choices=["experiment", "file", "entity", "claim", "report"],
                     default="experiment")
     sp.add_argument("--experiment", help="when --kind file/claim/report: limit to this exp_id")
     sp = add("show", "show one experiment and its files")
@@ -181,7 +179,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     sp.add_argument("text")
     sp.add_argument("--limit", type=int, default=8)
     sp.add_argument("--kind",
-                    choices=["experiment", "file", "entity", "claim", "report", "litreview"],
+                    choices=["experiment", "file", "entity", "claim", "report"],
                     default=None)
     sp = add("file", "show one file record (by relative path)")
     sp.add_argument("path")
@@ -293,38 +291,9 @@ async def _run_index_report(args: argparse.Namespace, card: dict[str, Any]) -> N
 
 def index_report(args: argparse.Namespace, card: dict[str, Any]) -> int:
     """Open the libkit store and upsert a ``kind=report`` document from a prepared ``card``
-    dict (built store-free by ``provenance.report`` + ``sci report``). Sync wrapper."""
+    dict (built store-free by ``reportkit.report`` + ``sci report``). Sync wrapper."""
     try:
         asyncio.run(_run_index_report(args, card))
-    except KeyboardInterrupt:
-        die("interrupted", code=130)
-    return 0
-
-
-async def _run_index_litreview(args: argparse.Namespace, card: dict[str, Any]) -> None:
-    home = _home(args)
-    _load_dotenv(home)
-    _require_initialized(home)
-    try:
-        store = Store.open(home)
-    except EmbedderConfigError as e:
-        die(str(e))
-    try:
-        rec = await store.upsert_litreview(card)
-        if args.json:
-            emit_json({"litreview_id": rec.get("litreview_id"), "scope": rec.get("scope"),
-                       "document_id": rec.get("document_id")})
-        else:
-            print(f"indexed litreview {rec.get('litreview_id')} ({rec.get('scope')}) into the store")
-    finally:
-        await store.close()
-
-
-def index_litreview(args: argparse.Namespace, card: dict[str, Any]) -> int:
-    """Open the libkit store and upsert a ``kind=litreview`` document from a prepared ``card``
-    dict (built store-free by ``provenance.litreview`` + ``sci litreview``). Sync wrapper."""
-    try:
-        asyncio.run(_run_index_litreview(args, card))
     except KeyboardInterrupt:
         die("interrupted", code=130)
     return 0

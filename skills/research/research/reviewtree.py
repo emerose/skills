@@ -7,10 +7,11 @@ claim-citing nodes** — parents *reference* children, never contain them — so
 by **more nodes** (a bushier/deeper tree), each node stays ~one screenful (``B``), and any fact is
 reached in ``depth × B``. **The root rollup IS "the review."**
 
-This module is the tree's mechanical audit + render. It is store-free and **reuses
-:mod:`provenance.report` wholesale** — a node file is the same ``[lit:]``/``[claim:]``/
-``[litreview:]``-citing Markdown the report audit already parses, so per-node grounding is
-``report.audit`` and only the *tree* layer is new here.
+This module is the tree's mechanical audit + render. It is store-free and **reuses the report
+engine (:mod:`reportkit.report`) + the ``[lit:]`` citation layer (:mod:`research.literature_cites`)
+wholesale** — a node file is the same ``[lit:]``/``[claim:]``/``[litreview:]``-citing Markdown the
+report audit already parses, so per-node grounding is the engine's ``audit`` and only the *tree*
+layer is new here.
 
 ## The node model
 
@@ -43,7 +44,7 @@ unresolved conflict named in the parent's synthesis), whether the split is at a 
 
 A **flat review is the degenerate one-node tree** (``levels=0``): a review.md with no ``nodes/``
 and no ``[litreview:]`` child edges is exactly Phase 1's review, audited unchanged by
-:mod:`provenance.litreview` — there is no migration.
+:mod:`research.litreview` — there is no migration.
 """
 from __future__ import annotations
 
@@ -54,7 +55,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import report as REPORT
+from reportkit import report as RK
+from . import literature_cites as LIT
 from . import paperclaims as _paperclaims
 
 # Reader load ceiling per node — a cheap word-count proxy for "~one screenful" (a *max* on a
@@ -116,14 +118,14 @@ def is_tree(review_path: Path) -> bool:
         text = rp.read_text(encoding="utf-8")
     except OSError:
         return False
-    return bool(REPORT.parse_report(text).get("litreview_cites"))
+    return bool(RK.parse_report(text).get("litreview_cites"))
 
 
 def _node_from_file(path: Path, *, is_root: bool) -> Node:
     text = path.read_text(encoding="utf-8")
-    fm = REPORT._front_matter(text)
+    fm = RK._front_matter(text)
     nid = str(fm.get("id") or ("root" if is_root else path.stem)).strip() or path.stem
-    parsed = REPORT.parse_report(text)
+    parsed = RK.parse_report(text)
     ra = fm.get("rolled_against") if isinstance(fm.get("rolled_against"), dict) else {}
     return Node(
         id=nid, path=path, is_root=is_root,
@@ -154,8 +156,8 @@ def discover_nodes(review_path: Path) -> tuple[dict[str, Node], list[dict[str, A
         if node.id in nodes:
             findings.append({"kind": "duplicate-node-id", "line": 0, "node": node.id,
                              "detail": f"node id `{node.id}` is declared by two files "
-                                       f"({REPORT._rel_or_name(nodes[node.id].path, rp.parent)} and "
-                                       f"{REPORT._rel_or_name(path, rp.parent)}) — ids must be unique"})
+                                       f"({RK._rel_or_name(nodes[node.id].path, rp.parent)} and "
+                                       f"{RK._rel_or_name(path, rp.parent)}) — ids must be unique"})
             continue
         nodes[node.id] = node
     return nodes, findings
@@ -263,8 +265,8 @@ def _synthesis_word_count(node: Node) -> int:
     screenful" — not a real tokenizer (redesign §6 keeps the proxy objective + deterministic)."""
     text = node.body
     text = re.sub(r"^---\n.*?\n---\n", "", text, count=1, flags=re.DOTALL)  # drop frontmatter
-    for pat in (REPORT._CITE_RE, REPORT._LIT_RE, REPORT._LITREVIEW_RE, REPORT._REPORT_RE,
-                REPORT._EMBED_RE):
+    for pat in (RK._CITE_RE, LIT._LIT_RE, LIT._LITREVIEW_RE, RK._REPORT_RE,
+                RK._EMBED_RE):
         text = pat.sub("", text)
     # drop heading/markup punctuation so it doesn't inflate the count
     return len([w for w in re.split(r"\s+", text) if w.strip(" #*_`>-|")])
@@ -279,7 +281,7 @@ def _node_grounding(node: Node, home: Path) -> list[dict[str, Any]]:
     (the tree layer owns those); and overlays the litreview-only rule — a ``[claim:]`` (Kicho data)
     or ``[report:]`` citation in a review node is blocking (data meets the literature only in the
     citing report). Each finding is tagged with the node id."""
-    res = REPORT.audit(node.path, home=home)
+    res = RK.audit(node.path, home=home)
     # The tree layer (build_tree) is the sole authority on [litreview:] node edges — drop
     # report.audit's whole-review [litreview:] verdicts (it resolves them against
     # litreviews/<slug>/review.md, not sibling nodes, so it can only mis-flag them).
@@ -312,7 +314,7 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
     The conflict-survival obligation and the split-seam judgment are the completeness critic's, not
     enforced here (see the module docstring / ``references/reviews-tree.md``)."""
     rp = Path(review_path).resolve()
-    home = REPORT._resolve_home(home, rp)
+    home = RK._resolve_home(home, rp)
     findings: list[dict[str, Any]] = []
     advisories: list[dict[str, Any]] = []
 
@@ -334,7 +336,7 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
             findings.append({"kind": "node-over-B", "line": 0, "node": nid, "value": words,
                              "detail": f"node `{nid}` synthesis is ~{words} words > B={B} — never "
                                        f"compress past B; split it into subtopic leaves + a rollup "
-                                       f"(`sci litreview {REPORT.report_scope(rp, home)['slug']} "
+                                       f"(`res litreview {RK.report_scope(rp, home)['slug']} "
                                        f"--add-node <id> --parent {nid}`)"})
 
     # reference-don't-contain: a rollup must not re-cite a primary claim owned by a descendant
@@ -376,13 +378,13 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
 
     # review-level Phase-1 discipline (protocol/screening/coverage/gaps), at the root
     from . import litreview as LITREVIEW
-    claim_index = REPORT.index_claims(home)
+    claim_index = RK.index_claims(home)
     paper_claim_index = _paperclaims.load_paper_claims(home)
     all_text = "\n\n".join(n.body for n in nodes.values())
 
     proto, proto_findings = LITREVIEW.validate_protocol(rp)
     findings.extend(proto_findings)
-    rows, screen_findings = LITREVIEW.parse_screening(REPORT.litreview_screening_path(rp))
+    rows, screen_findings = LITREVIEW.parse_screening(LIT.litreview_screening_path(rp))
     findings.extend(screen_findings)
     funnel = LITREVIEW.prisma_funnel(rows)
     cov_findings, cov_advisories = LITREVIEW._coverage_crosscheck(
@@ -400,13 +402,13 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
                        "children": children.get(n.id, []), "words": _synthesis_word_count(n)}
                       for n in nodes.values()]
     return {
-        "report": REPORT._rel_or_name(rp, home),
+        "report": RK._rel_or_name(rp, home),
         "kind": "litreview", "tree": True,
         "root": tree["root"], "node_count": len(nodes), "nodes": node_summaries,
         "funnel": funnel, "protocol_present": proto["present"], "screening_rows": len(rows),
         "contested_status_addressed": LITREVIEW._addresses_contested_status(all_text),
         "B": B, "findings": findings, "advisories": advisories, "status": status,
-        "warnings": REPORT.stale_grounding_warnings(home),
+        "warnings": RK.stale_grounding_warnings(home),
     }
 
 
@@ -419,7 +421,7 @@ def write_rollup_pins(review_path: Path, home: Path | None = None) -> dict[str, 
     rolled_against}`` for nodes touched. Surgical: replaces the ``rolled_against`` block in place,
     leaving other frontmatter byte-for-byte."""
     rp = Path(review_path).resolve()
-    home = REPORT._resolve_home(home, rp)
+    home = RK._resolve_home(home, rp)
     nodes, _ = discover_nodes(rp)
     tree = build_tree(nodes)
     children = tree["children"]
@@ -467,7 +469,7 @@ def add_node(home: Path, slug: str, new_id: str, parent_id: str, *,
     review_dir = home / scope / "litreviews" / slug
     node_path = review_dir / "nodes" / f"{new_id}.md"
     if node_path.exists():
-        return {"node": new_id, "path": REPORT._rel_or_name(node_path, home), "created": False,
+        return {"node": new_id, "path": RK._rel_or_name(node_path, home), "created": False,
                 "parent": parent_id, "reminder": "node already exists — not overwritten"}
     node_path.parent.mkdir(parents=True, exist_ok=True)
     stub = (
@@ -483,9 +485,9 @@ def add_node(home: Path, slug: str, new_id: str, parent_id: str, *,
         f"     references/reviews-tree.md. -->\n")
     node_path.write_text(stub, encoding="utf-8")
     reminder = (f"add [litreview:{new_id}] to `{parent_id}`'s synthesis (the edge), move the "
-                f"relevant [lit:] citations into nodes/{new_id}.md, then `sci litreview {slug} "
+                f"relevant [lit:] citations into nodes/{new_id}.md, then `res litreview {slug} "
                 f"--write-rollup-pins` and re-audit")
-    return {"node": new_id, "path": REPORT._rel_or_name(node_path, home), "created": True,
+    return {"node": new_id, "path": RK._rel_or_name(node_path, home), "created": True,
             "parent": parent_id, "reminder": reminder}
 
 
@@ -494,7 +496,7 @@ def add_node(home: Path, slug: str, new_id: str, parent_id: str, *,
 # --------------------------------------------------------------------------- #
 def _node_heading(node: Node) -> str:
     """A section heading for a node: its frontmatter ``title`` if any, else a Title-Cased id."""
-    fm = REPORT._front_matter(node.body)
+    fm = RK._front_matter(node.body)
     if fm.get("title"):
         return str(fm["title"]).strip()
     return node.id.replace("-", " ").replace("_", " ").strip().title()
@@ -505,7 +507,7 @@ def _node_synthesis(node: Node) -> str:
     removed (the child's section follows inline in the linearization, so the edge marker is noise).
     ``[lit:]``/``[claim:]`` are LEFT for ``report.render_markdown`` to footnote with fresh facts."""
     text = re.sub(r"^---\n.*?\n---\n", "", node.body, count=1, flags=re.DOTALL)
-    text = REPORT._LITREVIEW_RE.sub("", text)
+    text = LIT._LITREVIEW_RE.sub("", text)
     # drop a leading H1 (the linearizer supplies headings) so we don't double-title
     text = re.sub(r"^\s*#\s+.*\n", "", text, count=1)
     return text.strip()
@@ -518,7 +520,7 @@ def linearize(review_path: Path, home: Path | None = None) -> str:
     :func:`report.render_markdown` resolves every fact **fresh** at render (storage ≠ presentation;
     the rendered doc is a disposable view)."""
     rp = Path(review_path).resolve()
-    home = REPORT._resolve_home(home, rp)
+    home = RK._resolve_home(home, rp)
     nodes, _ = discover_nodes(rp)
     tree = build_tree(nodes)
     children = tree["children"]
@@ -550,12 +552,12 @@ def render(review_path: Path, out_path: Path, home: Path | None = None, to: str 
     ``sci report`` markdown→pandoc path. Writes the linearized Markdown to a temporary
     ``.render-<n>.md`` beside ``review.md`` (so relative embeds resolve), renders, then removes it."""
     rp = Path(review_path).resolve()
-    home = REPORT._resolve_home(home, rp)
+    home = RK._resolve_home(home, rp)
     md = linearize(rp, home)
     tmp = rp.parent / f".render-{os.getpid()}.md"
     tmp.write_text(md, encoding="utf-8")
     try:
-        return REPORT.render(tmp, Path(out_path), home=home, to=to)
+        return RK.render(tmp, Path(out_path), home=home, to=to)
     finally:
         try:
             tmp.unlink()
