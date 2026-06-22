@@ -8,7 +8,7 @@ GROUNDED. The robustness signals are exactly the fields a ``grounding_report.jso
 ``primary``, ``mode``, ``tier`` — plus the ``interpretive`` / ``external`` claim kinds.
 """
 
-from scientist.provenance import report as R
+from reportkit import report as R
 
 
 def _index(*claims):

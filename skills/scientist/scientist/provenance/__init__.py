@@ -45,11 +45,14 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-# Canonical locate+load for grounding_report.json, re-exported on the package so callers
-# (store, grounding) reach it as ``provenance.find_report`` / ``provenance.load_report`` /
-# ``provenance.claims_of`` / ``provenance.report_candidates`` / ``provenance.iter_reports``.
-# Pure stdlib leaf module — no import cycle with the rest of the package.
-from ._grounding_io import (  # noqa: F401  (re-exported)
+# Canonical locate+load for grounding_report.json + the read-only experiment.yml ledger
+# primitives, both re-exported on the package so callers (store, grounding, the report engine)
+# reach them as ``provenance.find_report`` / ``provenance.load_report`` / ``provenance.claims_of``
+# / ``provenance.report_candidates`` / ``provenance.iter_reports`` and ``provenance.sha256_file`` /
+# ``provenance.edges``. These now live in the generic ``reportkit`` library (the report engine
+# needs them to ground embeds against the ledger); scientist re-exports them so its surface is
+# unchanged and builds the authoring/validation/staleness layer below on top.
+from reportkit._grounding_io import (  # noqa: F401  (re-exported)
     GROUNDING_REPORT_NAME,
     claims_of,
     find_report,
@@ -57,8 +60,13 @@ from ._grounding_io import (  # noqa: F401  (re-exported)
     load_report,
     report_candidates,
 )
-
-SIDECAR_NAME = "experiment.yml"
+from reportkit._ledger import (  # noqa: F401  (re-exported; the read-only ledger primitives)
+    SIDECAR_NAME,
+    SidecarError,
+    _load_raw,
+    edges,
+    sha256_file,
+)
 
 
 # Lifecycle statuses; common synonyms normalise to these. Unknown values raise a
@@ -84,20 +92,8 @@ _FIELD_ORDER = ["exp_id", "name", "title", "cro", "cro_study_ids", "status",
                 "model", "species", "assays", "asos", "related", "provenance"]
 
 
-class SidecarError(ValueError):
-    """experiment.yml failed validation — message names the field and the problem."""
-
-
-# --------------------------------------------------------------------------- #
-# hashing
-# --------------------------------------------------------------------------- #
-def sha256_file(path: Path) -> str:
-    """Streaming sha256 of a file's bytes (hex)."""
-    h = hashlib.sha256()
-    with Path(path).open("rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
+# ``SidecarError`` and ``sha256_file`` are imported from ``reportkit._ledger`` above (the single
+# home for the read-only ledger primitives); the authoring/validation layer below builds on them.
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -167,20 +163,6 @@ def validate(data: Any) -> dict[str, Any]:
     # a legacy mapping-shaped provenance (old data_fingerprint form) is simply
     # dropped: the experiment then reads as needing a re-review under the new model.
     return out
-
-
-def _load_raw(exp_dir: Path) -> dict[str, Any]:
-    """Parse ``experiment.yml`` to a raw dict (no schema validation). Empty dict if
-    absent; raises only on malformed YAML."""
-    import yaml
-
-    path = Path(exp_dir) / SIDECAR_NAME
-    if not path.is_file():
-        return {}
-    try:
-        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as e:
-        raise SidecarError(f"{path}: invalid YAML: {e}") from e
 
 
 def read_sidecar(exp_dir: Path) -> dict[str, Any]:
@@ -295,15 +277,6 @@ def record_provenance(exp_dir: Path, entries: list[dict], *, repo_root: Path | N
             if isinstance(e, dict) and e.get("artifact") not in ours]
     sidecar["provenance"] = sorted(kept + list(entries), key=lambda e: e["artifact"])
     (Path(exp_dir) / SIDECAR_NAME).write_text(_dump_sidecar_text(sidecar), encoding="utf-8")
-
-
-def edges(sidecar: dict[str, Any], prefix: str | None = None) -> list[dict]:
-    """Provenance entries from a sidecar, optionally filtered by artifact prefix
-    (``'data/'``, ``'analysis/'``, ``'README'``). ``None`` returns all entries."""
-    prov = [e for e in (sidecar.get("provenance") or []) if isinstance(e, dict)]
-    if prefix is None:
-        return prov
-    return [e for e in prov if str(e.get("artifact", "")).startswith(prefix)]
 
 
 # --------------------------------------------------------------------------- #

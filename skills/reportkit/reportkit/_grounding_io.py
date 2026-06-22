@@ -9,8 +9,9 @@ the ``json.load`` + ``data.get("claims")`` shape. This module is the single home
 those two steps; every caller keeps its own *interpretation* of the claims (claim cards,
 lit spans, store records, DAG trace) on top of these primitives.
 
-Pure stdlib; lives in :mod:`provenance` (a leaf-ish package) so it imports nothing from
-``store`` / ``grounding``. Re-exported from :mod:`provenance.report` for discoverability.
+Pure stdlib leaf module (imports nothing else in :mod:`reportkit`). The host skill re-exports
+these names (e.g. ``scientist.provenance.find_report`` / ``…load_report`` / ``…claims_of``) so
+its callers keep their surface.
 """
 
 from __future__ import annotations

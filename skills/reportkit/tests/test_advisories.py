@@ -5,7 +5,7 @@ paragraph (not line) scope, the report-wide restatement filter, skipping ``[repo
 paragraphs, cited-paragraphs-only, and ×↔% normalization with a rounding tolerance.
 """
 
-from scientist.provenance import report as R
+from reportkit import report as R
 
 
 # --- pure number extraction ------------------------------------------------- #
