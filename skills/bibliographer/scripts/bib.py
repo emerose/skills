@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["libkit>=0.4.0", "pypdf>=4.0", "httpx>=0.27", "diskcache>=5.6", "platformdirs>=4.0"]
+# dependencies = ["libkit>=0.5.0", "pypdf>=4.0", "httpx>=0.27", "diskcache>=5.6", "platformdirs>=4.0"]
 # ///
 """bib - a libkit-backed bibliographer for a collection of academic articles.
 
@@ -13,7 +13,7 @@ override with --home or BIBLIOGRAPHER_HOME) containing:
       papers/            the organized files, one per article
       index.html         a self-contained, searchable HTML viewer (auto-regenerated)
 
-libkit (>=0.4.0) IS the store: there is no separate bibliographer database.
+libkit (>=0.5.0) IS the store: there is no separate bibliographer database.
 Each paper is one libkit document; every bibliographic field — DOI, arXiv id,
 authors, venue, year, abstract, tags, citekey, file path — lives in the
 document's free-form ``metadata`` JSON. Paper-level identity (citekeys, dedup
