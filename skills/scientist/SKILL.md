@@ -15,7 +15,9 @@ description: >-
   "which study has the Day-29 knockdown numbers," or "everything we ran with ASO 7," file a new
   CRO/lab delivery, scaffold a new experiment folder, keep a README/summary current, or trace a
   result back to the original measurements — even if they don't say "scientist." For a personal
-  library of published academic papers (DOIs, arXiv, PMIDs, PDFs), use bibliographer instead.
+  library of published academic papers (DOIs, arXiv, PMIDs, PDFs), use bibliographer instead; for
+  literature reviews, `[lit:]` claims grounded on published papers, or bibliometric claims about
+  the literature, use research instead.
 ---
 
 # Scientist
