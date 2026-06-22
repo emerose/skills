@@ -51,9 +51,7 @@ Each phase's detail lives in `references/` and is loaded only when you need it. 
 | &nbsp;&nbsp;↳ deep reference for the structural / staleness / semantic audit passes (`sci check` / `sci audit` / parallel-agent) | [references/auditing.md](references/auditing.md) |
 | Author a human-facing **report** from grounded claims — `sci report` mechanics (cite `[claim:<id>]`, embed grounded figures, audit + render) | [references/report.md](references/report.md) |
 | &nbsp;&nbsp;↳ when **drafting the report prose**: voice/structure, literature-sweep & disconfirming-evidence discipline, the generation brief, the fresh-context §3 + voice/tone reviews | [references/report-authoring.md](references/report-authoring.md) |
-| Author a neutral **literature survey** (`kind=litreview`) — an assessed map of the third-party literature a report argues *from*, with a committed PROSPERO/PRISMA `protocol.md` + `screening.jsonl`; reports cite it via `[litreview:]` and pin to its search protocol | [references/litreview.md](references/litreview.md) |
-| &nbsp;&nbsp;↳ when a review **outgrows one document**: store it as a **node tree** (`nodes/` + `[litreview:<child>]` edges; the root rollup *is* the review) — split/merge seams, rollups, conflict-survival, `sci litreview add-node`/`--write-rollup-pins`/`--render` | [references/reviews-tree.md](references/reviews-tree.md) |
-| Extract a paper's **attributed claim set** once (`sci paper-claims`) into a per-paper JSONL so an external `[lit:]` cite resolves to a pre-extracted, quote-pinned record instead of being re-authored per citation | [references/paper-claims.md](references/paper-claims.md) |
+| Do a **literature review / survey** (`kind=litreview`), extract a paper's **attributed paper-claims**, ground a third-party fact as a `[lit:]` claim, or assert a **bibliometric** claim about the literature | → the separate **[research](../research/SKILL.md)** skill (the `res` CLI). scientist is experiments-only; a `sci report` can *cite* `[lit:]`/`[litreview:]` when research is installed (see [references/report.md](references/report.md) → `[lit:]`). |
 
 `data/` naming convention + assay vocabulary: [references/naming.md](references/naming.md).
 Private CRO vocabulary (your real vendor names): [references/vocab.example.yml](references/vocab.example.yml).
@@ -141,8 +139,10 @@ Read the repo-wide [AGENTS.md](../../AGENTS.md) first: improve-as-you-go, push r
 and verify changes on throwaway data. Per-phase maintenance notes live in each `references/` file;
 the open direction (finer-grained provenance, program-level traceability) is in
 [ROADMAP.md](ROADMAP.md) — claim↔prose enforcement, the reproduction audit, and the terminal
-**report** phase (`claims → report`, see [report.md](references/report.md)) are shipped. A neutral
-**litreview** survey (`kind=litreview`, see [litreview.md](references/litreview.md)) sits alongside
-reports as a thesis-independent map of the third-party literature — with a committed PROSPERO/PRISMA
-protocol + screening log making its method auditable; reports cite it via `[litreview:]` and pin to
-its search protocol.
+**report** phase (`claims → report`, see [report.md](references/report.md)) are shipped. The
+**literature layer** — neutral litreviews (`kind=litreview`), per-paper paper-claims, and
+`[lit:]`/bibliometric claims — has been **split out into the separate
+[research](../research/SKILL.md) skill** (the `res` CLI). A `sci report` can still *cite*
+`[lit:]`/`[litreview:]` when research is installed (the citation layer registers with the shared
+`reportkit` engine), but scientist no longer owns the literature docs or commands; work on those in
+research.

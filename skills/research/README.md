@@ -27,8 +27,11 @@ research/
     cli_utils.py       # CLI helpers (home resolution)
   scripts/res.py       # the `res` CLI (PEP 723; zero-install via uv)
   bin/res              # launcher shim
+  references/          # the literature guides: lit-claims, litreview, reviews-tree, paper-claims
   tests/               # the literature test suite
 ```
+
+See [SKILL.md](SKILL.md) → *Pick the task → load the reference* for the `references/` guide index.
 
 ## Dependencies
 

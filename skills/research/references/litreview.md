@@ -1,10 +1,12 @@
 # Literature reviews — `kind=litreview` (a neutral evidence map)
 
 > Load this when authoring, auditing, consuming, or updating a **litreview**. It builds on the
-> report machinery: the `[lit:]` grounding rubric and the authoring/voice discipline in
-> [report-authoring.md](report-authoring.md), and the citation/audit/render mechanics in
-> [report.md](report.md). This file is only the part that is *specific to a litreview*; it does
-> not restate the `[lit:]` rules or the sweep method.
+> claim machinery: the `[lit:]` grounding rubric in [lit-claims.md](lit-claims.md), the
+> authoring/voice discipline in
+> [report-authoring.md](../../scientist/references/report-authoring.md), and the report
+> citation/audit/render mechanics in [report.md](../../scientist/references/report.md). This file is
+> only the part that is *specific to a litreview*; it does not restate the `[lit:]` rules or the
+> sweep method.
 
 A **litreview** is a thesis-independent survey of the **third-party literature** on one
 sub-question — an organized, assessed map of what the field reports, who reports it, how strong
@@ -41,7 +43,7 @@ works to *represent the literature faithfully* and point the reader to the prima
   it does not belong here.
 - **Not internal data.** A litreview surveys only external literature: its claims are `[lit:]` only.
   It never grounds on a Kicho `[claim:]`. Kicho data meets the literature in the *report*, where the
-  feasibility-vs-validation line is drawn (see [report-authoring.md](report-authoring.md) →
+  feasibility-vs-validation line is drawn (see [report-authoring.md](../../scientist/references/report-authoring.md) →
   *Derive; don't presuppose*). Keeping Kicho data out keeps the litreview the genuinely independent
   picture.
 - **Not the library.** The bibliographer library is the corpus (papers, full text, search). A
@@ -67,11 +69,11 @@ underscores** (a Python module name can't carry a hyphen — litreview `it-aso-b
 `program/claims/test_litreview_it_aso_biodistribution.py`), so its `[lit:]` claims belong to the
 litreview. The `protocol.md` and `screening.jsonl` are **committed artifacts** that make the
 survey's *method and screening* auditable — the integrity anchor that replaced the old hand-tagged
-must-confront set (see *The PROSPERO/PRISMA discipline* below). `sci new-litreview <slug>` scaffolds
+must-confront set (see *The PROSPERO/PRISMA discipline* below). `res new-litreview <slug>` scaffolds
 all five files.
 
 `slug` is the litreview-folder name. One litreview per **major sub-question**, not one giant program
-review — match the supporting-report decomposition [report-authoring.md](report-authoring.md) already
+review — match the supporting-report decomposition [report-authoring.md](../../scientist/references/report-authoring.md) already
 encourages (e.g. `it-aso-biodistribution`, `ube3a-dosage-biology`). Per-question scope also *bounds*
 the completeness problem: "complete on IT biodistribution" is tractable; "complete on everything" is
 not. A report cites the 1–3 litreviews its argument spans.
@@ -83,7 +85,7 @@ not. A report cites the 1–3 litreviews its argument spans.
 > root rollup *is* the review. A flat `review.md` is just the degenerate one-node tree (no
 > migration). The whole of this file still applies at the **root / review level**; the tree adds
 > split/merge seams, rollups, and the conflict-survival obligation. See
-> [reviews-tree.md](reviews-tree.md). `sci litreview` audit/render are tree-aware automatically.
+> [reviews-tree.md](reviews-tree.md). `res litreview` audit/render are tree-aware automatically.
 
 A litreview reads like a review article: a **synthesis organized by the themes of the field**,
 engaging specific studies and their numbers, showing where the literature agrees, conflicts, and is
@@ -126,7 +128,7 @@ half of "be critical" we keep; the evaluative half — *your* judgment of who is
 **Be a roadmap to the primary literature.** Name the studies and their systems *in the prose*, not
 only in footnotes, so the review doubles as a finding-aid. Every load-bearing statement resolves to a
 `[lit:]` claim pinned to a specific paper — and always the **primary** source (see
-[report-authoring.md](report-authoring.md) → *Always cite the primary source*).
+[report-authoring.md](../../scientist/references/report-authoring.md) → *Always cite the primary source*).
 
 **The shape — adapt to the evidence, never template:**
 
@@ -180,8 +182,8 @@ in the missing evidence, not to add an "Absent:" paragraph.
 ## The claim backbone — `[lit:]` as usual
 
 Every load-bearing assertion is a grounded `[lit:]` claim authored exactly as in
-[report.md](report.md) → *Authoring and reviewing a literature claim*: `source(quote=, paraphrase=)`,
-the locator ladder → strength ceiling, the caller-records `sci judge` support loop, independence via
+[lit-claims.md](lit-claims.md) → *Authoring and reviewing a literature claim*: `source(quote=, paraphrase=)`,
+the locator ladder → strength ceiling, the caller-records `res judge` support loop, independence via
 `group=`, primary/secondary. None of that changes. The litreview's claim module is just where those
 claims now live (per-litreview, so parallel authors don't collide), instead of a per-report
 `test_literature_<slug>.py`.
@@ -197,7 +199,7 @@ def test_floor_developmentally_gated():
 **Bibliometric claims belong here too.** A claim *about the literature* — "the most-cited result on
 this question is X," "Y is rarely replicated" — is third-party and litreview-legal, but it cannot be
 quote-grounded (no paper states its own citation count). Author it as a `@kind("bibliometric")`
-claim grounded on a stored OpenAlex metric via `cited_by()`/`metric()` (see [report.md](report.md) →
+claim grounded on a stored OpenAlex metric via `cited_by()`/`metric()` (see [lit-claims.md](lit-claims.md) →
 *Bibliometric claims*) and cite it `[lit:]` like any other. These are precisely the meta-claims a
 litreview is tempted to assert as an ungrounded flourish; ground them or cut them.
 
@@ -265,7 +267,7 @@ network), then pipe its JSON into the screening log:
 
 ```bash
 bib discover "intrathecal ASO biodistribution" --json > discover.json
-sci litreview program/litreviews/it-aso-biodistribution/review.md --ingest-discover discover.json
+res litreview program/litreviews/it-aso-biodistribution/review.md --ingest-discover discover.json
 ```
 
 Each result becomes a row with `decision` **unset** — `id` from doi/arxiv_id/pmid, `source` from
@@ -312,8 +314,8 @@ contested literature — is no longer a `sci`-enforced check against a hand-tagg
 two fresh-context critics, both reading the **screening log** rather than the author's memory: the
 survey-side completeness critic (did the survey screen in and confront the disconfirmers?) and the
 report-side completeness critic already mandated for the report phase (does the report's argument
-engage the survey's screened-in evidence, or quietly skip it?). See [report.md](report.md) →
-`[litreview:]` and [review-audit.md](review-audit.md). The report's only **mechanical** obligation to
+engage the survey's screened-in evidence, or quietly skip it?). See [report.md](../../scientist/references/report.md) →
+`[litreview:]` and [review-audit.md](../../scientist/references/review-audit.md). The report's only **mechanical** obligation to
 the survey is the staleness pin below.
 
 **Prerequisite — regenerate the full transitive grounding tree first.** Auditing a consuming report's
@@ -323,15 +325,15 @@ dependency's grounding. Those `grounding_report.json` files are **gitignored / r
 fresh checkout has none: if *any* upstream is missing or stale, the report shows `BROKEN` on that
 upstream and **downstream results are masked**. So before auditing the consumption: regenerate the
 whole transitive tree (`pytest … --grounding-out …` for each cited experiment and each
-`[report:]`/`[litreview:]` dep), then run `sci report`. (See [report.md](report.md) → *Running* and
-[review-audit.md](review-audit.md) → the grounding-report regeneration note — a missing gitignored
-grounding is a regenerate step, not a defect to backfill.)
+`[report:]`/`[litreview:]` dep), then run `sci report`. (See [lit-claims.md](lit-claims.md) → *Running*
+and [review-audit.md](../../scientist/references/review-audit.md) → the grounding-report regeneration
+note — a missing gitignored grounding is a regenerate step, not a defect to backfill.)
 
 ## Staleness — the search protocol is the invalidation boundary
 
 A report Y that cites `[litreview:X]` pins to **X's registered search method** — a sha over X's
 `protocol.md` *Search queries* body plus its front-matter `as_of` and `sources`, recorded the way
-`@reviewed(sha=)` pins a paper's text (see [report.md](report.md)). When X changes:
+`@reviewed(sha=)` pins a paper's text (see [lit-claims.md](lit-claims.md)). When X changes:
 
 - **Blocking** (`stale-litreview`): X's registered search changed — a new/edited query, a refreshed
   `as_of` snapshot, or an added/dropped source. That is the one event that can invalidate Y's claim to
@@ -369,10 +371,10 @@ green until X's search actually drifts. The pin is a sha over X's protocol `Sear
 ## Keeping a citing report current — the cheap path
 
 Steady-state maintenance of a report when its litreview moves is the **scoped, incremental update**
-in [report-authoring.md](report-authoring.md) → *Keeping a report current* — **not** a from-scratch
+in [report-authoring.md](../../scientist/references/report-authoring.md) → *Keeping a report current* — **not** a from-scratch
 regeneration (which is explicit-only, a debugging step). The cheap mechanism:
 
-1. **Mechanical filter (free).** `sci litreview <slug> --delta <baseline>` emits the claim-set delta
+1. **Mechanical filter (free).** `res litreview <slug> --delta <baseline>` emits the claim-set delta
    (added/removed claims, strength changes, retractions). If the delta intersects none of Y's surface
    — no claim Y cites, no paper Y references — and the protocol pin still matches, re-pin Y silently.
 2. **Scoped delta-judge (cheap).** For a delta that *does* intersect Y, hand a **fresh-context**
@@ -380,7 +382,7 @@ regeneration (which is explicit-only, a debugging step). The cheap mechanism:
    the paragraphs the tool flags as likely-affected, and ask the narrow question per delta item:
    *does this force a change to Y, or can Y stand (perhaps with a new citation)?* → `no-impact` /
    `add-citation` / `needs-rewrite` / `needs-rederivation`. Record the verdict pinned to the delta
-   sha (like `sci judge`), so a green re-pin is *inspectable* ("judged immaterial by judge J on date
+   sha (like `res judge`), so a green re-pin is *inspectable* ("judged immaterial by judge J on date
    D"), not "nobody looked".
 3. **Escalate** only on a `needs-rewrite`/`needs-rederivation`, or when the **cumulative-drift cap**
    trips (too many cheap re-pins since Y's last from-scratch derivation, or too much of X's screened
@@ -396,16 +398,16 @@ paragraph the topic-match missed.
 Authoring a litreview *starts* with the same broad parallel sweep a report does — fan out research
 subagents, each beginning with `bib discover` per the bibliographer
 [literature-search protocol](../../bibliographer/references/literature-search.md), bank selectively
-(responsive, or germane-and-highly-ranked — see [report-authoring.md](report-authoring.md) →
+(responsive, or germane-and-highly-ranked — see [report-authoring.md](../../scientist/references/report-authoring.md) →
 *Bank selectively*), require disconfirming evidence. The litreview adds only the **assessment** layer
 on top of the gathered corpus: pre-register the protocol, **screen the full retrieved set** into
 `screening.jsonl` (seed it with `--ingest-discover`, then decide each), organize by question, ground
 the load-bearing assertions as `[lit:]` claims, write the controversies and gaps. Retrieval is
 bibliographer; judgment is here.
 
-After the sweep, run `sci coverage --query "<this survey's topic>"` — banked-but-unclaimed papers
+After the sweep, run `res coverage --query "<this survey's topic>"` — banked-but-unclaimed papers
 **relevant to the topic** are the worklist of assertions the survey still owes. Use the **topic-scoped**
-form: unscoped `sci coverage` is a coarse library-wide tally that returns *every* uncited paper, unranked
+form: unscoped `res coverage` is a coarse library-wide tally that returns *every* uncited paper, unranked
 and polluted with off-topic noise — useless for a single sub-question (`--since` narrows by date but not
 by topic). `--query` intersects the uncited set with a `bib query` and ranks it by relevance, which is
 the actual per-survey worklist; a topic-scoped `bib query` does the same by hand. Treat it as one
@@ -425,7 +427,7 @@ path; the broad sweep above is for genuinely new ground. Two things make it safe
   for a node-name collision before moving (two `test_floor`s would become ambiguous) and rename if so;
   then re-run grounding so the moved claims land in the new module's grounding report.
 - **Surface deferred coverage hits, don't bury them.** A restructure is deliberately *not* a fresh
-  sweep — but `sci coverage` will still surface on-topic library papers no claim cites. Don't silently
+  sweep — but `res coverage` will still surface on-topic library papers no claim cites. Don't silently
   ignore them, and don't cold-sweep them either: list them in the **Gaps** section as candidates for a
   later assessment pass, so the deferral is *visible*. A restructured litreview that lists zero such
   candidates on a well-studied topic is suspiciously tidy.
@@ -446,7 +448,7 @@ audit's only hard structural check is that a gaps section exists. Before a litre
 **delegate a completeness/fairness review to a fresh-context subagent** — the litreview author is
 blind to the question they didn't ask.
 Hand it `review.md`, the cited claims' statements/strengths/sources, the `prompt.md` (for sub-topic
-coverage), and the topic-scoped `sci coverage --query "<this survey's topic>"` worklist (the
+coverage), and the topic-scoped `res coverage --query "<this survey's topic>"` worklist (the
 unscoped tally is too noisy to hand a critic — see *Gathering*). Prompt it adversarially:
 
 > *What sub-question relevant to the scope got no coverage? What claim is characterized as settled
@@ -507,19 +509,19 @@ home-literature into this critic's sights: do not flag the survey for "incomplet
 neighbouring topic it deliberately delegated. The critic's coverage bar is this survey's own
 sub-question, not the union of every scope it touches at the edges.
 
-## `sci litreview` — build / audit / ingest / index / render / delta
+## `res litreview` — build / audit / ingest / index / render / delta
 
 ```bash
-sci new-litreview <slug>                            # SCAFFOLD: folder + review.md + protocol.md + screening.jsonl + prompt.md + module
-sci litreview <review.md> [--home H] [--json]       # AUDIT: [lit:] backed; gaps present; protocol + screening committed; cited papers screened-in
-sci litreview <review.md> --ingest-discover d.json  # seed screening.jsonl from `bib discover --json` (decision unset, de-duped by id)
-sci litreview <review.md> --render review.pdf       # RENDER: linearize tree → review.pdf; COMMIT beside review.md as the deliverable [--to pdf|html|docx]
-sci litreview <review.md> --trace                   # litreview -> each [lit:] claim -> paper
-sci litreview <review.md> --delta base.json [--json]  # claim-set delta vs a baseline (the cheap-update filter)
-sci litreview <review.md> --index                   # upsert into the store as kind=litreview
+res new-litreview <slug>                            # SCAFFOLD: folder + review.md + protocol.md + screening.jsonl + prompt.md + module
+res litreview <review.md> [--home H] [--json]       # AUDIT: [lit:] backed; gaps present; protocol + screening committed; cited papers screened-in
+res litreview <review.md> --ingest-discover d.json  # seed screening.jsonl from `bib discover --json` (decision unset, de-duped by id)
+res litreview <review.md> --render review.pdf       # RENDER: linearize tree → review.pdf; COMMIT beside review.md as the deliverable [--to pdf|html|docx]
+res litreview <review.md> --trace                   # litreview -> each [lit:] claim -> paper
+res litreview <review.md> --delta base.json [--json]  # claim-set delta vs a baseline (the cheap-update filter)
+res litreview <review.md> --index                   # upsert into the store as kind=litreview
 ```
 
-**Start with `sci new-litreview <slug>`** — it stubs the folder, `review.md`, `protocol.md`,
+**Start with `res new-litreview <slug>`** — it stubs the folder, `review.md`, `protocol.md`,
 `screening.jsonl`, `prompt.md`, and the **correctly-named** claim module
 (`test_litreview_<slug-underscored>.py`), removing the highest-risk manual steps. Then pre-register
 the search in `protocol.md`, `--ingest-discover` your `bib discover` output and screen each candidate,
@@ -531,11 +533,11 @@ front matter automatically (no manual paste).
 
 The `--delta` baseline is just an older copy of the grounding report — the git part stays yours:
 `git show <ref>:program/analysis/grounding_report.json > base.json`, then
-`sci litreview <review.md> --delta base.json`. It reports the claims that were added/removed or
+`res litreview <review.md> --delta base.json`. It reports the claims that were added/removed or
 drifted, the worklist the cheap-update delta-judge weighs (see *Keeping a citing report current*).
 
 The **audit** validates mechanically (a failure → `BROKEN`, exit 1): every `[lit:]` claim resolves
-and is `backed` by the `lit_verdict` rule in [report.md](report.md); a **gaps** section is present;
+and is `backed` by the `lit_verdict` rule in [lit-claims.md](lit-claims.md); a **gaps** section is present;
 the **protocol** is committed and complete (`missing-protocol` / `missing-protocol-field`); the
 **screening log** parses and accounts for every candidate (`malformed-screening-row`,
 `excluded-without-reason`); and the **coverage cross-check** holds — every `[lit:]`-cited paper is an
@@ -555,16 +557,16 @@ coverage is *fair* — beyond the mechanical cross-check — is the completeness
 The `stale-litreview` protocol pin lives in the **report** audit (`sci report`), since it is a
 property of the *consuming* report — see *Consumption* / *Staleness*.
 
-## Maintaining (for agents working ON scientist)
+## Maintaining (for agents working ON research)
 
-The litreview parse/audit/index lives in `scientist/provenance/litreview.py`, store-free at its core
-like `report.py`/`trace.py` (PyYAML + stdlib). It **reuses** `report.py`'s `parse_report`,
-`index_claims`, `lit_verdict`, and `render_markdown` — a litreview is `[lit:]`-only report-shaped
-Markdown, so do not re-implement citation parsing or the `[lit:]` verdict. The protocol parsing
-(`parse_protocol`, `litreview_protocol_pin_sha`) lives in `report.py` (the store-free base) so both
-the survey audit and the consuming report's pin can read it; protocol/screening **validation**, the
-funnel, the coverage cross-check, and `--ingest-discover` are in `litreview.py`. The `[litreview:]`
-citation regex and the protocol-keyed `stale-litreview` pin are in `report.py`'s report audit. The
-`kind=litreview` store card is `_meta.litreview_card_markdown` + `_store.upsert_litreview`, mirroring
-the report card. Keep the `[lit:]` rule and `claim_id` format identical across all of this and §3 — a
-drift in one is a drift in all.
+The litreview parse/audit lives in `research/litreview.py`, store-free at its core (PyYAML + stdlib).
+It **reuses** the generic report engine `reportkit.report`'s `parse_report`, `index_claims`,
+`lit_verdict`, and `render_markdown` — a litreview is `[lit:]`-only report-shaped Markdown, so do not
+re-implement citation parsing or the `[lit:]` verdict. The protocol parsing (`parse_protocol`,
+`litreview_protocol_pin_sha`) lives in `reportkit.report` (the store-free base) so both the survey
+audit and the consuming report's pin can read it; protocol/screening **validation**, the PRISMA
+funnel, the coverage cross-check, and `--ingest-discover` are in `research/litreview.py`. The
+`[lit:]`/`[litreview:]` citation layer (the citation regex and the protocol-keyed `stale-litreview`
+pin) is in `research/literature_cites.py`, which registers those schemes with the shared `reportkit`
+engine on import. Keep the `[lit:]` rule and `claim_id` format identical across all of this and §3 (the
+scientist prose↔claims pass) — a drift in one is a drift in all.

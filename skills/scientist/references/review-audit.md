@@ -154,7 +154,7 @@ survey miss a sub-question, mischaracterize a claim, or exclude a disconfirmer o
 reading the survey's committed `protocol.md` + `screening.jsonl`. `sci report` itself adds only the
 mechanical **protocol-keyed `stale-litreview` pin** (the survey's registered search changed since the
 report pinned it) — there is no omissions gate. Both are distinct from this prose↔claims check — see
-[litreview.md](litreview.md) (and [report.md](report.md) → `[litreview:]`).
+[litreview.md](../../research/references/litreview.md) (and [report.md](report.md) → `[litreview:]`).
 
 ## Structural check
 
@@ -171,33 +171,16 @@ The `data/` edges have their own re-extraction audit (determinism, grounding, re
 reconciliation, naming) plus the full cell-coverage check — see [extract.md](extract.md) (`audit.py`,
 `cellcov.py`). Because the data edges live in the same `provenance` list, stock `sci audit` checks them too.
 
-## Claims coverage — is the grounding keeping up with the library?
+## Claims coverage — moved to the `research` skill
 
-```bash
-sci coverage --query "<topic>" [--since 2026-06-16] [--home H] [--json]   # uncited papers relevant to a topic
-sci coverage [--since 2026-06-16] [--home H] [--json]                     # coarse library-wide tally
-```
-The completeness counterpart to `sci report`: the audit checks that the citations a report *wrote*
-resolve; `coverage` checks the opposite gap — papers banked into the bibliographer library that **no
-grounded literature claim cites**. A literature sweep that grows the library by dozens of papers while
-the claim set stays put is the silent failure (the library looks like diligence, the audit stays green,
-the grounding quietly stagnates). It diffs the library citekeys (`bib list --json`) against the
-citekeys any claim cites (`evidence.lit_sources`).
-
-**Use the topic-scoped form for a per-report worklist.** Bare `sci coverage` is a **coarse,
-library-wide tally** — it returns *every* uncited paper newest-first, which on a real library is
-hundreds of rows, unranked and polluted with off-topic noise, useless for a single report or
-sub-question. `--query "<topic>"` intersects the uncited set with a `bib query` and **ranks it by
-relevance**, which is the actual per-report worklist (a topic-scoped `bib query` by hand does the
-same). `--since` narrows by *date* but not by *topic*, so it does not substitute for `--query`.
-
-It is a **worklist generator, not a gate** (always exit 0) and **one mechanical input to completeness,
-not the whole leg**: the set-difference is mechanical, but judging which uncited papers are load-bearing
-enough to deserve a claim is an agent's job — ideally a fresh-context **completeness critic** that reads
-the flagged papers and proposes claims (or strength upgrades where a paper adds an independent group).
-Run the topic-scoped form after a sweep; treat a pile of recently-banked, on-topic uncited papers as the
-prompt to write the claims the sweep earned. The bibliographer CLI is found via `--bib`,
-`$SCIENTIST_BIB_CMD`, the sibling `bib.py`, or `bib` on PATH (it needs `$BIBLIOGRAPHER_HOME`).
+"Is the grounding keeping up with the bibliographer library?" — papers banked but cited by **no**
+grounded literature claim — is a **literature** concern, now owned by the
+[research](../../research/SKILL.md) skill (`res coverage`): `res coverage --query "<topic>"` is the
+topic-scoped per-report worklist, bare `res coverage` the coarse library-wide tally. It is a worklist
+generator, not a gate, and one mechanical input to completeness — the full discipline (topic-scoped vs
+library-wide, the completeness critic) lives in
+[research/references/litreview.md](../../research/references/litreview.md) → *Gathering*. scientist's
+own audit (above) covers the `[claim:]`↔prose link; the library↔literature-claim gap is `res`'s.
 
 ## Claims: grounding report + rollup
 
