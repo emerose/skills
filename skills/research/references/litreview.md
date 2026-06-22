@@ -313,8 +313,13 @@ re-survey of the neighbour is out of scope.
 contested literature — is no longer a `sci`-enforced check against a hand-tagged set. It is carried by
 two fresh-context critics, both reading the **screening log** rather than the author's memory: the
 survey-side completeness critic (did the survey screen in and confront the disconfirmers?) and the
-report-side completeness critic already mandated for the report phase (does the report's argument
-engage the survey's screened-in evidence, or quietly skip it?). See [report.md](../../scientist/references/report.md) →
+report-side completeness critic already mandated for the report phase. The latter has two axes: (i)
+does the report's argument *engage* the screened-in evidence of the litreviews it cites, or quietly
+skip it; and (ii) is each load-bearing subtopic backed by litreview-level context **at all** — or is
+it argued from a cherry-picked handful with no survey behind it (the `unsurveyed-subtopic` verdict in
+[report-authoring.md](../../scientist/references/report-authoring.md) → *Required: the §3 pass*)? The
+second axis is what makes "consult the literature via litreviews" a standing obligation rather than an
+option, while leaving per-detail `[lit:]` paper cites free. See [report.md](../../scientist/references/report.md) →
 `[litreview:]` and [review-audit.md](../../scientist/references/review-audit.md). The report's only **mechanical** obligation to
 the survey is the staleness pin below.
 

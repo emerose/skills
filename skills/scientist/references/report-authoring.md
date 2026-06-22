@@ -112,7 +112,62 @@ useful report is the one that surfaces where the program may be wrong.
 ## Research and composition
 
 Reports are how the program's understanding grows, so a report should *leave the system
-smarter*, not just answer one question:
+smarter*, not just answer one question.
+
+### Consult the literature through litreviews — read the relevant ones, run new ones as needed
+
+A report **argues**; a [litreview](../../research/references/litreview.md) (`kind=litreview`) is the
+**neutral, thesis-independent evidence map** the argument draws *from*. The report's job is to
+guarantee it argues from a **surveyed field**, not a cherry-picked handful or whatever you already
+knew — and the litreview is what assures that context. So a report's literature consultation runs on
+two tracks that coexist:
+
+- **Context (the standing obligation).** Each load-bearing subtopic the report rests on should be
+  covered by a litreview — an *existing* one you read, or a *new* one you run. This is what stops a
+  report arguing into a vacuum; the litreview is the durable, reusable survey that establishes the
+  lay of the field (what's reported, how strong each piece is, where it conflicts or is silent).
+- **Detail (encouraged, unchanged).** Reading and citing *individual papers* `[lit:]` for specific
+  load-bearing facts is first-class and welcome — the litreview does **not** replace per-detail
+  citation. The point of the litreview is *context assurance*, not a citation monopoly.
+
+The graduated rule: **lean on a litreview for a subtopic's context; cite individual papers freely for
+the details.** Background and one-off edge-facts can stay a bare reference or an inline `[lit:]`; a
+*full survey is not owed for every passing mention*. What's owed is that the report's load-bearing
+subject area is contextualized by litreview-level coverage. The report-side completeness critic (see
+*Required: the §3 pass* and [litreview.md](../../research/references/litreview.md) → *Required: a
+completeness critic*) is what enforces this — it is a judgment, **not** a `sci report` tripwire.
+
+**Per subtopic, run this branch before sweeping it cold:**
+
+1. **Discover** what context already exists. `res litreview --list` scans every litreview in the data
+   tree with its registered question + PRISMA funnel — the at-a-glance "what's already surveyed" view;
+   `res query --kind litreview "<subtopic>"` is the semantic cross-check. Read this *before* deciding
+   to run anything.
+2. **Judge coverage.** Does an existing litreview's registered *Question & scope* actually cover this
+   subtopic, and is its search-protocol pin fresh (no `stale-litreview`)?
+3. **Branch:**
+   - **Covered + fresh** → read it, draw the subtopic's context from it, cite `[litreview:<id>]`, and
+     record the pin (`sci report --write-pins`). No new sweep.
+   - **Covered + stale/grown** → run the cheap delta-judge / re-sweep (see litreview.md → *Keeping a
+     citing report current*), then cite.
+   - **Partially covered** → extend the existing survey (`res litreview <slug> --add-node …`) or run a
+     focused sibling litreview, rather than duplicating it.
+   - **Not covered** → run a **new** litreview. "Run a litreview" does **not** mean "run a full PRISMA
+     tree": a flat one-node `review.md` is the documented degenerate case (see
+     [reviews-tree.md](../../research/references/reviews-tree.md)), so a new survey starts as light as
+     the subtopic warrants and grows later — which is what keeps the first report into a fresh area
+     from paying for a dozen full surveys at once.
+
+**The broad sweep is the litreview's gathering step.** The fan-out below (parallel research subagents,
+each starting with `bib discover`) still happens — but its *durable output is a litreview* (screened
+into `screening.jsonl`, assessed, the load-bearing assertions grounded as `[lit:]` claims), not a pile
+of report-private `test_literature_<slug>.py` claims. A litreview *starts* with exactly the sweep a
+report's research phase does (see [litreview.md](../../research/references/litreview.md) → *Gathering
+stays in bibliographer*); the survey adds the PRISMA assessment layer on top. The inline
+`test_literature_<slug>.py` module survives only for genuine **edge-facts** — a single detail not worth
+a survey — not for a subtopic's whole context.
+
+The discipline that governs that sweep — whether it feeds a litreview or a one-off `[lit:]` cite:
 
 - **Always cite the *primary* source — track it down, don't relay.** If author A established
   finding X, cite **A's own paper**, even when you first met X somewhere else: in a review or
@@ -131,11 +186,12 @@ smarter*, not just answer one question:
   unobtainable — and then say so explicitly. (A Kicho report's own *grounded `[claim:]`s* are
   primary — they rest on Kicho's measured data — and are cited via `[report:<id>]`/`[claim:<id>]`
   as normal; this rule is about not relaying *third-party* findings through a report.)
-- **Sweep the literature *before* you write, not after.** The broad search below is step one,
-  not a citation-gathering afterthought: do it first, then write the report on the evidence it
-  surfaces. Writing first and back-filling citations produces a report built on whatever you
-  already knew — and a thin library — which is exactly backwards. If you've already drafted on a
-  thin base, re-derive the conclusions against the full sweep before considering it done.
+- **Sweep the literature *before* you write, not after.** The consult-and-survey step above is
+  step one, not a citation-gathering afterthought: read the existing litreviews and run the ones a
+  subtopic still needs *first*, then write the report on the evidence they map. Writing first and
+  back-filling citations produces a report built on whatever you already knew — and a thin library —
+  which is exactly backwards. If you've already drafted on a thin base, re-derive the conclusions
+  against the surveyed evidence before considering it done.
 - **Do the literature search in subagents, and make it broad.** A literature-heavy report
   needs real depth. Fan out parallel research subagents — one per sub-topic spanning the
   report's whole subject area, not just its headline question (for a per-tissue knockdown
@@ -153,6 +209,10 @@ smarter*, not just answer one question:
   to each, and an evidence-strength/gaps assessment. Eight focused
   sub-topic agents will surface ~100+ relevant papers; a thin single-pass search surfaces a
   dozen. If your sweep returns only the handful you end up citing, it was too shallow — go wider.
+  Each sub-topic sweep is a litreview's gathering step: seed its candidates into the survey's PRISMA
+  log (`res litreview <slug> --ingest-discover <bib-discover.json>`) and screen each to
+  included/excluded, so the durable output is an assessed survey, not a per-report digest that
+  evaporates after the report ships.
 - **Require disconfirming evidence in the sweep.** A sweep that only confirms is a steered
   sweep. Each research subagent must surface what *cuts against* the report's likely conclusion
   — contradicting studies, tolerated exceptions, fixed-dose phenotypic variability, regimes
@@ -208,6 +268,14 @@ smarter*, not just answer one question:
   end-to-end. This keeps each report focused and the sub-conclusion reusable. (Internal
   shorthand only: don't call these "lemmas" or anything jargon-y in the report text — each is
   just a report.)
+  - **Litreview vs. supporting report — neutral map vs. drawn conclusion.** Decompose into a
+    **supporting report** (`[report:]`) when the sub-question has its own *answer* the parent leans
+    on ("what should the dose be," "does the evidence support route X"). Decompose into a
+    **litreview** (`[litreview:]`) when what the parent needs is the *neutral evidence map* of a
+    subtopic — "what does the field report about ASO CNS biodistribution" — with no conclusion drawn.
+    A litreview is thesis-independent and reusable across reports that argue opposite sides; a
+    supporting report commits to a finding. Reach for the litreview to establish a subtopic's
+    context, the supporting report to settle a sub-conclusion.
   - **A supporting report is a natural unit of work to hand a sub-agent.** Just as the
     literature sweep fans out (above), you can spawn a sub-agent to *author* a whole supporting
     report — it returns a `GROUNDED`, `[report:]`-able result the parent cites. Escalate to this
@@ -288,9 +356,11 @@ The question, and the frame for answering it — the decomposition, the bar, the
 The values or conclusions not to bake in for *this* question, and the specific disconfirming
 evidence to hunt for (named, not generic).
 
-## Sub-topics to sweep (scope — each an open question)
-One bullet per sub-topic spanning the whole subject area, not just the headline question; close
-with an explicit "required disconfirming evidence" line.
+## Sub-topics to survey (scope — each an open question, each backed by a litreview)
+One bullet per sub-topic spanning the whole subject area, not just the headline question. For each,
+name the litreview that establishes its context — an existing one to read (`res litreview --list` /
+`res query --kind litreview`) or a new one to run — so the report argues from a surveyed field, not a
+cold per-topic sweep. Close with an explicit "required disconfirming evidence" line.
 
 ## Suggested spine
 The logical order for the write-up. Omit if it is obvious from the task.
@@ -415,7 +485,11 @@ re-check the citation presence the audit already passed):
   `abstract-only`/`weak-locator`/`interpretive`/`external`) — hand all of these to the reviewer so
   it can judge scope and robustness with the same evidence the author had;
 - the report's `prompt.md` (so it can check sub-topic coverage and that no presupposed conclusion
-  was smuggled in).
+  was smuggled in);
+- the report's `[litreview:]` citations and the litreviews available in the tree (`res litreview
+  --list`), so it can judge whether each **load-bearing subtopic is backed by litreview-level
+  context** or is argued from an unsurveyed handful (the *context-assurance* check — see *Consult the
+  literature through litreviews*).
 
 **Prompt it adversarially and specifically** — not "does this look right" (invites the same bias)
 but: "list every quantitative sentence whose cited claim does not itself contain that value; list
@@ -427,20 +501,26 @@ secondary/abstract-only source, contested, used outside its measured scope, a ti
 study, an analogy) where the prose does not visibly acknowledge that thinness in the sentence that
 uses it, then either hedge it there or waive it with a one-line note in the assumptions/weak-support
 section** (it is address-or-waive, not a hard stop); list load-bearing disconfirming evidence the
-brief asked for that is absent." (Fresh
+brief asked for that is absent; **list every load-bearing subtopic whose context rests on a
+cherry-picked handful of papers rather than a litreview that surveyed the field — an existing one the
+report should have read and cited `[litreview:]`, or one it should have run.**" (Fresh
 context defeats *contextual* bias; the specific prompt is what guards against the *systematic*
 model bias a same-model subagent still shares.) Use the `weak-load-bearing` advisories as a
 starting candidate list, but do not stop there: the tool sees only %/×/fold bounds and the
 strength/independence signals, not a qualitative load-bearing claim or a scope mismatch.
 
 **It must return**, per finding: the line, the sentence, the verdict (`unbacked` / `off-topic` /
-`weak-backing` / `derived` / `artifact-only` / `incommensurate-evidence` / `missing-disconfirmer`),
+`weak-backing` / `derived` / `artifact-only` / `incommensurate-evidence` / `missing-disconfirmer` /
+`unsurveyed-subtopic`),
 the claim it maps to (or that none does), and the claim's value where relevant. **Blocking** (must
 clear before done): `unbacked` numeric, `off-topic`, `weak-backing`, `derived`, claim-value ≠
 sentence-value, any contradicted backing. **Surfaced** (address or explicitly waive in the
-assumptions section): unbacked *qualitative* conclusions, missing disconfirmers, and
+assumptions section): unbacked *qualitative* conclusions, missing disconfirmers,
 `incommensurate-evidence` — a load-bearing claim/bound on non-robust evidence with no
-strength-discussion in the prose where it does its work. Like `missing-disconfirmer`, the reviewer
+strength-discussion in the prose where it does its work — and `unsurveyed-subtopic`, a load-bearing
+subtopic whose context was never surveyed by a litreview (read/cite an existing one, run a new one,
+or — for a genuinely narrow subtopic not worth a survey — waive it with a one-line note saying why a
+full survey isn't owed here). Like `missing-disconfirmer`, the reviewer
 must EITHER ensure the prose discusses the claim's evidentiary strength where it does its work
 (hedge in that sentence and mark the bound provisional, or strengthen the evidence — not delete the
 assumptions-list note) OR explicitly waive it with a one-line note in the assumptions/weak-support

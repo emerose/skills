@@ -648,6 +648,70 @@ def scaffold(home: Path, slug: str, *, title: str | None = None,
             "module": RK._rel_or_name(module, home)}
 
 
+def list_reviews(home: Path) -> list[dict[str, Any]]:
+    """Scan the data tree for every litreview and return a coverage row per survey — the
+    at-a-glance "what context already exists" view a report author reads **before** deciding to run
+    a new litreview (vs. read/extend an existing one). Store-free: globs
+    ``<home>/**/litreviews/*/review.md`` and reads each survey's own committed artifacts.
+
+    One row per review: ``{id, slug, scope, title, question, as_of, sources, tree,
+    funnel: {identified, included, excluded, pending}, path}`` — where ``id`` is the
+    ``[litreview:<scope>::<slug>]`` citation id, ``question`` is the protocol's *Question & scope*
+    body (first line, the survey's registered subject), and ``funnel`` is the PRISMA screening
+    count. Rows are sorted by ``(scope, slug)``. This is a directory listing, **not** an audit — it
+    reports what each survey *registered*, not whether it is GROUNDED."""
+    home = Path(home).resolve()
+    rows: list[dict[str, Any]] = []
+    for review in sorted(home.glob("**/litreviews/*/review.md")):
+        sc = RK.report_scope(review, home)
+        scope_id = "program" if sc["scope"] == "program" else (sc["exp_id"] or "program")
+        slug = review.parent.name
+        title = str(RK._front_matter(review.read_text(encoding="utf-8")).get("title") or "").strip()
+        proto = LIT.parse_protocol(LIT.litreview_protocol_path(review))
+        fm = proto["front_matter"]
+        qbody = str(proto["headings"].get("question & scope", "")).strip()
+        question = next((ln.strip() for ln in qbody.splitlines() if ln.strip()), "")
+        sources = fm.get("sources")
+        sources = [str(s) for s in sources] if isinstance(sources, list) else (
+            [str(sources)] if sources else [])
+        rows_screen, _ = parse_screening(LIT.litreview_screening_path(review))
+        funnel = prisma_funnel(rows_screen)
+        rows.append({
+            "id": f"{scope_id}::{slug}", "slug": slug, "scope": sc["scope"],
+            "title": title, "question": question,
+            "as_of": str(fm.get("as_of") or "").strip(), "sources": sources,
+            "tree": (review.parent / "nodes").is_dir(),
+            "funnel": {k: funnel[k] for k in ("identified", "included", "excluded", "pending")},
+            "path": RK._rel_or_name(review, home)})
+    rows.sort(key=lambda r: (r["scope"], r["slug"]))
+    return rows
+
+
+def render_list(rows: list[dict[str, Any]]) -> str:
+    """Human-readable ``res litreview --list`` — one block per survey: the ``[litreview:]`` id, its
+    registered question, the PRISMA funnel, and its search snapshot. Empty tree → a one-line hint."""
+    if not rows:
+        return ("no litreviews found under this data tree — none exists yet for any subject. "
+                "Scaffold one with `res new-litreview <slug>`.")
+    out: list[str] = [f"{len(rows)} litreview(s):"]
+    for r in rows:
+        f = r["funnel"]
+        tree = " (node tree)" if r["tree"] else ""
+        q = r["question"] or "(no Question & scope registered)"
+        title = r["title"] or r["slug"]
+        out.append(f"\n  [litreview:{r['id']}]{tree}  — {title}")
+        out.append(f"    question:  {q}")
+        out.append(f"    screened:  {f['identified']} identified → {f['included']} included, "
+                   f"{f['excluded']} excluded"
+                   + (f", {f['pending']} pending" if f["pending"] else ""))
+        snap = (f"as_of {r['as_of']}" if r["as_of"] else "as_of —")
+        if r["sources"]:
+            snap += " · " + ", ".join(r["sources"])
+        out.append(f"    search:    {snap}")
+        out.append(f"    path:      {r['path']}")
+    return "\n".join(out)
+
+
 def render_audit(result: dict[str, Any]) -> str:
     """Human-readable litreview audit — the :func:`report.render_audit` body plus the litreview's
     PRISMA funnel, protocol status, and contested-status read. A Phase-3 **tree** audit

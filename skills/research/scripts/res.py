@@ -15,6 +15,7 @@ scientific-data pipeline, split out of `sci`:
 
 Literature reviews (neutral PROSPERO/PRISMA surveys; kind=litreview):
 
+    uv run skills/research/scripts/res.py litreview --list --home "<data folder>"
     uv run skills/research/scripts/res.py new-litreview <slug> --home "<data folder>"
     uv run skills/research/scripts/res.py litreview <review.md|slug> --home "<data folder>"
     uv run skills/research/scripts/res.py litreview <review.md> --ingest-discover <discover.json>
@@ -78,10 +79,14 @@ def main() -> int:
                           help="audit a literature review (review.md): every [lit:] claim backed, "
                                "literature-only, a gaps section present, the protocol + screening "
                                "committed and every cited paper screened-in; render/trace it.")
-    p_lr.add_argument("path", help="litreview review.md (program/litreviews/<slug>/review.md) OR a "
-                      "bare <slug> (resolved to program/litreviews/<slug>/review.md). A review may "
+    p_lr.add_argument("path", nargs="?", help="litreview review.md (program/litreviews/<slug>/review.md) "
+                      "OR a bare <slug> (resolved to program/litreviews/<slug>/review.md). A review may "
                       "be a flat review.md or a Phase-3 node tree (nodes/ + [litreview:] edges) — "
-                      "audit/render are tree-aware.")
+                      "audit/render are tree-aware. Omit with --list to scan all litreviews.")
+    p_lr.add_argument("--list", dest="do_list", action="store_true",
+                      help="list every litreview in the data tree with its registered question + "
+                           "PRISMA funnel — the 'what context already exists' scan a report author "
+                           "reads BEFORE running a new one (no path needed)")
     p_lr.add_argument("--home", help="managed data folder (default: $SCIENTIST_HOME or inferred)")
     p_lr.add_argument("--add-node", dest="add_node", metavar="NEW_ID",
                       help="(tree) scaffold a child node nodes/<NEW_ID>.md under --parent; `res` only "
@@ -221,6 +226,22 @@ def _litreview(args: argparse.Namespace) -> int:
     from research import reviewtree as TREE
 
     home = resolve_home(args)
+
+    # --list: scan every litreview in the tree (no path) — the "what context exists" view.
+    if getattr(args, "do_list", False):
+        if home is None:
+            print("no data-tree root: pass --home or set $SCIENTIST_HOME", file=sys.stderr)
+            return 1
+        rows = LITREVIEW.list_reviews(home)
+        if args.json:
+            print(json.dumps(rows, indent=2, ensure_ascii=False, default=str))
+        else:
+            print(LITREVIEW.render_list(rows))
+        return 0
+
+    if not args.path:
+        print("res litreview needs a <review.md|slug> path (or --list to scan all)", file=sys.stderr)
+        return 1
     path = _resolve_review_path(args.path, home)
 
     # --add-node: scaffold a child node file (tree authoring). Needs --parent.
