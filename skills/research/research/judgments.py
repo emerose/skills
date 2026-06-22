@@ -9,11 +9,11 @@ deterministic, *offline* pytest suite.
 
 The discipline is strict and load-bearing — and note WHO judges: **no model lives in this tool.**
 The orchestrating agent (an LLM that already read the paper, ideally via a fresh-context judge
-subagent for independence) produces the verdict; ``sci judge`` only lists the work and records the
+subagent for independence) produces the verdict; ``res judge`` only lists the work and records the
 verdict it is handed.
 
   * The verdict is WRITTEN by the record step (``scientist.grounding.refresh.record_verdicts`` /
-    ``sci judge --record``), which ingests caller-supplied verdicts and pins each one with an
+    ``res judge --record``), which ingests caller-supplied verdicts and pins each one with an
     ``evidence_sha`` the tool recomputes itself.
   * The pytest path (``source()``) and the audit (``provenance.report.lit_verdict``) only ever
     READ this cache — a plain JSON file, a pure function of bytes. No network, no key, no model.
@@ -50,7 +50,7 @@ mirroring the existing ``stale-review`` design (which fires when a cited paper's
   * ``miss``  — no entry for this ``(citekey, paraphrase)`` at all (never judged, or the
     paraphrase was edited into a new question) → judge.
 
-Both ``stale`` and ``miss`` are resolved the same way — run ``sci judge`` — so the distinction is
+Both ``stale`` and ``miss`` are resolved the same way — run ``res judge`` — so the distinction is
 purely diagnostic (``stale-judgment`` vs ``needs-judgment`` in the audit).
 """
 from __future__ import annotations

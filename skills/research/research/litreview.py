@@ -1,4 +1,4 @@
-"""The litreview phase — ``sci litreview`` (audit / ingest-discover / render / trace / delta).
+"""The litreview phase — ``res litreview`` (audit / ingest-discover / render / trace / delta).
 
 A *litreview* (``kind=litreview``) is a neutral, thesis-independent survey of the **third-party
 literature** on one sub-question: an organized, assessed map of what the field reports, how strong
@@ -191,7 +191,7 @@ def validate_protocol(review_path: Path) -> tuple[dict[str, Any], list[dict[str,
             "kind": "missing-protocol", "line": 0,
             "detail": "no protocol.md beside review.md — pre-register the survey (question & scope, "
                       "search queries, inclusion + exclusion criteria) BEFORE screening; "
-                      "`sci new-litreview` scaffolds it"}]
+                      "`res new-litreview` scaffolds it"}]
 
     findings: list[dict[str, Any]] = []
     fm = proto["front_matter"]
@@ -233,7 +233,7 @@ def parse_screening(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, An
             "kind": "missing-screening", "line": 0,
             "detail": "no screening.jsonl beside review.md — account for the full retrieved set "
                       "(every candidate → included|excluded-with-reason); seed it with "
-                      "`sci litreview <review.md> --ingest-discover <discover.json>`"}]
+                      "`res litreview <review.md> --ingest-discover <discover.json>`"}]
 
     rows: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
@@ -548,7 +548,7 @@ def render_delta(d: dict[str, Any]) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# scaffold — `sci new-litreview`
+# scaffold — `res new-litreview`
 # --------------------------------------------------------------------------- #
 def scaffold(home: Path, slug: str, *, title: str | None = None,
              scope: str = "program") -> dict[str, Any]:
@@ -612,7 +612,7 @@ def scaffold(home: Path, slug: str, *, title: str | None = None,
             f"## Sub-question\n\n## Must cover\n\n## Search & screening\n"
             f"Pre-register the method in `protocol.md` first. Run `bib discover` per the\n"
             f"bibliographer literature-search protocol, then seed the PRISMA log:\n"
-            f"`sci litreview <review.md> --ingest-discover <discover.json>`. Screen each candidate\n"
+            f"`res litreview <review.md> --ingest-discover <discover.json>`. Screen each candidate\n"
             f"to included|excluded(+reason) by hand in `screening.jsonl`.\n"),
         module: (
             f'"""[lit:] claim module for litreview `{slug}`.\n\n'
@@ -621,7 +621,7 @@ def scaffold(home: Path, slug: str, *, title: str | None = None,
             f"claim per references/report.md. Run with --grounding-out to emit the grounding report\n"
             f'the audit reads.\n"""\n'
             f"from grounding import kind, strength, statement  # noqa: F401\n"
-            f"from scientist.grounding import source  # noqa: F401\n\n\n"
+            f"from research import source  # noqa: F401\n\n\n"
             f"# @kind"
             f'("literature")\n'
             f"# @strength"

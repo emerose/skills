@@ -10,10 +10,10 @@ import pytest
 
 from grounding import Capture
 from grounding._capture import _CURRENT
-from scientist import grounding
-from scientist.grounding import judgments as J
-from scientist.grounding import refresh as REFRESH
-from scientist.provenance import report as R
+import research as grounding
+from research import judgments as J
+from research import refresh as REFRESH
+from research import report as R
 
 
 # --------------------------------------------------------------------------- #

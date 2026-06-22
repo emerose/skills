@@ -107,6 +107,42 @@ def test_registration_is_idempotent_by_name(tmp_path, clean_registry):
     assert list(R._CITATION_RESOLVERS) == ["ext"]
 
 
+def test_unregistered_scheme_warns_non_blocking(tmp_path, clean_registry):
+    # A [lit:…] citation with NO resolver registered (the research skill isn't installed) is not
+    # silently dropped: the audit stays GROUNDED (a setup gap, not a broken cite) but surfaces a
+    # non-blocking warning naming the scheme + the install hint.
+    R._CITATION_RESOLVERS.clear()
+    exp = _exp(tmp_path)
+    md = _md(exp, "# x\n\nA fact [claim:test_a] and a paper [lit:smith2020foo].\n")
+    res = R.audit(md, home=tmp_path)
+    assert res["status"] == "GROUNDED"                                    # never blocks
+    warns = [w for w in res["warnings"] if w.get("kind") == "unregistered-scheme"]
+    assert len(warns) == 1
+    assert warns[0]["scheme"] == "lit"
+    assert "research skill" in warns[0]["detail"]
+    assert "⚠ unregistered-scheme" in R.render_audit(res)                 # rendered, labelled
+
+
+def test_unregistered_scheme_silent_once_registered(tmp_path, clean_registry):
+    # Registering a resolver for the scheme removes the warning — the citation is now audited.
+    lit_re = re.compile(r"\[lit:\s*([^\[\]]+?)\s*\]")
+    R.register_citation("lit", regex=lit_re, parse_key="lit_cites",
+                        resolve=lambda cites, ctx: ([], [], []))
+    exp = _exp(tmp_path)
+    md = _md(exp, "# x\n\nA paper [lit:smith2020foo].\n")
+    res = R.audit(md, home=tmp_path)
+    assert not [w for w in res["warnings"] if w.get("kind") == "unregistered-scheme"]
+
+
+def test_unregistered_scheme_ignores_urls_and_code_fences(tmp_path, clean_registry):
+    # A bracketed URL is not a citation, and a [lit:…] inside a code fence is an example — neither warns.
+    R._CITATION_RESOLVERS.clear()
+    exp = _exp(tmp_path)
+    md = _md(exp, "# x\n\nSee [https://example.com] and:\n\n```\n[lit:example2020]\n```\n")
+    res = R.audit(md, home=tmp_path)
+    assert not [w for w in res["warnings"] if w.get("kind") == "unregistered-scheme"]
+
+
 def test_claim_footnotes_are_content_keyed_deduped(tmp_path):
     # The generic [claim:] family numbers footnotes by rendered *text*: re-citing the SAME claim id
     # reuses ONE numbered note (cited twice), while a distinct claim gets its own note.

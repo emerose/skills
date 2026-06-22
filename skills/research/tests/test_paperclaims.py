@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from scientist.provenance import paperclaims as PC
-from scientist.provenance import report as REPORT
+from research import paperclaims as PC
+from research import report as REPORT
 
 
 # --------------------------------------------------------------------------- #
@@ -165,7 +165,7 @@ def test_validate_conditioned_on_resolution(tmp_path):
 # verify — quote-integrity drift
 # --------------------------------------------------------------------------- #
 def test_verify_intact(tmp_path):
-    from scientist.grounding.judgments import evidence_sha
+    from research.judgments import evidence_sha
     quote = "we observed loss of roughly half of the litters"
     text = "Methods … Results: we observed loss of roughly half of the litters with no change."
     _write(tmp_path, "silvasantos2015",
@@ -176,7 +176,7 @@ def test_verify_intact(tmp_path):
 
 
 def test_verify_quote_drift(tmp_path):
-    from scientist.grounding.judgments import evidence_sha
+    from research.judgments import evidence_sha
     quote = "a sentence the paper no longer contains"
     _write(tmp_path, "silvasantos2015",
            [_claim("a", precis=True, quote=quote, evidence_sha=evidence_sha(quote))])

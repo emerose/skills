@@ -3,13 +3,11 @@
 The standalone **grounding** package (pip: pytest-grounding) ships the single capture + report
 engine: it owns ``--grounding-out``/``--grounding-fresh``, the per-claim :class:`Capture`, the
 bypass guard, the judgment markers, and ``grounding_report.{json,md}``. This companion adds
-ONLY scientist's extras and deliberately does **not** redefine those options, so the two
+ONLY scientist's experiment extras and deliberately does **not** redefine those options, so the
 plugins coexist with no conflict:
 
   * the zero-boilerplate ``experiment`` fixture (the :class:`Study` resolved from the test's
     path, so no per-experiment conftest is needed),
-  * loading the literature support-verdict cache (so ``source(paraphrase=…)`` can read it),
-    plus the ``--judge-cache`` option,
 
 and, at import time, two adjustments so the library's bypass guard covers the scientist tree
 exactly as before:
@@ -19,6 +17,11 @@ exactly as before:
     scientist's data tree is the latter).
 
 Auto-loaded via the ``pytest11`` entry point alongside the grounding plugin.
+
+The **literature support-verdict cache** (and ``--judge-cache``) moved out to the ``research``
+skill's companion plugin (``research.plugin``) in the scientist/research split — when the data
+repo runs literature claims, that third plugin loads the cache so ``source(paraphrase=…)`` can read
+it. This companion no longer touches it.
 
 Dropped in the move to the grounding plugin (were advisory/unused-downstream): the
 docstring-as-statement behavior (call ``statement()`` now), the K1 ``reconcile`` lint, and the
@@ -32,8 +35,6 @@ from pathlib import Path
 import grounding
 import pytest
 
-from . import JUDGMENT_CACHE_NAME, JudgmentCache, set_judgment_cache
-
 # --- import-time guard adjustments (run once, before any pytest_configure) ----------------- #
 # scientist tracks GraphPad Prism XML alongside the library's generic data/doc formats, so an
 # untracked .pzfx read is flagged by the bypass guard. TRACKED_SUFFIXES is the shared set the
@@ -43,34 +44,6 @@ grounding.TRACKED_SUFFIXES.add(".pzfx")
 # Bridge them so reads under the data tree are guarded exactly as before.
 if os.environ.get("SCIENTIST_HOME") and not os.environ.get("GROUNDING_ROOT"):
     os.environ["GROUNDING_ROOT"] = os.environ["SCIENTIST_HOME"]
-
-
-def pytest_addoption(parser):
-    # Reuse the library plugin's "grounding" option group; add ONLY scientist's own option.
-    g = parser.getgroup("grounding")
-    g.addoption("--judge-cache", action="store", default=None,
-                help="literature support-verdict cache (default: <grounding-out>/"
-                     "lit_judgments.json). READ here; written only by `sci judge`. The model "
-                     "is never invoked on this path.")
-
-
-def pytest_configure(config):
-    # Load the literature support-verdict cache (read-only on this path) so a
-    # source(paraphrase=…) can pin its cached, key-matched verdict. Written only by
-    # `sci judge --record`; no model is ever invoked. Absent file → empty cache → every
-    # machine source reports needs-judgment (non-blocking).
-    set_judgment_cache(JudgmentCache.load(_judge_cache_path(config)))
-
-
-def _judge_cache_path(config) -> Path:
-    """Where the literature verdict cache lives: ``--judge-cache``, else
-    ``$SCIENTIST_JUDGE_CACHE``, else ``<--grounding-out or rootdir>/lit_judgments.json`` (next
-    to the grounding report). ``--grounding-out`` is defined by the grounding plugin."""
-    explicit = config.getoption("--judge-cache", default=None) or os.environ.get("SCIENTIST_JUDGE_CACHE")
-    if explicit:
-        return Path(explicit)
-    out = config.getoption("--grounding-out", default=None) or config.rootpath
-    return Path(out) / JUDGMENT_CACHE_NAME
 
 
 # --------------------------------------------------------------------------- #

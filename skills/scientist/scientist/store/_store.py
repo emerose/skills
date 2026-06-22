@@ -167,14 +167,6 @@ class Store:
             filters["exp_id"] = exp_id
         return await self.all_records(filters)
 
-    async def get_litreview(self, litreview_id: str) -> dict[str, Any] | None:
-        docs = await self.lib.list_documents(
-            filters={"kind": "litreview", "litreview_id": litreview_id})
-        return _meta.document_to_record(docs[0]) if docs else None
-
-    async def litreviews(self) -> list[dict[str, Any]]:
-        return await self.all_records({"kind": "litreview"})
-
     async def query(self, text: str, *, limit: int = 8,
                     filters: dict[str, Any] | None = None) -> list[Any]:
         """Semantic + full-text search inside the indexed content (libkit hybrid)."""
@@ -353,28 +345,6 @@ class Store:
         rec["updated_at"] = _now_iso()
 
         result = await self._ingest_card(_meta.report_card_markdown(rec), rec)
-        if existing and existing.get("document_id") and existing["document_id"] != result.document_id:
-            await self.lib.delete(existing["document_id"])
-        elif result.already_existed:
-            await self._merge_metadata(result.document_id, _meta.record_to_metadata(rec))
-        return await self._record_for_id(result.document_id)
-
-    async def upsert_litreview(self, rec: dict[str, Any]) -> dict[str, Any]:
-        """Create or update a litreview card (``kind=litreview``), keyed by a stable
-        ``litreview_id``. Mirrors :meth:`upsert_report`: the card's bytes derive from the
-        litreview's content (title/abstract/sections/PRISMA funnel/cited claims), so any change
-        yields a new ``document_id``; we ingest the new card and delete the prior one (if its id
-        differs), preserving the logical ``litreview_id`` identity and ``added_at``."""
-        litreview_id = rec.get("litreview_id")
-        if not litreview_id:
-            raise ValueError("litreview record needs a litreview_id")
-        rec = dict(rec)
-        rec["kind"] = "litreview"
-        existing = await self.get_litreview(litreview_id)
-        rec["added_at"] = (existing or {}).get("added_at") or rec.get("added_at") or _now_iso()
-        rec["updated_at"] = _now_iso()
-
-        result = await self._ingest_card(_meta.litreview_card_markdown(rec), rec)
         if existing and existing.get("document_id") and existing["document_id"] != result.document_id:
             await self.lib.delete(existing["document_id"])
         elif result.already_existed:

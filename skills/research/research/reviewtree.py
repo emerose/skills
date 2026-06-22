@@ -334,7 +334,7 @@ def audit(review_path: Path, home: Path | None = None) -> dict[str, Any]:
             findings.append({"kind": "node-over-B", "line": 0, "node": nid, "value": words,
                              "detail": f"node `{nid}` synthesis is ~{words} words > B={B} — never "
                                        f"compress past B; split it into subtopic leaves + a rollup "
-                                       f"(`sci litreview {REPORT.report_scope(rp, home)['slug']} "
+                                       f"(`res litreview {REPORT.report_scope(rp, home)['slug']} "
                                        f"--add-node <id> --parent {nid}`)"})
 
     # reference-don't-contain: a rollup must not re-cite a primary claim owned by a descendant
@@ -483,7 +483,7 @@ def add_node(home: Path, slug: str, new_id: str, parent_id: str, *,
         f"     references/reviews-tree.md. -->\n")
     node_path.write_text(stub, encoding="utf-8")
     reminder = (f"add [litreview:{new_id}] to `{parent_id}`'s synthesis (the edge), move the "
-                f"relevant [lit:] citations into nodes/{new_id}.md, then `sci litreview {slug} "
+                f"relevant [lit:] citations into nodes/{new_id}.md, then `res litreview {slug} "
                 f"--write-rollup-pins` and re-audit")
     return {"node": new_id, "path": REPORT._rel_or_name(node_path, home), "created": True,
             "parent": parent_id, "reminder": reminder}

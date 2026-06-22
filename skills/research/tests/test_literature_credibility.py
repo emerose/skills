@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-import scientist.grounding as grounding
-from scientist.grounding import LiteratureError, PaperRef, paper, source
+import research as grounding
+from research import LiteratureError, PaperRef, paper, source
 
 
 @pytest.fixture(autouse=True)

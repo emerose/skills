@@ -12,9 +12,9 @@ import json
 import textwrap
 from pathlib import Path
 
-from scientist.provenance import reviewtree as T
-from scientist.provenance import litreview as LITREVIEW
-from scientist.provenance import paperclaims as PC
+from research import reviewtree as T
+from research import litreview as LITREVIEW
+from research import paperclaims as PC
 
 
 # --------------------------------------------------------------------------- #
@@ -271,7 +271,7 @@ def test_linearize_depth_first(tmp_path):
 
 
 def test_render_markdown_resolves_facts(tmp_path):
-    from scientist.provenance import report as REPORT
+    from research import report as REPORT
     rp = _clean_tree(tmp_path)
     md = T.linearize(rp, home=tmp_path)
     tmp_md = rp.parent / "_lin.md"

@@ -204,7 +204,7 @@ def _row_findings(r: dict[str, Any], citekey: str) -> list[dict[str, Any]]:
     sha = str(r.get("evidence_sha") or "")
     if sha and not _EVIDENCE_SHA_RE.match(sha):
         bad("malformed-evidence-sha", f"evidence_sha {sha!r} is not a 64-char sha256 hex digest "
-                                      f"(re-run `sci paper-claims scaffold`/the extractor)")
+                                      f"(re-run `res paper-claims scaffold`/the extractor)")
 
     strength = r.get("strength")
     if strength is not None and str(strength).strip() and str(strength) not in STRENGTHS:
@@ -237,7 +237,7 @@ def validate(home: Path, citekey: str,
             return {"citekey": citekey, "path": str(path), "present": False, "count": 0,
                     "findings": [{"kind": "missing-paper-claims", "line": 0,
                                   "detail": f"no {citekey}.jsonl in {PAPER_CLAIMS_DIRNAME}/ — "
-                                            f"`sci paper-claims scaffold {citekey}` first"}],
+                                            f"`res paper-claims scaffold {citekey}` first"}],
                     "status": "BROKEN"}
         rows, findings = load_file(path)
     else:
@@ -286,7 +286,7 @@ def _default_paper_loader(citekey: str):
     """Resolve a paper to a :class:`PaperRef` via the grounding layer (reads the bibliographer
     library read-only, keyless/offline). Imported lazily so ``validate``/``load`` (and the
     ``[lit:]`` audit) never pull in the grounding package."""
-    from scientist.grounding import paper as _paper
+    from research import paper as _paper
     return _paper(citekey, allow_retracted=True)
 
 
@@ -301,7 +301,7 @@ def verify(home: Path, citekey: str, *,
     inject a fake. Returns ``{citekey, path, checked, ok, drift, findings, status}`` — ``status``
     is ``VERIFIED`` iff no claim drifted. The folded ``evidence_sha`` is computed exactly as the
     judge-cache / quote-matcher fold (one canonical identity)."""
-    from scientist.grounding.judgments import evidence_sha as _evidence_sha
+    from research.judgments import evidence_sha as _evidence_sha
 
     path = claims_path(home, citekey)
     if not path.is_file():
@@ -385,7 +385,7 @@ def scaffold(home: Path, citekey: str, *,
         f"  vocabulary), quote (verbatim), evidence_sha, strength (the paper's hedging),\n"
         f"  methods_qualifier (every claim). Exactly one precis:true row; an explicit\n"
         f"  null/negative pass; conditioned_on links; mark borrowed background. Re-extraction\n"
-        f"  rewrites this file from scratch (idempotent). Then `sci paper-claims validate "
+        f"  rewrites this file from scratch (idempotent). Then `res paper-claims validate "
         f"{citekey}`."
         + ("\n  ⚠ this paper is ABSTRACT-ONLY in the library — extraction will be shallow; "
            "`bib fetch` the full text first if you can." if shallow else ""))
@@ -424,7 +424,7 @@ def render_validate(result: dict[str, Any]) -> str:
         loc = f" L{f['line']}" if f.get("line") else ""
         lines.append(f"  ! {f['kind']}{loc}: {f.get('detail', '')}")
     if result["status"] == "VALID":
-        lines.append("  ✅ schema OK (run `sci paper-claims verify` for quote-integrity)")
+        lines.append("  ✅ schema OK (run `res paper-claims verify` for quote-integrity)")
     return "\n".join(lines)
 
 

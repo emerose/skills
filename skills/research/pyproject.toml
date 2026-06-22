@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "research"
+version = "0.1.0"
+description = "research — the literature layer: literature reviews, paper-claims, and bibliometric claims (split out of scientist)"
+# libkit (the bibliographer read path) requires >=3.12, matching scripts/res.py's PEP723 header.
+requires-python = ">=3.12"
+# Deliberately small. research is the literature layer: it reads the bibliographer library
+# (libkit, keyless/offline FTS path), parses YAML front matter / sidecars (PyYAML), and grounds
+# claims via the pytest-grounding core. The generic report engine (reportkit) and the paper
+# library (bibliographer) are reached via sys.path, supplied by the surrounding environment — so
+# they are NOT pip deps here; this env only needs what research imports directly.
+dependencies = [
+    "pyyaml>=6.0",
+    # bibliographer's store reads route through libkit; >=0.5.0 for the FTS-only / no-embedder
+    # read path (Library.open_reader) the keyless literature reads use — see research/literature.py.
+    "libkit>=0.5.0",
+    "platformdirs>=4.0",
+    # The claim-grounding core (capture, quote matching, the pytest plugin). research's grounding
+    # layer (paper/source/converge/metric) is built on it; the companion plugin (research.plugin)
+    # coexists with the grounding plugin (which owns --grounding-out + the report) and scientist's.
+    "pytest>=8.0",
+    "pytest-grounding>=0.0.3",
+]
+
+# Auto-load research's companion plugin: it loads the literature support-verdict cache so a
+# `source(paraphrase=…)` claim can read it, and adds --judge-cache. Coexists with the grounding
+# plugin and scientist's companion (none redefine --grounding-out).
+[project.entry-points.pytest11]
+research = "research.plugin"
+
+[tool.setuptools.packages.find]
+# The single top-level `research` package.
+where = ["."]
+include = ["research*"]

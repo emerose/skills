@@ -334,12 +334,12 @@ def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = N
       and for tier 1.
     - ``paraphrase`` — the claim's reading of the cited span. Opts the source into the
       **re-runnable, cache-pinned entailment check** "does the span fairly support P?": the verdict
-      is produced by the orchestrating agent (``sci judge --list`` surfaces the work; a fresh-context
-      judge subagent decides; ``sci judge --record`` writes it) and cached; this call merely reads
+      is produced by the orchestrating agent (``res judge --list`` surfaces the work; a fresh-context
+      judge subagent decides; ``res judge --record`` writes it) and cached; this call merely reads
       the cached, pin-keyed verdict (``(evidence_sha, paraphrase)``) and asserts *supported* when
       present. No model is ever called here — the claims suite stays offline and deterministic. A
       missing/stale verdict is **non-blocking** (the audit reports ``needs-judgment`` /
-      ``stale-judgment``; run ``sci judge``).
+      ``stale-judgment``; run ``res judge``).
     - ``chunk``      — a libkit chunk index (or iterable of indices): the **tier-2** locator for a
       paragraph-spanning fact with no single quotable sentence. Used with ``paraphrase=`` (no
       ``quote=``); the judged span is the chunk text.
@@ -417,7 +417,7 @@ def source(citekey: str, *, quote: str | None = None, paraphrase: str | None = N
 
     # Assert on the CACHED, pin-keyed verdict (decision: the support judgment is executable).
     # Graceful when absent/stale: a brand-new or re-judged claim stays needs-/stale-judgment
-    # (non-blocking) until `sci judge --record` runs — never a hard failure on a cache miss.
+    # (non-blocking) until `res judge --record` runs — never a hard failure on a cache miss.
     if status == "fresh":
         assert rec.get("supported"), (
             f"literature paraphrase NOT supported by the cited span in {citekey} "

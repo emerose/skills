@@ -8,8 +8,8 @@ tree is built under ``tmp_path`` and ``literature.__file__`` is pointed at a fak
 ``literature.py`` inside it, so the walk resolves the fake sibling rather than the
 real repo checkout. No DuckDB / libkit is touched.
 
-Run: ``uv run --with-editable skills/scientist pytest
-skills/scientist/tests/test_import_bibliostore.py -q``.
+Run: ``uv run --with-editable skills/research pytest
+skills/research/tests/test_import_bibliostore.py -q``.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import sys
 
 import pytest
 
-import scientist.grounding.literature as lit
+import research.literature as lit
 
 
 @pytest.fixture
@@ -35,12 +35,12 @@ def _isolate_import(monkeypatch):
 
 
 def _fake_skill_tree(root, *, layout: str):
-    """Build ``root/scientist/scientist/grounding/literature.py`` plus a sibling
-    bibliographer skill in the given ``layout`` ("package" = current, "scripts" = old).
-    Returns ``(fake literature.py path, skill-root expected on sys.path, store marker)``."""
-    grounding = root / "scientist" / "scientist" / "grounding"
-    grounding.mkdir(parents=True)
-    fake_lit = grounding / "literature.py"
+    """Build ``root/research/research/literature.py`` plus a sibling bibliographer skill in the
+    given ``layout`` ("package" = current, "scripts" = old). Returns ``(fake literature.py path,
+    skill-root expected on sys.path, store marker)``."""
+    pkg_dir = root / "research" / "research"
+    pkg_dir.mkdir(parents=True)
+    fake_lit = pkg_dir / "literature.py"
     fake_lit.write_text("# fake\n", encoding="utf-8")
 
     marker = f"BiblioStore_{layout}"
@@ -81,9 +81,9 @@ def test_resolves_legacy_scripts_layout(tmp_path, monkeypatch, _isolate_import):
 
 
 def test_missing_bibliographer_raises(tmp_path, monkeypatch, _isolate_import):
-    grounding = tmp_path / "scientist" / "scientist" / "grounding"
-    grounding.mkdir(parents=True)
-    fake_lit = grounding / "literature.py"
+    pkg_dir = tmp_path / "research" / "research"
+    pkg_dir.mkdir(parents=True)
+    fake_lit = pkg_dir / "literature.py"
     fake_lit.write_text("# fake\n", encoding="utf-8")
     monkeypatch.setattr(lit, "__file__", str(fake_lit))
 

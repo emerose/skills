@@ -1,9 +1,9 @@
 """Integrity / provenance command handlers: ``check``, ``audit``, ``meta``,
 ``fingerprint``, ``review`` (plus the store-free audit report builder/renderer).
 
-``check`` is the deterministic structural report + the cross-module literature
-divergence lint; ``audit`` is provenance staleness (experiment.yml ledger vs the
-evidence on disk) + a semantic-pass worklist; ``meta``/``fingerprint``/``review``
+``check`` is the deterministic structural report (the literature-divergence lint moved out
+with the literature layer to the ``research`` skill); ``audit`` is provenance staleness
+(experiment.yml ledger vs the evidence on disk) + a semantic-pass worklist; ``meta``/``fingerprint``/``review``
 read or stamp the sidecar via :mod:`provenance`. The staleness check is store-free
 (:func:`_staleness_entry`), so ``audit_report``/``print_audit_report`` are reused
 by the store-less ``sci audit`` path.
@@ -23,19 +23,12 @@ from ._store import Store
 from ._cli_common import _experiment_dirs, _find_experiment_dir
 
 
-def _grounding_report_paths(home: Path) -> list[Path]:
-    """Every experiment's grounding_report.json under ``home`` (``analysis/`` first, then
-    the experiment root). Pure folder walk — no store needed; used by the cross-module
-    literature-divergence lint. Wraps the shared :func:`provenance.iter_reports` walk."""
-    return [report_path for _exp_dir, report_path in provenance.iter_reports(home)]
-
-
 async def cmd_check(store: Store, args: argparse.Namespace) -> None:
     """Deterministic structural integrity report (reports only; never mutates).
 
-    Plus a cross-module hygiene pass — the literature-divergence lint — which warns (never
-    fails) when the same ``(citekey, paraphrase)`` is grounded on quotes that fold to
-    different spans across the program's grounding reports. See ``grounding.refresh``."""
+    The cross-module **literature**-divergence lint moved out with the literature layer to the
+    ``research`` skill (scientist is now literature-free); this is the experiment-structural pass
+    only."""
     worklist = []
     async for exp_dir, exp_id in _experiment_dirs(store, args.experiment):
         rec = await store.get_experiment(exp_id) or {"exp_id": exp_id}
@@ -43,13 +36,8 @@ async def cmd_check(store: Store, args: argparse.Namespace) -> None:
         flags = _audit.structural_flags(store.home, exp_dir, rec, files)
         if flags:
             worklist.append({"exp_id": exp_id, "flags": flags})
-    # Cross-module literature-divergence lint. A divergence is a *program* property (the same
-    # (citekey, paraphrase) grounded on different spans in two modules), so it scans every
-    # grounding report under home even when --experiment narrows the structural pass.
-    from ..grounding import refresh as _refresh
-    divergences = _refresh.divergence_lint(_grounding_report_paths(store.home))
     if args.json:
-        emit_json({"structural": worklist, "literature_divergence": divergences})
+        emit_json({"structural": worklist})
         return
     if not worklist:
         print("✓ no structural issues found")
@@ -57,8 +45,6 @@ async def cmd_check(store: Store, args: argparse.Namespace) -> None:
         print(f"{item['exp_id']}:")
         for f in item["flags"]:
             print(f"    {f}")
-    if divergences:
-        print(_refresh.render_divergence(divergences))
 
 
 def _staleness_entry(home: Path, exp_dir: Path, exp_id: str) -> dict[str, Any]:

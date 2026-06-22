@@ -21,9 +21,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scientist import grounding
-from scientist.provenance import litreview as LR
-from scientist.provenance import report as R
+import research as grounding
+from research import litreview as LR
+from research import report as R
 
 
 # --------------------------------------------------------------------------- #
@@ -531,29 +531,6 @@ def test_delta_no_change_is_empty(tmp_path):
     d = LR.delta(review, baseline, home=tmp_path)
     assert all(not v for v in d.values())
     assert "no change" in LR.render_delta(d)
-
-
-# --------------------------------------------------------------------------- #
-# kind=litreview store card (store-free determinism) — PRISMA funnel block
-# --------------------------------------------------------------------------- #
-def test_litreview_card_markdown_deterministic():
-    from scientist.store import _meta as M
-    card = {
-        "litreview_id": "program::it-biodist", "scope": "program", "slug": "it-biodist",
-        "title": "IT ASO biodistribution", "abstract": "How a lumbar ASO distributes the CNS.",
-        "sections": [{"heading": "Exposure", "summary": "cord highest"}],
-        "funnel": {"identified": 4, "included": 3, "excluded": 1},
-        "cited_claims": ["program::test_litreview_it_biodist.py::test_floor"],
-        "audit_status": "GROUNDED", "path": "program/litreviews/it-biodist/review.md",
-    }
-    md1 = M.litreview_card_markdown(card)
-    md2 = M.litreview_card_markdown(card)
-    assert md1 == md2                                         # deterministic → stable document_id
-    assert md1.startswith("# Literature review: IT ASO biodistribution")
-    assert "## Abstract" in md1
-    assert "## PRISMA funnel" in md1
-    assert "identified: 4" in md1 and "included: 3" in md1
-    assert "## Cites" in md1
 
 
 def test_litreview_cite_renders_as_footnote(tmp_path):

@@ -15,9 +15,9 @@ import pytest
 
 from grounding import Capture
 from grounding._capture import _CURRENT
-from scientist import grounding
-from scientist.grounding import LiteratureError, PaperRef, cited_by, metric
-from scientist.provenance import report as R
+import research as grounding
+from research import LiteratureError, PaperRef, cited_by, metric
+from research import report as R
 
 
 # --------------------------------------------------------------------------- #
