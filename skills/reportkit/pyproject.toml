@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reportkit"
+version = "0.1.0"
+description = "reportkit — the generic grounded-report engine (parse/audit/render/trace) shared by the scientist + research skills"
+requires-python = ">=3.12"
+# Runtime deps are intentionally tiny: PyYAML for front-matter / sidecar parsing (the only
+# third-party import; `*.csv` table inlining uses the stdlib `csv`, and pandoc is an external
+# binary the render step shells out to). reportkit is NOT published to PyPI — it knows the
+# in-house `[claim:]` citation grammar, so it is only useful inside this repo; the host skill
+# (scientist/research) reaches it via sys.path, supplying this dep from its own environment.
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["reportkit*"]
+
+[tool.setuptools.package-data]
+# Ship the pandoc Lua filters (used by the renderer) inside the wheel.
+"reportkit" = ["*.lua"]
