@@ -84,12 +84,11 @@ available keys.
 
 ```text
 /plugin marketplace add emerose/skills
-/plugin install bibliographer@emerose-skills
-/plugin install scientist@emerose-skills
+/plugin install sq@emerose-skills
 ```
 
-Claude Code clones this repo, discovers the skills, and invokes them automatically when
-relevant (or manually via `/bibliographer:bibliographer` / `/scientist:scientist`).
+Claude Code clones this repo, discovers the bundled skills, and invokes them automatically
+when relevant (or manually via `/sq:bibliographer`, `/sq:scientist`, `/sq:research`).
 
 ### The `bib` CLI, as a standalone tool
 
