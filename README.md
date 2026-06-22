@@ -7,8 +7,8 @@ Each skill is a self-contained folder under `skills/` — a `SKILL.md` (name +
 description frontmatter, then instructions) plus any bundled scripts, references, and
 tests.
 
-Three skills ship today, and they are complements for one workflow — running a
-scientific-data program and writing it up honestly:
+Three skills make up one workflow — running a scientific-data program and writing it up
+honestly:
 
 - **[bibliographer](skills/bibliographer/)** manages the published literature you *read*.
 - **[scientist](skills/scientist/)** manages the experiments you *run*.
@@ -16,7 +16,7 @@ scientific-data program and writing it up honestly:
   reviews and grounded citations of the published record.
 
 They share two internal pieces: **[reportkit](skills/reportkit/)**, the grounded-report
-engine, and **[libkit](#libkit--embeddings)**, the single searchable store both skills
+engine, and **[libkit](#libkit--embeddings)**, the single searchable store the skills
 index into instead of a bespoke database.
 
 | | [bibliographer](skills/bibliographer/) | [scientist](skills/scientist/) | [research](skills/research/) |
@@ -82,9 +82,9 @@ One `sci` CLI drives the deterministic operations; a pytest plugin runs the clai
 
 ### [research](skills/research/) — the literature layer
 
-Split out of `scientist` so that scientist owns *experiments* and research owns
-everything *literature*. It turns the published record — papers already in the
-bibliographer library — into the same kind of grounded, re-runnable, auditable artifacts:
+Where scientist owns *experiments*, research owns everything *literature*. It turns the
+published record — papers already in the bibliographer library — into the same kind of
+grounded, re-runnable, auditable artifacts:
 
 ```text
 bibliographer library  →  [lit:] claims / paper-claims  →  litreview (PRISMA survey)  →  cited by a report
@@ -130,8 +130,8 @@ bibliographer                 stands alone; research reaches it (read-only) for 
 [`reportkit`](skills/reportkit/) is deliberately domain-blind: it natively resolves
 `[claim:]`, `[report:]`, and `![..](..)` embeds, and knows nothing about literature or
 libraries. Every other citation scheme — including research's `[lit:]`/`[litreview:]` —
-plugs in through a `register_citation(...)` registry, which is the seam that let the
-literature layer split cleanly out of scientist. The grounding core, by contrast, *is*
+plugs in through a `register_citation(...)` registry, the seam that keeps each domain
+skill decoupled from the engine and from the others. The grounding core, by contrast, *is*
 generic: [`pytest-grounding`](https://pypi.org/project/pytest-grounding/) is a published
 PyPI package usable outside this repo.
 
@@ -144,11 +144,10 @@ how to build a tool an LLM agent operates and a human (or a second agent) has to
 
 An agent's context is its scarcest resource, so the skills are built to load detail only
 when it's needed. A `SKILL.md` is a thin overview that routes to `references/` files
-loaded on demand, not a wall of instructions read every time (the bibliographer guide was
-recently cut from ~580 to ~230 lines, with the detail moved into `references/`). The CLIs
-print terse, pipe-friendly output and offer `--json` for programmatic reads, so an agent
-can `head`/`grep` a result instead of pulling a verbose dump into context. The goal is
-that the *first* page an agent reads tells it which second page to read — and no more.
+loaded on demand, not a wall of instructions read every time. The CLIs print terse,
+pipe-friendly output and offer `--json` for programmatic reads, so an agent can
+`head`/`grep` a result instead of pulling a verbose dump into context. The goal is that
+the *first* page an agent reads tells it which second page to read — and no more.
 
 ### Encode the mechanical, leave the judgment to the model
 
