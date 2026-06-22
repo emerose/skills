@@ -1,0 +1,81 @@
+name: version-bump
+
+# Keep the `sq` plugin's published version moving on every change to main, so
+# `claude plugin update` (and any GitHub-sourced marketplace install) actually
+# pulls new work. The version sat at 0.1.0 through a whole refactor because
+# nothing bumped it — this removes the reliance on remembering.
+#
+# Behaviour on each push to main:
+#   - If a tag `sq--v<version>` already exists for the current manifest version,
+#     the merge did NOT bump the version -> auto-increment the PATCH in both
+#     manifests, commit ([skip ci] so this doesn't re-trigger), and tag+push.
+#   - If no such tag exists, the merge already introduced a new version (a human
+#     made a minor/major bump in the PR) -> just create and push the tag.
+#
+# The version lives in two files that must agree (the `claude plugin tag` check
+# enforces this): .claude-plugin/plugin.json and the `sq` entry in
+# .claude-plugin/marketplace.json. Both are bumped together.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version on merge and tag the release
+        run: |
+          set -euo pipefail
+          PLUGIN=.claude-plugin/plugin.json
+          MARKET=.claude-plugin/marketplace.json
+
+          VER=$(python3 -c "import json;print(json.load(open('$PLUGIN'))['version'])")
+          MVER=$(python3 -c "import json;print(json.load(open('$MARKET'))['plugins'][0]['version'])")
+          if [ "$VER" != "$MVER" ]; then
+            echo "::error::plugin.json ($VER) and marketplace.json ($MVER) disagree — fix in a PR before merging."
+            exit 1
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git rev-parse -q --verify "refs/tags/sq--v$VER" >/dev/null; then
+            # Version unchanged since its release tag -> auto patch-bump.
+            NEW=$(python3 - "$VER" <<'PY'
+          import sys
+          maj, minor, patch = sys.argv[1].split(".")
+          print(f"{maj}.{minor}.{int(patch) + 1}")
+          PY
+          )
+            python3 - "$PLUGIN" "$MARKET" "$VER" "$NEW" <<'PY'
+          import sys
+          plugin, market, old, new = sys.argv[1:5]
+          for f in (plugin, market):
+              s = open(f).read()
+              s = s.replace(f'"version": "{old}"', f'"version": "{new}"', 1)
+              open(f, "w").write(s)
+          PY
+            git add "$PLUGIN" "$MARKET"
+            git commit -m "chore(sq): bump to v$NEW [skip ci]"
+            git tag "sq--v$NEW"
+            git push origin HEAD:main
+            git push origin "sq--v$NEW"
+            echo "Auto-bumped sq $VER -> $NEW and tagged sq--v$NEW"
+          else
+            # PR already bumped the version -> just publish the tag.
+            git tag "sq--v$VER"
+            git push origin "sq--v$VER"
+            echo "Tagged released version sq--v$VER (no auto-bump needed)"
+          fi

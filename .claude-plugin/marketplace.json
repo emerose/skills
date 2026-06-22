@@ -12,7 +12,7 @@
       "name": "sq",
       "source": "./",
       "description": "Sam Quigley's research skills, bundled as one plugin. Ships three skills: bibliographer (manage a personal collection of academic papers — add from DOI/arXiv/PMID/S2/PDF with auto-fetched metadata, file PDFs into an author tree, full-text + semantic search, HTML viewer, audit); scientist (manage a tree of scientific experiments as a provenance-tracked raw→data→analysis→claims pipeline — extract CRO files into tidy CSVs, re-derive analysis, assert grounded pytest-backed claims, index for search); and research (the literature layer — author PROSPERO/PRISMA reviews, extract per-paper attributed claims, ground third-party facts as re-runnable [lit:] claims, assert bibliometric claims). Invoked as /sq:bibliographer, /sq:scientist, /sq:research. Built on libkit.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "Sam Quigley",
         "email": "quigley@emerose.com"
