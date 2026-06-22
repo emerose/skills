@@ -1,6 +1,6 @@
 {
   "name": "sq",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Sam Quigley's research skills, bundled as one plugin: bibliographer (personal academic-paper collection), scientist (provenance-tracked experiment pipeline), and research (literature reviews + grounded [lit:] claims). Invoked as /sq:bibliographer, /sq:scientist, /sq:research. Built on libkit.",
   "author": {
     "name": "Sam Quigley",
