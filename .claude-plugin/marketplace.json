@@ -9,9 +9,9 @@
   },
   "plugins": [
     {
-      "name": "bibliographer",
+      "name": "sq",
       "source": "./",
-      "description": "Manage a personal collection of academic articles: add papers from a DOI/arXiv/PMID/PMCID/S2 id or a PDF (auto-fetching metadata from Crossref, arXiv, PubMed, Semantic Scholar, and Unpaywall), file PDFs into a human-readable author tree, bulk-import a folder, recover metadata for unverified scans, search inside the papers, browse via a generated HTML viewer, and audit the library. Built on libkit.",
+      "description": "Sam Quigley's research skills, bundled as one plugin. Ships three skills: bibliographer (manage a personal collection of academic papers — add from DOI/arXiv/PMID/S2/PDF with auto-fetched metadata, file PDFs into an author tree, full-text + semantic search, HTML viewer, audit); scientist (manage a tree of scientific experiments as a provenance-tracked raw→data→analysis→claims pipeline — extract CRO files into tidy CSVs, re-derive analysis, assert grounded pytest-backed claims, index for search); and research (the literature layer — author PROSPERO/PRISMA reviews, extract per-paper attributed claims, ground third-party facts as re-runnable [lit:] claims, assert bibliometric claims). Invoked as /sq:bibliographer, /sq:scientist, /sq:research. Built on libkit.",
       "version": "0.1.0",
       "author": {
         "name": "Sam Quigley",
@@ -19,33 +19,7 @@
       },
       "repository": "https://github.com/emerose/skills",
       "category": "research",
-      "tags": ["bibliography", "research", "pdf", "citations", "academic", "rag", "libkit"]
-    },
-    {
-      "name": "scientist",
-      "source": "./",
-      "description": "Manage a tree of scientific experiments end to end as one provenance-tracked pipeline raw→data→analysis→claims: extract raw measurements from CRO files (Excel, GraphPad Prism, Word/PDF/PowerPoint) into tidy deterministic data/ CSVs; re-derive analysis (EC50/Hill fits, stats, summaries, figures); assert grounded scientific claims (each a re-runnable pytest spec linking a statement to sha-pinned evidence with a strength); and index everything — claims and summaries first — into a libkit store for semantic + full-text search, with an end-to-end traceability audit from any claim back to the original measurements. Built on libkit.",
-      "version": "0.1.0",
-      "author": {
-        "name": "Sam Quigley",
-        "email": "quigley@emerose.com"
-      },
-      "repository": "https://github.com/emerose/skills",
-      "category": "research",
-      "tags": ["science", "lab-data", "experiments", "cro", "provenance", "claims", "extraction", "research", "rag", "libkit"]
-    },
-    {
-      "name": "research",
-      "source": "./",
-      "description": "The literature layer of a scientific-data program: author neutral PROSPERO/PRISMA literature reviews (conclusion-free evidence surveys with a pre-registered search protocol + PRISMA screening log, scalable to a node tree), extract a paper's attributed paper-claims once into a per-paper store, ground a third-party fact as a re-runnable [lit:] claim that pins a verbatim quote to a paper in the bibliographer library plus a recorded support verdict, and assert bibliometric claims off stored OpenAlex metrics. Use it for a literature review or evidence survey, a systematic review, grounding a claim on a published paper, checking whether a quote fairly supports a paraphrase, building or auditing a review tree, finding which library papers no claim cites, or any claim about the literature itself. Independent of scientist; composes with the shared report engine. Built on libkit and bibliographer.",
-      "version": "0.1.0",
-      "author": {
-        "name": "Sam Quigley",
-        "email": "quigley@emerose.com"
-      },
-      "repository": "https://github.com/emerose/skills",
-      "category": "research",
-      "tags": ["literature-review", "systematic-review", "prisma", "paper-claims", "bibliometric", "citations", "grounding", "research", "rag", "libkit"]
+      "tags": ["bibliography", "science", "literature-review", "experiments", "claims", "provenance", "citations", "research", "rag", "libkit"]
     }
   ]
 }
