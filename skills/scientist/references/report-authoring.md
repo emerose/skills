@@ -175,8 +175,8 @@ smarter*, not just answer one question:
   Citations remain a subset of what you bank — and what you bank is a subset of the sweep.
   - **After a sweep, check what you banked but never grounded.** Banking papers without turning
     the load-bearing ones into claims is the silent stagnation case (the library grows, the
-    grounding doesn't). `sci coverage --since <sweep date>` lists the papers you just added that no
-    claim cites; for a single report, prefer the topic-scoped `sci coverage --query "<topic>"`, which
+    grounding doesn't). `res coverage --since <sweep date>` lists the papers you just added that no
+    claim cites; for a single report, prefer the topic-scoped `res coverage --query "<topic>"`, which
     ranks the uncited set by relevance instead of returning the noisy library-wide tally (see
     [review-audit.md](review-audit.md) → *Claims coverage*). Either way it is the worklist for which
     claims the sweep earned. A broad sweep that yields zero new claims is the symptom, not success.
@@ -195,7 +195,8 @@ smarter*, not just answer one question:
   search inside it — *not* copied into `program/refs/`. Cite it in the report's References by
   DOI as a **clickable link** (`[10.x/y](https://doi.org/10.x/y)`). (Vendoring a PDF into the
   repo to `doc()`-ground a literature claim is a last resort and usually the wrong tool — see
-  report.md → *Authoring and reviewing a literature claim*.)
+  [research's lit-claims.md](../../research/references/lit-claims.md) → *Authoring and reviewing a
+  literature claim*.)
 - **Decompose a sub-question into its own supporting report — liberally.** Whenever a report
   rests on a substantial question of its own — a piece of biology that deserves its own evidence
   review, *especially* one reusable across future investigations — write *that* as a separate
@@ -369,7 +370,7 @@ on the prior draft cannot reveal that the evidence moved or that a conclusion wa
 2. **Re-run the brief's method from scratch.** Do the broad parallel literature sweep the brief
    names (sweep *before* writing — see "Research and composition"), bank what it surfaces, and
    author the claims with the discipline above (`source(quote=, paraphrase=)`, paraphrase hugging a
-   self-contained quote, the caller-records judge, `sci coverage` to catch banked-but-unclaimed
+   self-contained quote, the caller-records judge, `res coverage` to catch banked-but-unclaimed
    load-bearing papers).
 3. **Write a genuinely new body** from the brief + the freshly-grounded claims — fresh structure and
    voice, not a paraphrase of the old one. Re-derive every number from the evidence; do not carry a
@@ -463,7 +464,7 @@ cohort," "underexplored."* These are *empirical* claims (about citation counts, 
 state of the field) that **quote-grounding can never catch** — no sentence in any paper asserts its
 own citation frequency — so they slip through `[lit:]` quote-checking by construction. When you see
 one, it must resolve to a **bibliometric claim** (`@kind("bibliometric")` grounded on a stored
-metric via `cited_by()`/`metric()` — see [report.md](report.md) → *Bibliometric claims*) or be
+metric via `cited_by()`/`metric()` — see [research's lit-claims.md](../../research/references/lit-claims.md) → *Bibliometric claims*) or be
 flagged `meta-claim-unbacked` (blocking). Do not let a plausible-sounding "most-cited" stand on the
 author's say-so: it is either measured-and-pinned or removed. (This rule exists because exactly such
 a flourish — "the single most-quoted result" — once shipped past a GROUNDED audit while being false.)

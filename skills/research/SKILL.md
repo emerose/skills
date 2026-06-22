@@ -118,5 +118,20 @@ companion pytest plugin loads the support-verdict cache so `source(paraphrase=�
 verdict; it coexists with the grounding plugin (which owns `--grounding-out`) and scientist's
 companion (the `experiment` fixture).
 
-Detailed references — the litreview discipline, the review-node tree, and paper-claims extraction —
-move into this skill alongside the rest of the literature docs.
+## Pick the task → load the reference
+
+Each part's detail lives in `references/` and is loaded only when you need it:
+
+| You want to… | Read |
+|---|---|
+| Author or review a **`[lit:]` literature claim** — the quote/paraphrase grounding rubric, the machine support judge (`res judge`), the locator-ladder strength ceiling, and **bibliometric** (`@kind("bibliometric")`, `cited_by()`/`metric()`) claims | [references/lit-claims.md](references/lit-claims.md) |
+| Author / audit / consume / update a neutral **literature review** (`kind=litreview`) — the PROSPERO/PRISMA `protocol.md` + `screening.jsonl`, the synthesis discipline, the gaps/completeness critic, consumption via `[litreview:]` and the search-protocol staleness pin | [references/litreview.md](references/litreview.md) |
+| When a review **outgrows one document** — store it as a **node tree** (`nodes/` + `[litreview:<child>]` edges; the root rollup *is* the review): split/merge seams, rollups, conflict-survival, `res litreview --add-node`/`--write-rollup-pins`/`--render` | [references/reviews-tree.md](references/reviews-tree.md) |
+| Extract a paper's **attributed claim set** once (`res paper-claims`) into a per-paper JSONL so an external `[lit:]` cite resolves to a pre-extracted, quote-pinned record instead of being re-authored per citation | [references/paper-claims.md](references/paper-claims.md) |
+
+The **report-engine** mechanics a literature citation rides on — how an *experiment* report cites
+`[lit:]`/`[litreview:]`, the audit verdicts, the auto-generated `# References`, the PDF render — live
+in scientist's report docs ([report.md](../scientist/references/report.md),
+[report-authoring.md](../scientist/references/report-authoring.md)), since the report phase is
+scientist's; research only plugs its citation layer into the shared `reportkit` engine
+(see *How research composes with the other skills*, above).

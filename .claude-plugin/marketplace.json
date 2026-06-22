@@ -33,6 +33,19 @@
       "repository": "https://github.com/emerose/skills",
       "category": "research",
       "tags": ["science", "lab-data", "experiments", "cro", "provenance", "claims", "extraction", "research", "rag", "libkit"]
+    },
+    {
+      "name": "research",
+      "source": "./",
+      "description": "The literature layer of a scientific-data program: author neutral PROSPERO/PRISMA literature reviews (conclusion-free evidence surveys with a pre-registered search protocol + PRISMA screening log, scalable to a node tree), extract a paper's attributed paper-claims once into a per-paper store, ground a third-party fact as a re-runnable [lit:] claim that pins a verbatim quote to a paper in the bibliographer library plus a recorded support verdict, and assert bibliometric claims off stored OpenAlex metrics. Use it for a literature review or evidence survey, a systematic review, grounding a claim on a published paper, checking whether a quote fairly supports a paraphrase, building or auditing a review tree, finding which library papers no claim cites, or any claim about the literature itself. Independent of scientist; composes with the shared report engine. Built on libkit and bibliographer.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Sam Quigley",
+        "email": "quigley@emerose.com"
+      },
+      "repository": "https://github.com/emerose/skills",
+      "category": "research",
+      "tags": ["literature-review", "systematic-review", "prisma", "paper-claims", "bibliometric", "citations", "grounding", "research", "rag", "libkit"]
     }
   ]
 }

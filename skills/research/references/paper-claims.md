@@ -2,11 +2,11 @@
 
 A **paper-claim** is one assertion a third-party paper makes, written into the program's own
 vocabulary and pinned to a verbatim span of the paper's text. Extracting a paper's claim set
-*once* — into scientist's own store — is what lets an external `[lit:]` citation resolve to a
+*once* — into research's own store — is what lets an external `[lit:]` citation resolve to a
 pre-extracted record instead of being re-authored, and re-read, in every report that cites the
 paper.
 
-This is the high-value, judgment-heavy half of the layer. The tool (`sci paper-claims …`) only
+This is the high-value, judgment-heavy half of the layer. The tool (`res paper-claims …`) only
 scaffolds, schema-checks, and quote-verifies; **you** read the paper and author the JSONL. This
 guide is the discipline that authoring must hold.
 
@@ -69,7 +69,7 @@ atom captured. You do not eliminate it — you mitigate it with cheap, idempoten
 At the head of each set, write **exactly one** claim with `precis: true`: the paper's own arc and
 headline in one or two sentences — what it set out to show and what it concludes. This is the
 cheapest place to preserve narrative across atomization (atomizing a paper otherwise loses its
-arc, emphasis, and conditionality). `sci paper-claims validate` **requires** exactly one précis
+arc, emphasis, and conditionality). `res paper-claims validate` **requires** exactly one précis
 row — zero is `missing-precis`, more than one is `multiple-precis`.
 
 The précis still needs a `quote` and `evidence_sha` like any claim — anchor it to the paper's own
@@ -164,7 +164,7 @@ One JSON object per line. Required fields are `id`, `paper`, `citekey`, `kind` (
   without a semantic index. `quote`/`hedge` keep the paper's own words for fidelity.
 - **`evidence_sha`** is the sha256 of the *folded* quote span (NFKC + dash-fold + emphasis-strip +
   whitespace-collapse — the same fold quote-matching uses). You normally don't compute it by hand:
-  re-running extraction and `sci paper-claims verify` recomputes/checks it. It is the pin
+  re-running extraction and `res paper-claims verify` recomputes/checks it. It is the pin
   `verify` re-checks against the retained PDF.
 
 ---
@@ -172,12 +172,12 @@ One JSON object per line. Required fields are `id`, `paper`, `citekey`, `kind` (
 ## 9. The workflow
 
 ```
-sci paper-claims scaffold <citekey>    # confirm the paper resolves in the library (read-only),
+res paper-claims scaffold <citekey>    # confirm the paper resolves in the library (read-only),
                                        # open paper-claims/<citekey>.jsonl, print this brief
 # … read the PDF, author one JSON object per line per §1–§8a …
-sci paper-claims validate <citekey>    # schema: required fields, kind, ids, one precis, links resolve
-sci paper-claims verify <citekey>      # quote-integrity: each quote still located in the paper text
-sci paper-claims --json --query <substr>   # load + emit for the `--json | python3 -c` pattern
+res paper-claims validate <citekey>    # schema: required fields, kind, ids, one precis, links resolve
+res paper-claims verify <citekey>      # quote-integrity: each quote still located in the paper text
+res paper-claims --json --query <substr>   # load + emit for the `--json | python3 -c` pattern
 ```
 
 - **`scaffold`** resolves the paper in the bibliographer library read-only (it never writes bib),

@@ -86,7 +86,7 @@ Request the `experiment` fixture (ships with the plugin; resolves the Study from
 ```python
 import pytest
 from grounding import statement, strength, caveats, kind, evidence, uses, doc  # the grounding core
-# literature helpers (paper/source/converge) live in scientist: from scientist.grounding import source
+# literature helpers (paper/source/converge) live in the research skill: from research import source
 
 @kind("result")                                   # result | design | external | interpretive
 @strength("strong")                               # strong | moderate | weak | unverifiable | ...
@@ -136,63 +136,16 @@ def test_report_no_mortality(experiment):
   phrases (`ref.is_presentation` flags the deck for reviewers). Legacy `.doc`/`.ppt` aren't supported —
   re-save as `.docx`/`.pptx`/PDF.
 
-### Literature claims — grounding a third-party fact on a paper
+### Literature claims live in the `research` skill
 
-`@kind("literature")` + `source(citekey, quote=…, paraphrase=…)` grounds a fact on a paper in the
-bibliographer library. Two layers, both re-runnable: the **quote** is the deterministic tripwire
-(verbatim string in the paper's stored text — fails the pytest assert if absent), and the
-**paraphrase** opts the source into a *cache-pinned entailment check* — "does the quote fairly
-support the paraphrase?". There is **no model in the tool**: *you* (the orchestrating agent, ideally
-a fresh-context judge subagent you spawn for independence) judge that question; `sci judge --list`
-surfaces the work and `sci judge --record` writes your verdict to the cache, which `source()`
-asserts on every run. The judging happens outside the assert; the suite stays offline and
-deterministic.
-
-```python
-@kind("literature")
-@strength("strong")                                    # ≥2 independent groups, direct, primary
-def test_target_knockdown_in_humans(experiment):
-    "Antisense knockdown of the target is well tolerated in humans."
-    converge(
-        source("noor2015q", quote="53% knockdown at the top dose",
-               paraphrase="knockdown reached 53% at the top dose"),  # hugs the quote; synthesis goes in the docstring
-        source("smith2019",  chunk=14,                 # tier 2: a paragraph-spanning fact
-               paraphrase="no dose-limiting toxicity was reported"),
-    )
-```
-
-- **Write the paraphrase as a faithful compression of a SELF-CONTAINED quote — not a summary of
-  the paper's finding.** The judge sees only the quote and the paraphrase, never the paper, and asks
-  the narrow question "does *this span* entail *this paraphrase*?". So the quote must itself contain
-  the subject + the number + the scope the paraphrase asserts, and the paraphrase must say *only*
-  what the span says. Two failure modes, both authoring errors (not the judge being too strict),
-  that together reject ~half of first-pass paraphrases when ignored:
-  - **Quote too short to carry the paraphrase** — e.g. a bare `"172.5%"`, or `"biallelically
-    express Ube3a"` with no subject. Fix: pick a full clause containing subject + figure + scope
-    (use `bib text <key> --all` to find one); `"53% knockdown at the top dose"` supports
-    `"knockdown reached 53% at the top dose"`, not `"the ASO halves target expression"` (which adds
-    the agent and the target the span never names).
-  - **Paraphrase imports outside context** — adding entities, arithmetic, or interpretation not in
-    the span (`"idic15"`, `"four alleles total"`, `"a patient family"`, `"below the additive 200%"`).
-    Put cross-source **synthesis** in the claim *docstring* (which is judged as a whole, not
-    per-source), and keep each paraphrase a near-restatement of its own quote.
-  When no single sentence carries the fact, prefer the tier-2 `chunk=` locator (the judge reads the
-  whole chunk) over stretching a thin quote. And when you run the §3 prose↔claims pass, hand the
-  reviewer each claim's **source quotes**, not just its statement — otherwise it false-positives on
-  numbers that a source quote in fact carries.
-- **Locator ladder caps strength.** tier 1 `quote=`+`paraphrase=` → up to `strong`; tier 2
-  `chunk=`+`paraphrase=` (a libkit chunk id from `bib query`) → up to `moderate`; tier 3
-  `paraphrase=` only (judge reads the whole doc) → `weak`. Exceeding the ceiling is a blocking
-  `over-strength` finding. Default to tier 1.
-- **The verdict is cached + pin-keyed** by `(quote_sha, paraphrase)` in `lit_judgments.json` (next
-  to the grounding report), stamped with `judge_id` + timestamp as metadata. A quote/span edit →
-  `stale-judgment`, a paraphrase edit → `needs-judgment` (re-`list`, re-judge, re-`record`). Until
-  recorded the claim stays `needs-judgment` (non-blocking) — never a crash. The tool recomputes the
-  pin from the report's current span, so a verdict can't attach to a stale/wrong span.
-- **Backward compatible.** A bare `source(citekey, quote=…)` with a hand-stamped
-  `@reviewed(support=…)` is the unchanged legacy path; add `paraphrase=` to upgrade the support
-  judgment from a trusted boolean to an executable check. Full authoring rubric (primary /
-  independence / abstract-only / disconfirmers) + the refresh command: [report.md](report.md).
+Grounding a *third-party* fact on a published paper — `@kind("literature")` +
+`source(citekey, quote=…, paraphrase=…)`, the machine support judge (`res judge`), the locator-ladder
+strength ceiling, **bibliometric** claims, **paper-claims**, and **litreviews** — is **no longer part
+of scientist.** It split out into the separate **[research](../../research/SKILL.md)** skill; the full
+authoring rubric is [research/references/lit-claims.md](../../research/references/lit-claims.md). A
+`[lit:]` claim module still lives in the data tree (`program/claims/test_literature.py`) and a
+`sci report` can *cite* it, but author and re-judge it with `res` and `from research import source` —
+not from here. This section of scientist is about its own **data-grounded** `[claim:]`s (above).
 
 ## Run it
 

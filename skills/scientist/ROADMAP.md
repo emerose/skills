@@ -98,18 +98,21 @@ write the claim first).
 - **Traceability.** `sci trace <report.md>` puts a report node atop the DAG, walkable down through each
   cited claim to the original measurements.
 
-### Executable literature support (`source(paraphrase=…)` + `sci judge --list/--record`)
+### Executable literature support (`source(paraphrase=…)` + `res judge --list/--record`)
 
-**Shipped.** The `[lit:]` support judgment is no longer a trusted, hand-stamped human boolean the
+**Shipped — now owned by the [research](../research/SKILL.md) skill** (the literature layer split out
+of scientist; the `res judge` command and the authoring rubric live in
+[research/references/lit-claims.md](../research/references/lit-claims.md)). The `[lit:]` support
+judgment is no longer a trusted, hand-stamped human boolean the
 audit never re-checks. `source(citekey, quote=…, paraphrase=…)` upgrades it to a **re-runnable,
 cache-pinned entailment check** — "does quote Q fairly support paraphrase P?" — bundled into the
 existing claims infrastructure (same `[lit:]` shape, audit, render). The discipline:
 
 - **No model in the tool — the caller records the verdict.** The orchestrating agent is already an
   LLM that read the paper, so the judging is done by it (ideally a *fresh-context judge subagent*,
-  for independence — don't let the authoring context grade its own paraphrase). `sci judge --list`
+  for independence — don't let the authoring context grade its own paraphrase). `res judge --list`
   surfaces the missing/stale work (`{span_text, paraphrase, evidence_sha, …}`); the agent judges;
-  `sci judge --record` writes `{supported, rationale}` to a sidecar verdict cache
+  `res judge --record` writes `{supported, rationale}` to a sidecar verdict cache
   (`lit_judgments.json`). The pytest path and audit only *read* the cache, so the claims suite stays
   offline + deterministic.
 - **Cache key** `(quote_sha, paraphrase)`; a quote/span edit → `stale-judgment`, a paraphrase edit →
@@ -120,8 +123,8 @@ existing claims infrastructure (same `[lit:]` shape, audit, render). The discipl
   (`moderate`), tier 3 whole-doc (`weak`); the audit enforces the ceiling.
 - **Additive / backward-compatible.** Legacy `quote=` + `@reviewed(support=…)` claims are
   unchanged; the judge is opt-in per source via `paraphrase=`, and stays `needs-judgment`
-  (non-blocking) until recorded. Docs in [references/report.md](references/report.md) +
-  [references/derive-claims.md](references/derive-claims.md).
+  (non-blocking) until recorded. Docs in
+  [research/references/lit-claims.md](../research/references/lit-claims.md).
 
 ## Resolved
 

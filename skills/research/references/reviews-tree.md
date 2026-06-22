@@ -8,11 +8,11 @@ richness is absorbed by **more nodes**, and any fact is reached in `depth × B`.
 *is* "the review."**
 
 This guide is the judgment half — when to split, how to roll up, what the critic must check. The
-tool (`sci litreview …`) only checks the objective graph/size/structure and scaffolds files; the
+tool (`res litreview …`) only checks the objective graph/size/structure and scaffolds files; the
 seams and the synthesis are yours.
 
 > A flat `review.md` is the **degenerate one-node tree** (`levels=0`). Everything in
-> [references/litreview.md](litreview.md) — the PROSPERO/PRISMA `protocol.md` + `screening.jsonl`,
+> [litreview.md](litreview.md) — the PROSPERO/PRISMA `protocol.md` + `screening.jsonl`,
 > the `[lit:]` backbone, the gaps section, consumption via `[litreview:]` — still holds, **at the
 > review level (the root)**. This guide adds only the tree. There is no migration: a review grows
 > into a tree when a node gets too big.
@@ -72,7 +72,7 @@ frontmatter is a convenience mirror the audit cross-checks.
 
 Node *content* is set by the local fidelity the subtopic demands; **`B` only caps grain.**
 
-- **Split when a node exceeds `B`.** `sci litreview audit` flags `node-over-B` (a word-count proxy,
+- **Split when a node exceeds `B`.** `res litreview audit` flags `node-over-B` (a word-count proxy,
   default ~500, `$SCIENTIST_REVIEW_B_WORDS`). The remedy is **never "compress harder"** — it is to
   **fragment into subtopic leaves + a rollup parent.** Cut at a *real* subtopic boundary (a
   mechanism, an organ, a dose regime, a contested axis), not an arbitrary midpoint. Richness ⇒ more
@@ -85,13 +85,13 @@ Node *content* is set by the local fidelity the subtopic demands; **`B` only cap
 
 Depth and fan-out are **derived**, not chosen: `levels ≈ log_k(U / claims-per-leaf)`, where `U` is
 the unique admitted paper-claims (the breadth set fixed by `ε`-saturation and recorded in
-`screening.jsonl` — see [references/litreview.md](litreview.md)). Small field → one flat node; rich
+`screening.jsonl` — see [litreview.md](litreview.md)). Small field → one flat node; rich
 field → a bushier/deeper tree.
 
 ### The mechanics of a split
 
 ```
-sci litreview <slug> --add-node <new-id> --parent <parent-id>   # scaffold nodes/<new-id>.md
+res litreview <slug> --add-node <new-id> --parent <parent-id>   # scaffold nodes/<new-id>.md
 ```
 
 `sci` **only lays out the file** (frontmatter + an empty synthesis stub). **You** then:
@@ -100,7 +100,7 @@ sci litreview <slug> --add-node <new-id> --parent <parent-id>   # scaffold nodes
 2. **Add the edge**: cite `[litreview:<new-id>]` from the parent's synthesis.
 3. **Write the parent's rollup** of the new child (a sentence or two; see §3) and the child's
    `summary`.
-4. `sci litreview <slug> --write-rollup-pins` to record each rollup's `rolled_against`, then
+4. `res litreview <slug> --write-rollup-pins` to record each rollup's `rolled_against`, then
    re-audit.
 
 Moving a citation is resolution-safe: a `[lit:]` id resolves the same wherever it lives.
@@ -148,7 +148,7 @@ A rollup cites children + a thin cross-cutting layer (a new connective `[lit:]` 
 
 ## 5. What `sci` checks (mechanical) vs the critic (judgment)
 
-**Mechanical — `sci litreview audit <slug>`, deterministic, blocking unless noted:**
+**Mechanical — `res litreview audit <slug>`, deterministic, blocking unless noted:**
 
 - **Well-formed tree** — the `[litreview:]` node-edge graph is a single rooted tree: one root
   (`review.md`), acyclic, every non-root cited by **exactly one** parent. (`malformed`/`root-is-child`,
@@ -173,14 +173,14 @@ A rollup cites children + a thin cross-cutting layer (a new connective `[lit:]` 
 
 This is the skill's KEEP-as-code-vs-guide line: `sci` checks the objective graph/size/structure;
 every judgment about *seam, honesty, and conflict-propagation* stays with the critic. Run it after
-`sci litreview audit` is GROUNDED — green means the tree is well-formed, not that it is *good*.
+`res litreview audit` is GROUNDED — green means the tree is well-formed, not that it is *good*.
 
 ---
 
 ## 6. Reading & rendering — storage ≠ presentation
 
 ```
-sci litreview <slug> --render review.pdf        # tree → one linear doc (facts resolved fresh)
+res litreview <slug> --render review.pdf        # tree → one linear doc (facts resolved fresh)
 ```
 
 The tree is the **store**; the rendered `review.pdf` is a **derived view** — generated from the
@@ -188,7 +188,7 @@ tree, never hand-edited and never treated as source. It is, though, the **commit
 deliverable**: render `review.pdf` beside `review.md` and commit it (markdown source ≠ a readable
 survey — the PDF is what a reader actually opens), then **re-render and re-commit whenever the tree
 or any cited fact changes**. Treat it as a checked-in build artifact, not disposable scratch: if
-`sci litreview --render` would change the bytes, the committed copy is stale and must be
+`res litreview --render` would change the bytes, the committed copy is stale and must be
 regenerated — never edit the PDF to "fix" it. `--render` linearizes
 depth-first — the root's synthesis is the overview, each child a nested section (heading depth =
 tree depth), recursing in citation order — and every `[lit:]`/`[claim:]` number is pulled **fresh**
