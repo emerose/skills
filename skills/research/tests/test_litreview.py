@@ -750,3 +750,30 @@ def test_stale_grounding_warns_when_module_is_newer(tmp_path):
     assert res.get("warnings")
     assert any("re-run pytest --grounding-out" in w["detail"] for w in res["warnings"])
     assert "stale-grounding" in LR.render_audit(res)
+
+
+# --------------------------------------------------------------------------- #
+# list_reviews — the "what context exists" coverage scan (res litreview --list)
+# --------------------------------------------------------------------------- #
+def test_list_reviews_scans_the_tree(tmp_path):
+    _full_litreview(tmp_path, slug="it-biodist")
+    _full_litreview(tmp_path, slug="aso-chemistry")
+    rows = LR.list_reviews(tmp_path)
+    assert [r["id"] for r in rows] == ["program::aso-chemistry", "program::it-biodist"]
+    biodist = next(r for r in rows if r["slug"] == "it-biodist")
+    assert biodist["title"] == "IT ASO biodistribution"
+    assert biodist["question"] == "How a lumbar ASO distributes across the CNS."
+    assert biodist["as_of"] == "2026-06-19"
+    assert biodist["sources"] == ["openalex", "pubmed"]
+    assert biodist["funnel"] == {"identified": 4, "included": 3, "excluded": 1, "pending": 0}
+    assert biodist["tree"] is False
+    # render is human-readable and surfaces the citation id + question
+    out = LR.render_list(rows)
+    assert "[litreview:program::it-biodist]" in out
+    assert "How a lumbar ASO distributes across the CNS." in out
+
+
+def test_list_reviews_empty_tree(tmp_path):
+    (tmp_path / "program").mkdir()
+    assert LR.list_reviews(tmp_path) == []
+    assert "no litreviews found" in LR.render_list([])

@@ -72,6 +72,7 @@ library.
 
 ```sh
 # Literature reviews (neutral PROSPERO/PRISMA surveys)
+res litreview --list                                  # scan every litreview + its question/funnel — "what context already exists"
 res new-litreview <slug>                              # scaffold protocol.md + screening.jsonl + review.md + claim module
 res litreview <review.md> --ingest-discover <bib-discover.json>   # seed the PRISMA screening log
 res litreview <review.md>                             # audit: every [lit:] backed, literature-only, protocol+screening committed

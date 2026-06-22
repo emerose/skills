@@ -116,6 +116,12 @@ still live in the data tree (`program/claims/test_literature.py`, or a litreview
 
 #### `[litreview:]` — cite a neutral literature survey (protocol-keyed staleness pin)
 
+Citing a litreview is the **expected way a report establishes a load-bearing subtopic's context** —
+not an optional extra. The report-side discipline (consult existing litreviews, run new ones as
+needed, with individual `[lit:]` paper cites still encouraged for the details) lives in
+[report-authoring.md](report-authoring.md) → *Consult the literature through litreviews*; this section
+is the citation/staleness mechanics.
+
 A report can ground a whole topic on a **litreview** (`kind=litreview` — a thesis-independent,
 neutral survey of the third-party literature a report argues *from*; the full discipline is in
 [litreview.md](../../research/references/litreview.md)) with **`[litreview:<id>]`**, where `<id>` is `<exp-or-program>::<slug>`
