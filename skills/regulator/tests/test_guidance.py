@@ -26,6 +26,45 @@ FEED = {
 }
 
 
+# The real static-corpus schema: a bare list of FDA Drupal-field objects.
+FDA_CORPUS = [
+    {
+        "title": '<a href="/regulatory-information/search-fda-guidance-documents/nonclinical-testing-individualized-antisense-oligonucleotide">Nonclinical Testing of Individualized Antisense Oligonucleotide Drug Products</a>',
+        "field_associated_media_2": '<a href="/media/159513/download">PDF (456 KB)<span class="sr-only">PDF</span></a>',
+        "field_issue_datetime": "12/01/2021",
+        "field_issuing_office_taxonomy": "Center for Drug Evaluation and Research",
+        "field_center": "CDER",
+        "topics-product": "Clinical - Medical",
+        "field_final_guidance_1": "Draft",
+        "field_comment_close_date": "",
+        "field_docket_number": '<a href="https://www.regulations.gov/docket/FDA-2021-D-0625">FDA-2021-D-0625</a>',
+        "field_communication_type": "Draft",
+        "field_regulated_product_field": "Drugs",
+    },
+]
+
+
+def test_parse_rows_fda_schema():
+    recs = guidance.parse_rows(FDA_CORPUS)
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["doc_type"] == "guidance"
+    assert r["title"].startswith("Nonclinical Testing of Individualized Antisense")
+    assert r["source_url"].endswith("/nonclinical-testing-individualized-antisense-oligonucleotide")
+    assert r["pdf_url"] == "https://www.fda.gov/media/159513/download"
+    assert r["guidance_id"] == "media-159513"
+    assert r["fda_org"] == "Center for Drug Evaluation and Research"
+    assert r["status"] == "Draft"
+    assert r["docket_number"] == "FDA-2021-D-0625"
+    assert r["regulated_product"] == "Drugs"
+    assert guidance.media_pdf_url(r).endswith("/media/159513/download")
+
+
+def test_search_corpus_fda_regulated_product():
+    recs = guidance.parse_rows(FDA_CORPUS)
+    assert guidance.search_corpus(recs, "antisense drugs")  # title + regulated_product
+
+
 def test_parse_rows_objects():
     recs = guidance.parse_rows(FEED)
     assert len(recs) == 2

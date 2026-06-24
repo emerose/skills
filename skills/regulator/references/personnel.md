@@ -30,6 +30,26 @@ reg list --type personnel
 reg show person-edward-m-cox
 ```
 
+## Authoring non-signers + enriching signers (`reg personnel add`)
+
+The leadership chain that signs *nothing* — HHS Secretary, FDA Commissioner,
+center/office/division directors — won't appear from `build`. Author them, and
+enrich the harvested signers with role/bio, using `personnel add`:
+
+```bash
+reg personnel add "Robert F. Kennedy Jr." --role "Secretary of HHS" --office HHS \
+  --bio "…" --source "https://www.hhs.gov/about/leadership/robert-kennedy.html" --tag hhs
+reg personnel add "Teresa J Buracchio" --role "Director, Office of Neuroscience" \
+  --division "Office of Neuroscience" --center CDER --bio "…" --tag signatory
+```
+
+Both `add` and `build` **upsert/merge**: enriching a signer keeps their harvested
+`signed_reviews`, and re-running `build` keeps a hand-authored `bio`. **Match the
+exact signature name form (incl. middle initial — `Teresa J Buracchio`, not
+`Teresa Buracchio`)** when enriching a signer, or you create a second dossier;
+get the form from `reg personnel build --dry-run`. Fill role/division from the
+fda.gov org charts and the CDER "Key Officials" roster.
+
 ## Proxy signatures
 
 Approval letters are often signed `"X on behalf of Y"`. We record **Y** (the
