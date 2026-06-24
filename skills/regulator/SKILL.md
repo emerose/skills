@@ -121,6 +121,7 @@ is in [references/commands.md](references/commands.md).
 | `guidance search` `guidance add` | search the cached corpus · ingest a guidance doc by match or URL | [guidance](references/guidance.md) |
 | `adcomm sync <url>` | extract a meeting/hub page's materials; `--add` to ingest (auto-recurses a year hub) | [advisory-committees](references/advisory-committees.md) |
 | `personnel build` | harvest reviewer signatures from ingested reviews into dossiers (`--dry-run`) | [personnel](references/personnel.md) |
+| `import [dir]` | index an existing folder of documents **in place** (no move); classifies accessdata-named PDFs as `drugsfda`, the rest as `other` (`--dry-run`) | [commands](references/commands.md) |
 | `list` `search` `show` | browse · substring metadata search · show one document (all take `--type`, `--json`) | [commands](references/commands.md) |
 | `query` `text` | semantic / full-text search **inside** the documents · dump one document's stored text | [commands](references/commands.md) |
 | `tag` `rm` `viewer` `check` | tag · remove · (re)build the HTML viewer · integrity check | [commands](references/commands.md) |
@@ -131,6 +132,11 @@ need to parse. For composition over many records, the Python API
 
 ## Good habits
 
+- **Index an existing archive with `reg import` (dry-run first).** If the library
+  home already holds curated documents (a regulatory archive), `reg import
+  --dry-run` previews how each file classifies; then a real `import` ingests them
+  *in place* (no move) so search/query covers them without disturbing the folder
+  layout. Files named the accessdata way are recognised as `drugsfda` reviews.
 - **Start from Drugs@FDA.** It's the only clean-API source and the highest-value
   one for precedent ("how did a comparable drug get approved"). `drugsfda search`
   to find the application, `drugsfda add --dry-run` to see its documents, then

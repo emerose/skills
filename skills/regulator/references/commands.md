@@ -49,6 +49,29 @@ search, grouped by doc_type). Auto-regenerated after any mutating command.
 Integrity check: missing files, documents with no `doc_type`, duplicate
 citekeys. Reports a worklist; changes nothing.
 
+### `reg import [dir] [--dry-run] [--include-docs]`
+Index an existing folder of regulatory documents **in place** — for an archive
+the user already curated, rather than fetched. Walks `dir` (default: the library
+home) for ingestible files and ingests each into the libkit store *without
+moving it*, preserving the human-organised folder structure. Classification is
+best-effort from the filename/path:
+
+- Names matching the accessdata Drugs@FDA convention (`206488Orig1s000MedR.pdf`)
+  become `drugsfda` records with the application number, submission, and review
+  type parsed out, and the brand/ingredient pulled from a `NN_Drug_Brand`
+  program folder.
+- Everything else becomes an `other` record titled from the filename, tagged
+  with its program folder.
+
+`--dry-run` previews the classification (no ingest/embed — free and offline).
+The managed `docs/` tree is skipped by default (those files are indexed when
+fetched); `--include-docs` re-walks it. Re-running is idempotent (libkit
+byte-dedup + per-type natural keys). **Caveat:** an imported review's
+`application_number` is the bare digits (the NDA/BLA prefix isn't in the
+accessdata filename), so it won't dedup against a later canonical
+`reg drugsfda add NDA…` of the same review — treat import as "make the existing
+archive searchable," and prefer `drugsfda add` when you want canonical metadata.
+
 ## Source commands (see per-source references)
 
 - `reg drugsfda search|add` → [drugs-at-fda](drugs-at-fda.md)

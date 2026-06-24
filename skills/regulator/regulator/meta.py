@@ -39,7 +39,7 @@ from typing import Any
 # never use these names for regulator-specific data.
 LIBKIT_TOP_LEVEL = frozenset({"title", "date", "source_url", "content_type"})
 
-DOC_TYPES = ("guidance", "drugsfda", "adcomm", "personnel")
+DOC_TYPES = ("guidance", "drugsfda", "adcomm", "personnel", "other")
 
 # Per-type natural-key fields, used for document-level dedup (layered over
 # libkit's byte identity). The first present key whose value matches an existing
@@ -49,6 +49,7 @@ NATURAL_KEYS = {
     "drugsfda": ("doc_url",),  # the accessdata PDF URL is the stable identity
     "adcomm": ("media_id", "doc_url"),
     "personnel": ("person_id",),
+    "other": ("file_path",),  # imported archive files: identity is their in-place path
 }
 
 STOPWORDS = {
@@ -125,6 +126,10 @@ def make_citekey(rec: dict[str, Any]) -> str:
         return "-".join(p for p in (comm, date, mat) if p)
     if dt == "personnel":
         return "person-" + (slug_words(rec.get("name") or "", limit=3, drop_stopwords=False) or "unknown")
+    if dt == "other":
+        prog = slug_words(rec.get("program") or "", limit=2)
+        body = slug_words(rec.get("title") or "", limit=6, drop_stopwords=False)
+        return "-".join(p for p in ("doc", prog, body) if p) or "doc"
     # guidance (and a sane default for anything else)
     year = _year_of(rec)
     body = slug_words(rec.get("title") or rec.get("docket_number") or "", limit=5)
@@ -194,4 +199,7 @@ def one_line(rec: dict[str, Any]) -> str:
         role = rec.get("role") or ""
         div = rec.get("division") or rec.get("office") or rec.get("center") or ""
         return f"[{rec.get('citekey','?')}] {rec.get('name', title)} — {role}, {div}".rstrip(", ")
+    if dt == "other":
+        prog = rec.get("program") or ""
+        return f"[{rec.get('citekey','?')}] {title}" + (f" — {prog}" if prog else "")
     return f"[{rec.get('citekey','?')}] {title} ({year})"

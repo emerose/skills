@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from regulator import meta as _meta  # noqa: E402
 from regulator import viewer as _viewer  # noqa: E402
+from regulator import importer as _importer  # noqa: E402
 from regulator.store import RegStore, EmbedderConfigError  # noqa: E402
 from regulator.sources import drugsfda, guidance, adcomm, personnel  # noqa: E402
 
@@ -284,6 +285,49 @@ async def cmd_check(args: argparse.Namespace, home: Path) -> None:
         print(f"{len(recs)} documents; {len(problems)} problem(s)")
         for p in problems:
             print(f"  - {p}")
+
+
+async def cmd_import(args: argparse.Namespace, home: Path) -> None:
+    """Index an existing folder of regulatory documents *in place* (no move)."""
+    root = Path(args.dir).expanduser().resolve() if args.dir else home
+    if not root.is_dir():
+        die(f"not a directory: {root}")
+    skip = () if args.include_docs else (".download", ".stubs", "docs")
+    files = _importer.walk(root, skip_dirs=skip)
+    records = [(f, _importer.classify_path(f, home)) for f in files]
+    if not records:
+        die(f"no ingestible files under {root}")
+
+    if args.dry_run:
+        from collections import Counter
+        counts = Counter(r["doc_type"] for _, r in records)
+        for f, r in records:
+            print(f"  {r['doc_type']:9} {r['file_path']}")
+        print(f"\n{len(records)} file(s): " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+        print("(re-run without --dry-run to ingest + embed in place)")
+        return
+
+    store = RegStore.open(home)
+    added = dup = failed = 0
+    try:
+        for f, rec in records:
+            try:
+                if await store.find_duplicate(rec) is not None:
+                    dup += 1
+                    continue
+                res = await store.add(rec, file_path=f)  # ingest in place, no move
+                if res["status"] == "added":
+                    added += 1
+                    print(f"  + [{res['record']['citekey']}] {rec['doc_type']}: {rec['file_path']}")
+                else:
+                    dup += 1
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                warn(f"failed to ingest {rec['file_path']}: {e}")
+        _viewer.write(home, await store.all_records())
+    finally:
+        await store.close()
+    print(f"\nindexed {added}, already-had {dup}, failed {failed}")
 
 
 # --------------------------------------------------------------------------- #
@@ -584,6 +628,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("check", cmd_check, "integrity check")
     sp.add_argument("--json", action="store_true")
+
+    sp = add("import", cmd_import, "index an existing folder of documents in place (no move)")
+    sp.add_argument("dir", nargs="?", help="directory to import (default: the library home)")
+    sp.add_argument("--dry-run", action="store_true", help="preview classification without ingesting")
+    sp.add_argument("--include-docs", action="store_true", help="also re-walk the managed docs/ tree")
 
     # ---- drugsfda group ----
     g = sub.add_parser("drugsfda", help="Drugs@FDA: openFDA metadata + accessdata PDFs")
