@@ -1,7 +1,7 @@
 {
   "name": "sq",
-  "version": "0.2.2",
-  "description": "Sam Quigley's research skills, bundled as one plugin: bibliographer (personal academic-paper collection), scientist (provenance-tracked experiment pipeline), and research (literature reviews + grounded [lit:] claims). Invoked as /sq:bibliographer, /sq:scientist, /sq:research. Built on libkit.",
+  "version": "0.3.0",
+  "description": "Sam Quigley's research skills, bundled as one plugin: bibliographer (personal academic-paper collection), scientist (provenance-tracked experiment pipeline), research (literature reviews + grounded [lit:] claims), and regulator (FDA regulatory-document library — guidance, Drugs@FDA approval packages, advisory-committee materials, reviewer dossiers). Invoked as /sq:bibliographer, /sq:scientist, /sq:research, /sq:regulator. Built on libkit.",
   "author": {
     "name": "Sam Quigley",
     "email": "quigley@emerose.com"
@@ -9,5 +9,5 @@
   "homepage": "https://github.com/emerose/skills",
   "repository": "https://github.com/emerose/skills",
   "license": "MIT",
-  "keywords": ["bibliography", "science", "literature-review", "experiments", "claims", "provenance", "citations", "research", "rag", "libkit"]
+  "keywords": ["bibliography", "science", "literature-review", "experiments", "claims", "provenance", "citations", "research", "regulatory", "fda", "rag", "libkit"]
 }
