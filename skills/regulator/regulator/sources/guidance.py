@@ -29,11 +29,31 @@ from typing import Any
 
 import httpx
 
-CORPUS_URL = "https://www.fda.gov/datatables-json/search-for-guidance.json"
+# The full guidance corpus (~2,800 docs) is served as one static JSON file — the
+# DataTables grid on the search page loads it client-side. This static path is
+# NOT bot-gated (unlike the legacy /datatables-json/ AJAX path, which Akamai 503s).
+CORPUS_URL = "https://www.fda.gov/files/api/datatables/static/search-for-guidance.json"
 SEARCH_PAGE = "https://www.fda.gov/regulatory-information/search-fda-guidance-documents"
 
-# Default column order of the DataTables grid (used when rows are arrays rather
-# than keyed objects). Matches the visible columns of the guidance search table.
+# The corpus rows are objects keyed by FDA Drupal field names. Map them to our
+# record fields. The `title` cell is an HTML anchor (title text + landing-page
+# href); `field_associated_media_2` is an HTML anchor to the /media/<id> PDF.
+FDA_FIELDS = {
+    "title": "title",                              # HTML anchor: title + landing page
+    "field_associated_media_2": "pdf",             # HTML anchor: /media/<id>/download
+    "field_issue_datetime": "issue_date",
+    "field_issuing_office_taxonomy": "fda_org",
+    "field_center": "center",
+    "topics-product": "topic",
+    "field_final_guidance_1": "status",
+    "field_comment_close_date": "comment_close",
+    "field_docket_number": "docket_number",        # HTML anchor: regulations.gov docket
+    "field_communication_type": "guidance_type",
+    "field_regulated_product_field": "regulated_product",
+}
+
+# Default column order of the legacy DataTables grid (used only when rows are
+# positional arrays rather than keyed objects).
 DEFAULT_COLUMNS = [
     "document", "issue_date", "fda_org", "topic", "status",
     "open_for_comment", "comment_close", "docket_number", "guidance_type",
@@ -78,13 +98,43 @@ def media_pdf_url(rec: dict[str, Any]) -> str | None:
     return _abs_url(u) if u else None
 
 
-def parse_rows(data: Any, columns: list[str] | None = None) -> list[dict[str, Any]]:
-    """Parse a DataTables payload into guidance records.
+def _fda_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Parse one FDA-schema corpus row (keys like ``field_issue_datetime``)."""
+    mapped = {dst: row.get(src) for src, dst in FDA_FIELDS.items()}
+    landing, title = _first_anchor(str(mapped.get("title") or ""))
+    pdf_href, _ = _first_anchor(str(mapped.get("pdf") or ""))
+    if not title:
+        return None
+    rec: dict[str, Any] = {
+        "doc_type": "guidance",
+        "title": title,
+        "source_url": _abs_url(landing),
+        "issue_date": _strip_tags(str(mapped.get("issue_date") or "")) or None,
+        "fda_org": _strip_tags(str(mapped.get("fda_org") or "")) or None,
+        "center": _strip_tags(str(mapped.get("center") or "")) or None,
+        "topic": _strip_tags(str(mapped.get("topic") or "")) or None,
+        "status": _strip_tags(str(mapped.get("status") or "")) or None,
+        "comment_close": _strip_tags(str(mapped.get("comment_close") or "")) or None,
+        "docket_number": _strip_tags(str(mapped.get("docket_number") or "")) or None,
+        "guidance_type": _strip_tags(str(mapped.get("guidance_type") or "")) or None,
+        "regulated_product": _strip_tags(str(mapped.get("regulated_product") or "")) or None,
+    }
+    pdf = _abs_url(pdf_href)
+    if pdf and _MEDIA_RE.search(pdf):
+        rec["pdf_url"] = pdf
+        m = _MEDIA_RE.search(pdf)
+        rec["guidance_id"] = "media-" + m.group(1) if m else None
+    rec["guidance_id"] = rec.get("guidance_id") or (rec.get("docket_number") or title)[:80] or None
+    return rec
 
-    Accepts either the raw feed (``{"data": [...]}``), a bare list, and rows that
-    are keyed objects *or* positional arrays. The ``document`` cell is HTML
-    holding the title + link; we split it into ``title`` and ``source_url`` (and
-    a ``pdf_url`` when the link is a ``/media/<id>/download``).
+
+def parse_rows(data: Any, columns: list[str] | None = None) -> list[dict[str, Any]]:
+    """Parse a guidance corpus payload into records.
+
+    Accepts the static corpus (a bare list of FDA-schema objects), the legacy
+    DataTables feed (``{"data": [...]}``), and positional-array rows. FDA-schema
+    rows (keyed by ``field_*`` names) are routed to :func:`_fda_row`; anything
+    else falls back to the generic ``document``-cell parsing.
     """
     if isinstance(data, dict):
         rows = data.get("data") or data.get("aaData") or []
@@ -94,6 +144,11 @@ def parse_rows(data: Any, columns: list[str] | None = None) -> list[dict[str, An
 
     out: list[dict[str, Any]] = []
     for row in rows:
+        if isinstance(row, dict) and ("field_issue_datetime" in row or "field_associated_media_2" in row):
+            rec = _fda_row(row)
+            if rec:
+                out.append(rec)
+            continue
         if isinstance(row, dict):
             cells = {k.lower(): v for k, v in row.items()}
             get = lambda k: cells.get(k)  # noqa: E731
@@ -103,7 +158,7 @@ def parse_rows(data: Any, columns: list[str] | None = None) -> list[dict[str, An
         doc_cell = get("document") or get("title") or ""
         href, title = _first_anchor(str(doc_cell))
         url = _abs_url(href)
-        rec: dict[str, Any] = {
+        rec = {
             "doc_type": "guidance",
             "title": title or _strip_tags(str(doc_cell)),
             "source_url": url,
@@ -203,7 +258,7 @@ def search_corpus(records: list[dict[str, Any]], query: str, *, limit: int = 25)
     terms = [t for t in re.split(r"\s+", query.lower()) if t]
     hits = []
     for r in records:
-        hay = " ".join(str(r.get(k) or "") for k in ("title", "topic", "fda_org", "docket_number", "guidance_type", "summary")).lower()
+        hay = " ".join(str(r.get(k) or "") for k in ("title", "topic", "fda_org", "center", "regulated_product", "docket_number", "guidance_type", "summary")).lower()
         if all(t in hay for t in terms):
             hits.append(r)
         if len(hits) >= limit:

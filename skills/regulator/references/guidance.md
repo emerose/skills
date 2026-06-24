@@ -1,25 +1,25 @@
 # FDA Guidance documents (`reg guidance`)
 
-The entire guidance corpus (~4,000 documents) is one JSON feed backing the
-DataTables grid on the guidance search page:
+The entire guidance corpus (~2,800 documents) is one JSON file that the
+DataTables grid on the search page loads client-side:
 
-- feed: `https://www.fda.gov/datatables-json/search-for-guidance.json`
+- corpus: `https://www.fda.gov/files/api/datatables/static/search-for-guidance.json`
 - page: `https://www.fda.gov/regulatory-information/search-fda-guidance-documents`
 
-## The bot wall (important)
+## Endpoints (which one, and the bot wall)
 
-That feed sits behind **Akamai bot protection** — a request from a flagged
-egress gets an HTTP 503 challenge. `reg guidance sync` detects this and exits
-with an escape-hatch message rather than caching a challenge page. Two ways
-through:
+`reg guidance sync` uses the **static** corpus file above, which is **not**
+bot-gated — it pulls all ~2,800 records directly, no browser needed. (The legacy
+`/datatables-json/search-for-guidance.json` AJAX path *is* Akamai-gated → HTTP
+503; don't use it.) The corpus is a **bare JSON list of FDA Drupal-field objects**
+(`title`, `field_associated_media_2`, `field_issue_datetime`, …) — `parse_rows`
+maps those field names, splitting the `title` cell into title + landing page and
+`field_associated_media_2` into the `/media/<id>` PDF link.
 
-1. **`--from-file`** — open the feed URL once in a real browser (or pull it from
-   an un-flagged IP), save the JSON, and run
-   `reg guidance sync --from-file <saved.json>`.
-2. Run `reg guidance sync` from a network/egress Akamai doesn't challenge.
-
-The **per-document PDFs** (`https://www.fda.gov/media/<id>/download`) are *not*
-gated, so once the corpus is cached, `guidance add` downloads work normally.
+If a future FDA change breaks the static path, the escape hatch still works:
+open the corpus URL in a real browser, save the JSON, and run `reg guidance sync
+--from-file <saved.json>`. The per-document PDFs (`/media/<id>/download`) are
+ungated regardless.
 
 ## Sync → search → add
 
@@ -29,6 +29,7 @@ reg guidance search "rare disease natural history"
 reg guidance search "accelerated approval" --json
 reg guidance add "rare disease natural history"        # ingest the single match
 reg guidance add "expedited programs" --index 2        # disambiguate by index
+reg guidance add "antisense oligonucleotide" --all     # ingest ALL matches (bulk)
 reg guidance add https://www.fda.gov/media/85393/download --title "Expedited Programs"
 ```
 

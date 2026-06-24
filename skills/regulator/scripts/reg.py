@@ -32,9 +32,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, NoReturn
+
+import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -168,7 +171,8 @@ async def cmd_search(args: argparse.Namespace, home: Path) -> None:
         await store.close()
     terms = args.query.lower().split()
     fields = ("title", "sponsor_name", "brand_name", "active_ingredient", "fda_org",
-              "topic", "docket_number", "committee", "name", "review_type", "guidance_type")
+              "topic", "docket_number", "committee", "name", "review_type", "guidance_type",
+              "role", "division", "office", "center", "program", "regulated_product")
     hits = [
         r for r in recs
         if all(any(t in str(r.get(f) or "").lower() for f in fields) for t in terms)
@@ -330,6 +334,57 @@ async def cmd_import(args: argparse.Namespace, home: Path) -> None:
     print(f"\nindexed {added}, already-had {dup}, failed {failed}")
 
 
+async def cmd_add(args: argparse.Namespace, home: Path) -> None:
+    """Ingest one document from a URL or local file as an arbitrary doc_type.
+
+    The general-purpose escape hatch for documents the source ingesters don't
+    cover — an FDA PFDD report, a patient-experience report, a hand-written
+    landscape note. URLs download into the tree; local files are ingested in place.
+    """
+    src = args.source
+    rec: dict[str, Any] = {"doc_type": args.type, "title": args.title}
+    if args.program:
+        rec["program"] = args.program
+    if args.tag:
+        rec["tags"] = [args.type, *args.tag]
+    is_url = bool(re.match(r"^https?://", src))
+    store = RegStore.open(home)
+    try:
+        if is_url:
+            rec["source_url"] = src
+            if not rec["title"]:
+                rec["title"] = src.rstrip("/").rsplit("/", 1)[-1]
+            rec.setdefault("citekey", await store.unique_citekey(_meta.make_citekey(rec)))
+            dl = _download_dir(home)
+            ext = ".pdf" if ".pdf" in src.lower() or "/download" in src.lower() else (Path(src).suffix or ".pdf")
+            tmp = dl / (re.sub(r"[^A-Za-z0-9._-]", "_", rec["citekey"])[:80] + ext)
+            async with httpx.AsyncClient(
+                headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"},
+                timeout=httpx.Timeout(180.0), follow_redirects=True,
+            ) as cl:
+                async with cl.stream("GET", src) as resp:
+                    resp.raise_for_status()
+                    with tmp.open("wb") as fh:
+                        async for chunk in resp.aiter_bytes(1 << 16):
+                            fh.write(chunk)
+            res = await store.add_document(rec, src=tmp, move=True)
+        else:
+            p = Path(src).expanduser().resolve()
+            if not p.is_file():
+                die(f"no such file: {p}")
+            if not rec["title"]:
+                rec["title"] = p.stem
+            res = await store.add(rec, file_path=p)  # in place
+        _viewer.write(home, await store.all_records())
+    finally:
+        await store.close()
+    if res["status"] == "duplicate":
+        print(f"already have: [{res['record']['citekey']}] {res['record'].get('title')}")
+    else:
+        print(f"{res['status']}: [{res['record']['citekey']}] {res['record'].get('title')}")
+
+
 # --------------------------------------------------------------------------- #
 # drugsfda
 # --------------------------------------------------------------------------- #
@@ -436,47 +491,69 @@ async def cmd_guidance_search(args: argparse.Namespace, home: Path) -> None:
     print(f"\n{len(hits)} match(es) — `reg guidance add <#>` to ingest by index")
 
 
+async def _ingest_one_guidance(store: RegStore, cl: Any, home: Path, rec: dict[str, Any]) -> dict[str, Any]:
+    """Download (or stub) + ingest one guidance record; return the store result."""
+    rec = dict(rec)
+    pdf = guidance.media_pdf_url(rec)
+    if not pdf:
+        return await store.add_document(rec, src=None)
+    rec.setdefault("citekey", await store.unique_citekey(_meta.make_citekey(rec)))
+    path = await guidance.download(pdf, _download_dir(home), cl=cl, citekey=rec.get("citekey"))
+    return await store.add_document(rec, src=path, move=True)
+
+
 async def cmd_guidance_add(args: argparse.Namespace, home: Path) -> None:
-    # Resolve the target record: a direct /media/ or http URL, or a corpus hit.
-    rec: dict[str, Any] | None = None
+    # Resolve the candidate list: a direct URL, or corpus hit(s).
+    candidates: list[dict[str, Any]] = []
     if args.target.startswith("http"):
-        rec = {"doc_type": "guidance", "title": args.title or args.target,
-               "source_url": args.target, "pdf_url": args.target,
-               "guidance_id": args.target}
+        candidates = [{"doc_type": "guidance", "title": args.title or args.target,
+                       "source_url": args.target, "pdf_url": args.target,
+                       "guidance_id": args.target}]
     else:
         records = guidance.load_corpus(home)
         if not records:
             die("no cached guidance corpus — run `reg guidance sync` first")
-        hits = guidance.search_corpus(records, args.target, limit=50)
-        if args.index is not None:
+        hits = guidance.search_corpus(records, args.target, limit=500 if args.all else 50)
+        if args.all:
+            candidates = hits
+        elif args.index is not None:
             if args.index >= len(hits):
                 die(f"index {args.index} out of range ({len(hits)} hits)")
-            rec = hits[args.index]
+            candidates = [hits[args.index]]
         elif len(hits) == 1:
-            rec = hits[0]
+            candidates = hits
         else:
-            print(f"{len(hits)} matches — re-run with --index N:")
-            for i, r in enumerate(hits[:20]):
+            print(f"{len(hits)} matches — re-run with --index N (or --all to add them all):")
+            for i, r in enumerate(hits[:25]):
                 print(f"  [{i}] {r.get('title')} — {r.get('fda_org','')}")
             return
-    if rec is None:
-        die("could not resolve a guidance document to add")
-    pdf = guidance.media_pdf_url(rec)
+    if not candidates:
+        die("no guidance documents matched")
+
     store = RegStore.open(home)
     cl = guidance.client()
+    added = dup = failed = 0
     try:
-        if not pdf:
-            warn("no downloadable PDF URL found; ingesting a citation-only stub")
-            res = await store.add_document(rec, src=None)
-        else:
-            rec.setdefault("citekey", await store.unique_citekey(_meta.make_citekey(rec)))
-            path = await guidance.download(pdf, _download_dir(home), cl=cl, citekey=rec.get("citekey"))
-            res = await store.add_document(rec, src=path, move=True)
+        for rec in candidates:
+            if await store.find_duplicate(rec) is not None:
+                dup += 1
+                continue
+            try:
+                res = await _ingest_one_guidance(store, cl, home, rec)
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                warn(f"failed: {rec.get('title')}: {e}")
+                continue
+            if res["status"] in ("added", "merged"):
+                added += 1
+                print(f"  + [{res['record']['citekey']}] {res['record'].get('title')}")
+            else:
+                dup += 1
         _viewer.write(home, await store.all_records())
     finally:
         await cl.aclose()
         await store.close()
-    print(f"{res['status']}: [{res['record']['citekey']}] {res['record'].get('title')}")
+    print(f"\nadded {added}, already-had {dup}, failed {failed}")
 
 
 # --------------------------------------------------------------------------- #
@@ -527,6 +604,61 @@ async def cmd_adcomm_sync(args: argparse.Namespace, home: Path) -> None:
 # --------------------------------------------------------------------------- #
 # personnel
 # --------------------------------------------------------------------------- #
+def _merge_person(existing: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """Overlay ``new``'s non-empty fields onto ``existing`` (each side is
+    authoritative for what it carries): a signature harvest keeps a hand-authored
+    bio, and an authored bio keeps the harvested signed-review list."""
+    merged = dict(existing or {})
+    for k, v in (new or {}).items():
+        if v in (None, "", [], {}):
+            continue
+        merged[k] = v
+    merged["doc_type"] = "personnel"
+    if merged.get("signed_reviews"):
+        merged["n_signed_reviews"] = len(merged["signed_reviews"])
+    return merged
+
+
+async def _upsert_person(store: RegStore, home: Path, person: dict[str, Any]) -> dict[str, Any]:
+    """Create or update a personnel dossier, merging with any existing record."""
+    ck = _meta.make_citekey(person)
+    existing = await store.get_by_citekey(ck)
+    merged = _merge_person(existing or {}, person)
+    slug = merged.get("person_id") or personnel.person_slug(merged.get("name") or "unknown")
+    md = personnel.dossier_markdown(merged)
+    tmp = _download_dir(home) / f"{slug}.md"
+    tmp.write_text(md, encoding="utf-8")
+    if existing:
+        await store.remove(existing["citekey"], delete_file=True)
+    return await store.add_document(merged, src=tmp, move=True, force=True)
+
+
+async def cmd_personnel_add(args: argparse.Namespace, home: Path) -> None:
+    """Author or enrich a dossier for one person (e.g. a leader who signed nothing)."""
+    person: dict[str, Any] = {
+        "doc_type": "personnel", "name": args.name,
+        "person_id": personnel.person_slug(args.name), "title": args.name,
+    }
+    for k in ("role", "division", "office", "center"):
+        v = getattr(args, k, None)
+        if v:
+            person[k] = v
+    if args.bio:
+        person["bio"] = args.bio
+    elif args.bio_file:
+        person["bio"] = Path(args.bio_file).expanduser().read_text(encoding="utf-8")
+    if args.source:
+        person["sources"] = args.source
+    person["tags"] = ["personnel", *(args.tag or [])]
+    store = RegStore.open(home)
+    try:
+        res = await _upsert_person(store, home, person)
+        _viewer.write(home, await store.all_records())
+    finally:
+        await store.close()
+    print(f"{res['status']}: [{res['record']['citekey']}] {res['record'].get('name')}")
+
+
 async def cmd_personnel_build(args: argparse.Namespace, home: Path) -> None:
     """Harvest reviewer signatures from the drugsfda docs already in the library."""
     store = RegStore.open(home, read_only=True)
@@ -553,7 +685,7 @@ async def cmd_personnel_build(args: argparse.Namespace, home: Path) -> None:
         print("no signatures found (ingest some Drugs@FDA reviews first, e.g. `reg drugsfda add NDA…`)")
         return
     if args.dry_run:
-        for slug, p in sorted(people.items()):
+        for p in sorted(people.values(), key=lambda x: x.get("person_id") or ""):
             print(f"  {p['name']:30} {p['n_signed_reviews']} review(s)  [{', '.join(p.get('review_disciplines') or [])}]")
         print(f"\n{len(people)} person(s) — re-run without --dry-run to write dossiers")
         return
@@ -561,16 +693,10 @@ async def cmd_personnel_build(args: argparse.Namespace, home: Path) -> None:
     store = RegStore.open(home)
     written = 0
     try:
-        for slug, p in people.items():
-            existing = await store.get_by_citekey(_meta.make_citekey(p))
-            md = personnel.dossier_markdown(p)
-            tmp = _download_dir(home) / f"{slug}.md"
-            tmp.write_text(md, encoding="utf-8")
-            if existing:
-                await store.remove(existing["citekey"], delete_file=True)
-            await store.add_document(p, src=tmp, move=True, force=True)
+        for p in people.values():
+            res = await _upsert_person(store, home, p)  # preserves any hand-authored bio/role
             written += 1
-            print(f"  + person-{slug}: {p['name']} ({p['n_signed_reviews']} reviews)")
+            print(f"  + [{res['record']['citekey']}] {p['name']} ({p['n_signed_reviews']} reviews)")
         _viewer.write(home, await store.all_records())
     finally:
         await store.close()
@@ -634,6 +760,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", help="preview classification without ingesting")
     sp.add_argument("--include-docs", action="store_true", help="also re-walk the managed docs/ tree")
 
+    sp = add("add", cmd_add, "ingest one document from a URL or local file (any doc_type)")
+    sp.add_argument("source", help="an http(s) URL or a local file path")
+    sp.add_argument("--type", default="other", choices=_meta.DOC_TYPES, help="doc_type (default: other)")
+    sp.add_argument("--title", help="document title")
+    sp.add_argument("--program", help="program/grouping label")
+    sp.add_argument("--tag", nargs="*", help="extra tags")
+
     # ---- drugsfda group ----
     g = sub.add_parser("drugsfda", help="Drugs@FDA: openFDA metadata + accessdata PDFs")
     gs = g.add_subparsers(dest="sub", required=True)
@@ -665,6 +798,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_guidance_add)
     s.add_argument("target", help="a search string, or a direct /media/<id>/download URL")
     s.add_argument("--index", type=int, help="pick hit N when a search string is ambiguous")
+    s.add_argument("--all", action="store_true", help="ingest ALL matches of the search string")
     s.add_argument("--title", help="title to use when adding by raw URL")
 
     # ---- adcomm group ----
@@ -685,6 +819,17 @@ def build_parser() -> argparse.ArgumentParser:
     s = gs.add_parser("build", help="harvest reviewer signatures from ingested Drugs@FDA reviews")
     s.set_defaults(fn=cmd_personnel_build)
     s.add_argument("--dry-run", action="store_true")
+    s = gs.add_parser("add", help="author/enrich a dossier for one person (e.g. a non-signer leader)")
+    s.set_defaults(fn=cmd_personnel_add)
+    s.add_argument("name")
+    s.add_argument("--role")
+    s.add_argument("--division")
+    s.add_argument("--office")
+    s.add_argument("--center")
+    s.add_argument("--bio", help="biography text")
+    s.add_argument("--bio-file", help="read biography from a markdown/text file")
+    s.add_argument("--source", nargs="*", help="source URLs/citations")
+    s.add_argument("--tag", nargs="*", help="extra tags")
 
     return p
 

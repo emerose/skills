@@ -122,6 +122,7 @@ is in [references/commands.md](references/commands.md).
 | `adcomm sync <url>` | extract a meeting/hub page's materials; `--add` to ingest (auto-recurses a year hub) | [advisory-committees](references/advisory-committees.md) |
 | `personnel build` | harvest reviewer signatures from ingested reviews into dossiers (`--dry-run`) | [personnel](references/personnel.md) |
 | `import [dir]` | index an existing folder of documents **in place** (no move); classifies accessdata-named PDFs as `drugsfda`, the rest as `other` (`--dry-run`) | [commands](references/commands.md) |
+| `add <url\|file>` | ingest one arbitrary document (any `--type`, default `other`) — the escape hatch for PFDD reports, landscape notes, any FDA PDF the source ingesters don't cover | [commands](references/commands.md) |
 | `list` `search` `show` | browse · substring metadata search · show one document (all take `--type`, `--json`) | [commands](references/commands.md) |
 | `query` `text` | semantic / full-text search **inside** the documents · dump one document's stored text | [commands](references/commands.md) |
 | `tag` `rm` `viewer` `check` | tag · remove · (re)build the HTML viewer · integrity check | [commands](references/commands.md) |
@@ -153,12 +154,18 @@ need to parse. For composition over many records, the Python API
 
 ## Gotchas (learned the hard way)
 
-- **The guidance JSON feed is Akamai bot-gated.** `reg guidance sync` from a
-  flagged egress gets HTTP 503 and exits with an escape-hatch message. Fetch
-  `https://www.fda.gov/datatables-json/search-for-guidance.json` once in a real
-  browser (or from an un-flagged IP) and pass it with `--from-file`. The
-  individual guidance PDFs (`/media/<id>/download`) are **not** gated, so once the
-  corpus is cached, `guidance add` works fine.
+- **Guidance corpus: use the static endpoint, not the legacy AJAX feed.** The
+  search page's grid loads from a static JSON file
+  (`/files/api/datatables/static/search-for-guidance.json`, ~2,800 records) that
+  is **not** bot-gated — that's what `reg guidance sync` now uses. The old
+  `/datatables-json/...` AJAX path *is* Akamai-gated (HTTP 503); if a future FDA
+  change breaks the static path, `--from-file` still accepts a browser-saved copy
+  (the static JSON is a bare list of `field_*`-keyed objects, which `parse_rows`
+  handles). Individual guidance PDFs (`/media/<id>/download`) are ungated.
+- **Bulk-add guidance with `--all`.** `reg guidance add "<terms>" --all` ingests
+  every corpus match of a search string (dedup is automatic). Drive a curated set
+  of topic queries (oligonucleotide, gene therapy, rare disease, expedited
+  programs, surrogate endpoint, …) rather than adding one at a time.
 - **An AdComm *year hub* has no document links — only meeting links.** The
   materials live on the per-meeting pages. `reg adcomm sync` handles both: given a
   hub it auto-recurses one level into each meeting page and aggregates (can be
@@ -167,12 +174,18 @@ need to parse. For composition over many records, the Python API
 - **FDA review PDFs are often scanned.** Without `DATALAB_API_KEY` they ingest as
   poor text and `query` won't find anything in them. This source needs OCR more
   than bibliographer's papers do.
-- **Personnel is derived, not fetched.** `reg personnel build` reads the
-  *already-ingested* Drugs@FDA reviews and parses their electronic-signature
-  pages — so it only finds people whose reviews you've ingested. Approval letters
-  often carry a proxy signature ("X on behalf of Y"); we record Y (the official of
-  record) as the person and X as `signed_by`. Enrich a dossier's bio/role/division
-  by web research (org charts at fda.gov give office/division directors).
+- **Personnel: harvest with `build`, author/enrich with `add`.** `reg personnel
+  build` reads the *already-ingested* Drugs@FDA reviews and parses their
+  electronic-signature pages — so it only finds people whose reviews you've
+  ingested (approval letters carry proxy signatures "X on behalf of Y"; we record
+  Y as the person and X as `signed_by`). For the leadership chain who *signed
+  nothing* (HHS Secretary, Commissioner, center/office directors), use `reg
+  personnel add "<name>" --role … --division … --bio … --source …` to author a
+  dossier from web research (fda.gov org charts give office/division directors).
+  Both `add` and `build` **upsert/merge**: enriching a signer keeps their harvested
+  signed-review list, and re-running `build` keeps a hand-authored bio. **Match the
+  signature name form** (incl. middle initial, e.g. `Teresa J Buracchio`) when
+  enriching a signer, or you'll create a second dossier.
 - **Application numbers carry a prefix.** Pass `NDA205834` / `BLA761234`, not a
   bare number — the prefix distinguishes drug (NDA/ANDA) from biologic (BLA).
 

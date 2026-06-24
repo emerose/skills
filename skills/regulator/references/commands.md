@@ -45,6 +45,14 @@ and prunes the now-empty folder.
 (Re)build the self-contained `index.html` browser viewer (filter + free-text
 search, grouped by doc_type). Auto-regenerated after any mutating command.
 
+### `reg add <url|file> [--type T] [--title …] [--program …] [--tag …]`
+Ingest **one** document the source ingesters don't cover — an FDA PFDD "Voice of
+the Patient" report, a patient-experience report, a hand-written landscape note,
+any FDA PDF. A URL is downloaded into the tree; a local file is ingested in
+place. `--type` defaults to `other`. Use this for the disease-/modality-level
+context docs that matter for unapproved programs (FDA publishes no review
+packages pre-approval, so there's nothing program-specific to fetch).
+
 ### `reg check [--json]`
 Integrity check: missing files, documents with no `doc_type`, duplicate
 citekeys. Reports a worklist; changes nothing.
