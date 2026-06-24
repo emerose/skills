@@ -1,0 +1,661 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["libkit>=0.5.0", "pypdf>=4.0", "httpx>=0.27", "diskcache>=5.6", "platformdirs>=4.0"]
+# ///
+"""reg — a libkit-backed library of FDA regulatory documents.
+
+The collection lives in a "library" directory (default: ~/.regulator, override
+with --home or REGULATOR_HOME) containing:
+
+    <library>/
+      catalog.duckdb        the libkit store (the single source of truth)
+      docs/                 the organized documents, grouped by type
+      guidance_index.json   a cached copy of the FDA guidance corpus
+      index.html            a self-contained, searchable HTML viewer
+
+libkit (>=0.5.0) IS the store: there is no separate regulator database. Each
+regulatory document is one libkit document; every field — doc_type, title, FDA
+org, application number, status — lives in the document's free-form metadata.
+
+Sources (one subcommand group each):
+  drugsfda   openFDA metadata + accessdata approval-package PDFs (clean API)
+  guidance   the FDA guidance-document corpus (one JSON feed; may be bot-gated)
+  adcomm     advisory-committee briefing docs / transcripts / rosters (scraped)
+  personnel  biographical dossiers from review-PDF signatures + research
+
+Run `reg <command> --help` for details on any command.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import os
+import sys
+from pathlib import Path
+from typing import Any, NoReturn
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from regulator import meta as _meta  # noqa: E402
+from regulator import viewer as _viewer  # noqa: E402
+from regulator.store import RegStore, EmbedderConfigError  # noqa: E402
+from regulator.sources import drugsfda, guidance, adcomm, personnel  # noqa: E402
+
+FALLBACK_HOME = Path.home() / ".regulator"
+
+
+# --------------------------------------------------------------------------- #
+# env + home
+# --------------------------------------------------------------------------- #
+def _default_home() -> Path:
+    h = os.environ.get("REGULATOR_HOME")
+    return Path(h).expanduser() if h else FALLBACK_HOME
+
+
+def _load_dotenv(home: Path | None = None) -> None:
+    here = Path(__file__).resolve()
+    candidates = [
+        *([home / ".env"] if home is not None else []),
+        Path.cwd() / ".env",
+        *[p / ".env" for p in here.parents],
+        Path.home() / ".env",
+    ]
+    seen: set[Path] = set()
+    for env_path in candidates:
+        if env_path in seen or not env_path.is_file():
+            continue
+        seen.add(env_path)
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+# --------------------------------------------------------------------------- #
+# small helpers
+# --------------------------------------------------------------------------- #
+def die(msg: str, code: int = 1) -> NoReturn:
+    print(f"error: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def warn(msg: str) -> None:
+    print(f"warning: {msg}", file=sys.stderr)
+
+
+def emit_json(obj: Any) -> None:
+    import json
+    print(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+
+
+def _mailto() -> str | None:
+    return os.environ.get("REGULATOR_MAILTO")
+
+
+def _download_dir(home: Path) -> Path:
+    d = home / ".download"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def print_records(records: list[dict[str, Any]]) -> None:
+    if not records:
+        print("(no documents)")
+        return
+    for r in records:
+        print("  " + _meta.one_line(r))
+
+
+# --------------------------------------------------------------------------- #
+# shared library commands
+# --------------------------------------------------------------------------- #
+async def cmd_init(args: argparse.Namespace, home: Path) -> None:
+    store = RegStore.open(home)
+    try:
+        recs = await store.all_records()
+        _viewer.write(home, recs)
+    finally:
+        await store.close()
+    print(f"initialized regulator library at {home}")
+
+
+async def cmd_list(args: argparse.Namespace, home: Path) -> None:
+    store = RegStore.open(home, read_only=True)
+    try:
+        filters = {"doc_type": args.type} if args.type else None
+        recs = await store.all_records(filters)
+    finally:
+        await store.close()
+    recs.sort(key=lambda r: (r.get("doc_type") or "", r.get("citekey") or ""))
+    if args.json:
+        emit_json(recs)
+    else:
+        print_records(recs)
+        print(f"\n{len(recs)} document(s)")
+
+
+async def cmd_show(args: argparse.Namespace, home: Path) -> None:
+    store = RegStore.open(home, read_only=True)
+    try:
+        rec = await store.get_by_citekey(args.citekey)
+    finally:
+        await store.close()
+    if rec is None:
+        die(f"no document with citekey {args.citekey!r}")
+    if args.json:
+        emit_json(rec)
+    else:
+        for k in sorted(rec):
+            if k.startswith("_"):
+                continue
+            print(f"{k:20} {rec[k]}")
+
+
+async def cmd_search(args: argparse.Namespace, home: Path) -> None:
+    """Substring metadata search over the catalog (title + key fields)."""
+    store = RegStore.open(home, read_only=True)
+    try:
+        filters = {"doc_type": args.type} if args.type else None
+        recs = await store.all_records(filters)
+    finally:
+        await store.close()
+    terms = args.query.lower().split()
+    fields = ("title", "sponsor_name", "brand_name", "active_ingredient", "fda_org",
+              "topic", "docket_number", "committee", "name", "review_type", "guidance_type")
+    hits = [
+        r for r in recs
+        if all(any(t in str(r.get(f) or "").lower() for f in fields) for t in terms)
+    ]
+    hits.sort(key=lambda r: (r.get("doc_type") or "", r.get("citekey") or ""))
+    if args.json:
+        emit_json(hits)
+    else:
+        print_records(hits)
+        print(f"\n{len(hits)} match(es)")
+
+
+async def cmd_query(args: argparse.Namespace, home: Path) -> None:
+    """Semantic / full-text search *inside* the documents (libkit)."""
+    store = RegStore.open(home, read_only=True, want_semantic=not args.fts)
+    try:
+        fts_only = args.fts or not store.semantic_available
+        if not args.fts and not store.semantic_available:
+            warn(f"[FTS-only] no usable embedder ({store.embedder_reason}); running keyword search")
+        hits = await store.query(args.text, limit=args.limit, fts_only=fts_only)
+        out = []
+        for h in hits:
+            md = h.chunk.metadata or {}
+            out.append({
+                "citekey": md.get("citekey"),
+                "doc_type": md.get("doc_type"),
+                "title": h.chunk.title or md.get("title"),
+                "score": round(h.score, 4),
+                "snippet": " ".join((h.chunk.text or "").split())[:280],
+                "source_url": md.get("source_url"),
+            })
+    finally:
+        await store.close()
+    if args.json:
+        emit_json(out)
+    else:
+        if not out:
+            print("(no matches)")
+        for h in out:
+            print(f"  [{h['citekey']}] ({h['doc_type']}) score={h['score']}  {h['title']}")
+            if h["snippet"]:
+                print(f"      … {h['snippet'].strip()[:200]} …")
+
+
+async def cmd_text(args: argparse.Namespace, home: Path) -> None:
+    store = RegStore.open(home, read_only=True)
+    try:
+        rec = await store.get_by_citekey(args.citekey)
+        if rec is None:
+            die(f"no document with citekey {args.citekey!r}")
+        text = await store.document_text(rec["document_id"])
+    finally:
+        await store.close()
+    print(text)
+
+
+async def cmd_tag(args: argparse.Namespace, home: Path) -> None:
+    store = RegStore.open(home)
+    try:
+        rec = await store.set_tags(args.citekey, add=args.add or [], remove=args.remove or [])
+        _viewer.write(home, await store.all_records())
+    except KeyError:
+        die(f"no document with citekey {args.citekey!r}")
+    finally:
+        await store.close()
+    print(f"[{rec['citekey']}] tags: {', '.join(rec.get('tags') or []) or '(none)'}")
+
+
+async def cmd_rm(args: argparse.Namespace, home: Path) -> None:
+    store = RegStore.open(home)
+    try:
+        rec = await store.remove(args.citekey, delete_file=args.delete_file)
+        store.prune_empty_dirs()
+        _viewer.write(home, await store.all_records())
+    except KeyError:
+        die(f"no document with citekey {args.citekey!r}")
+    finally:
+        await store.close()
+    print(f"removed [{rec['citekey']}] {rec.get('title')}")
+
+
+async def cmd_viewer(args: argparse.Namespace, home: Path) -> None:
+    store = RegStore.open(home, read_only=True)
+    try:
+        recs = await store.all_records()
+    finally:
+        await store.close()
+    out = _viewer.write(home, recs)
+    print(f"wrote {out} ({len(recs)} documents)")
+
+
+async def cmd_check(args: argparse.Namespace, home: Path) -> None:
+    store = RegStore.open(home, read_only=True)
+    try:
+        recs = await store.all_records()
+    finally:
+        await store.close()
+    problems = []
+    seen_ck: dict[str, int] = {}
+    for r in recs:
+        ck = r.get("citekey")
+        seen_ck[ck] = seen_ck.get(ck, 0) + 1
+        if r.get("content_state") == "full" and r.get("file_path"):
+            if not (home / r["file_path"]).exists():
+                problems.append(f"missing file: [{ck}] {r['file_path']}")
+        if not r.get("doc_type"):
+            problems.append(f"no doc_type: [{ck}]")
+    for ck, n in seen_ck.items():
+        if n > 1:
+            problems.append(f"duplicate citekey: {ck} ({n}×)")
+    if args.json:
+        emit_json({"documents": len(recs), "problems": problems})
+    else:
+        print(f"{len(recs)} documents; {len(problems)} problem(s)")
+        for p in problems:
+            print(f"  - {p}")
+
+
+# --------------------------------------------------------------------------- #
+# drugsfda
+# --------------------------------------------------------------------------- #
+async def cmd_drugsfda_search(args: argparse.Namespace, home: Path) -> None:
+    results = await drugsfda.search(
+        args.query, field=args.field, limit=args.limit, mailto=_mailto()
+    )
+    if args.json:
+        emit_json(results)
+        return
+    if not results:
+        print("(no applications)")
+        return
+    for a in results:
+        print(f"  {a['application_number']}  {a.get('sponsor_name','')}")
+        bits = []
+        if a.get("brand_names"):
+            bits.append("/".join(a["brand_names"][:3]))
+        if a.get("active_ingredients"):
+            bits.append(", ".join(a["active_ingredients"][:3]))
+        if a.get("latest_approval"):
+            bits.append(f"approved {a['latest_approval']}")
+        if bits:
+            print(f"      {' · '.join(bits)}")
+    print(f"\n{len(results)} application(s)")
+
+
+async def cmd_drugsfda_add(args: argparse.Namespace, home: Path) -> None:
+    summary, docs = await drugsfda.gather_docs(
+        args.appno, pdf_only=True, mailto=_mailto()
+    )
+    if summary is None:
+        die(f"no Drugs@FDA application {args.appno!r}")
+    if args.submission:
+        want = {s.lower() for s in args.submission}
+        docs = [d for d in docs if d.get("submission", "").lower() in want]
+    if args.type:
+        want_t = {t.lower() for t in args.type}
+        docs = [d for d in docs if d.get("review_type", "").lower() in want_t]
+    if not docs:
+        die("no documents matched (try without --submission/--type, or check `reg drugsfda search`)")
+    print(f"{args.appno}: {summary.get('sponsor_name','')} — {len(docs)} document(s) to ingest")
+    if args.dry_run:
+        for d in docs:
+            print(f"  {d['submission']:6} {d['review_type']:14} {d['doc_url']}")
+        return
+
+    store = RegStore.open(home)
+    cl = drugsfda.client(mailto=_mailto())
+    added = dup = failed = 0
+    try:
+        for d in docs:
+            existing = await store.find_duplicate(d)
+            if existing is not None:
+                dup += 1
+                print(f"  = [{existing['citekey']}] already have {d['review_type']}")
+                continue
+            try:
+                path = await drugsfda.download(d["doc_url"], _download_dir(home), cl=cl)
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                warn(f"download failed for {d['doc_url']}: {e}")
+                continue
+            res = await store.add_document(d, src=path, move=True)
+            if res["status"] in ("added", "merged"):
+                added += 1
+                print(f"  + [{res['record']['citekey']}] {d['review_type']} ({d['submission']})")
+            else:
+                dup += 1
+        _viewer.write(home, await store.all_records())
+    finally:
+        await cl.aclose()
+        await store.close()
+    print(f"\nadded {added}, already-had {dup}, failed {failed}")
+
+
+# --------------------------------------------------------------------------- #
+# guidance
+# --------------------------------------------------------------------------- #
+async def cmd_guidance_sync(args: argparse.Namespace, home: Path) -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    try:
+        records = await guidance.fetch_corpus(
+            from_file=Path(args.from_file) if args.from_file else None
+        )
+    except guidance.GatedError as e:
+        die(str(e))
+    path = guidance.save_corpus(home, records)
+    print(f"cached {len(records)} guidance records → {path}")
+
+
+async def cmd_guidance_search(args: argparse.Namespace, home: Path) -> None:
+    records = guidance.load_corpus(home)
+    if not records:
+        die("no cached guidance corpus — run `reg guidance sync` first")
+    hits = guidance.search_corpus(records, args.query, limit=args.limit)
+    if args.json:
+        emit_json(hits)
+        return
+    for i, r in enumerate(hits):
+        print(f"  [{i}] {r.get('title')}")
+        bits = [r.get("fda_org"), r.get("status"), r.get("issue_date"), r.get("docket_number")]
+        print(f"      {' · '.join(b for b in bits if b)}")
+    print(f"\n{len(hits)} match(es) — `reg guidance add <#>` to ingest by index")
+
+
+async def cmd_guidance_add(args: argparse.Namespace, home: Path) -> None:
+    # Resolve the target record: a direct /media/ or http URL, or a corpus hit.
+    rec: dict[str, Any] | None = None
+    if args.target.startswith("http"):
+        rec = {"doc_type": "guidance", "title": args.title or args.target,
+               "source_url": args.target, "pdf_url": args.target,
+               "guidance_id": args.target}
+    else:
+        records = guidance.load_corpus(home)
+        if not records:
+            die("no cached guidance corpus — run `reg guidance sync` first")
+        hits = guidance.search_corpus(records, args.target, limit=50)
+        if args.index is not None:
+            if args.index >= len(hits):
+                die(f"index {args.index} out of range ({len(hits)} hits)")
+            rec = hits[args.index]
+        elif len(hits) == 1:
+            rec = hits[0]
+        else:
+            print(f"{len(hits)} matches — re-run with --index N:")
+            for i, r in enumerate(hits[:20]):
+                print(f"  [{i}] {r.get('title')} — {r.get('fda_org','')}")
+            return
+    if rec is None:
+        die("could not resolve a guidance document to add")
+    pdf = guidance.media_pdf_url(rec)
+    store = RegStore.open(home)
+    cl = guidance.client()
+    try:
+        if not pdf:
+            warn("no downloadable PDF URL found; ingesting a citation-only stub")
+            res = await store.add_document(rec, src=None)
+        else:
+            rec.setdefault("citekey", await store.unique_citekey(_meta.make_citekey(rec)))
+            path = await guidance.download(pdf, _download_dir(home), cl=cl, citekey=rec.get("citekey"))
+            res = await store.add_document(rec, src=path, move=True)
+        _viewer.write(home, await store.all_records())
+    finally:
+        await cl.aclose()
+        await store.close()
+    print(f"{res['status']}: [{res['record']['citekey']}] {res['record'].get('title')}")
+
+
+# --------------------------------------------------------------------------- #
+# adcomm
+# --------------------------------------------------------------------------- #
+async def cmd_adcomm_sync(args: argparse.Namespace, home: Path) -> None:
+    materials = await adcomm.sync_meeting(
+        args.url, committee=args.committee, committee_abbr=args.abbr,
+        meeting_date=args.date,
+    )
+    if not args.add:
+        if args.json:
+            emit_json(materials)
+        else:
+            for m in materials:
+                print(f"  {m['material_type']:12} {m['title']}")
+                print(f"      {m['doc_url']}")
+            print(f"\n{len(materials)} material(s) — re-run with --add to ingest")
+        return
+    store = RegStore.open(home)
+    cl = adcomm.client()
+    added = dup = failed = 0
+    try:
+        for m in materials:
+            if await store.find_duplicate(m) is not None:
+                dup += 1
+                continue
+            try:
+                m.setdefault("citekey", await store.unique_citekey(_meta.make_citekey(m)))
+                path = await adcomm.download(m["doc_url"], _download_dir(home), cl=cl, citekey=m["citekey"])
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                warn(f"download failed for {m['doc_url']}: {e}")
+                continue
+            res = await store.add_document(m, src=path, move=True)
+            if res["status"] in ("added", "merged"):
+                added += 1
+                print(f"  + [{res['record']['citekey']}] {m['material_type']}: {m['title']}")
+            else:
+                dup += 1
+        _viewer.write(home, await store.all_records())
+    finally:
+        await cl.aclose()
+        await store.close()
+    print(f"\nadded {added}, already-had {dup}, failed {failed}")
+
+
+# --------------------------------------------------------------------------- #
+# personnel
+# --------------------------------------------------------------------------- #
+async def cmd_personnel_build(args: argparse.Namespace, home: Path) -> None:
+    """Harvest reviewer signatures from the drugsfda docs already in the library."""
+    store = RegStore.open(home, read_only=True)
+    rows: list[dict[str, Any]] = []
+    try:
+        recs = await store.all_records({"doc_type": "drugsfda"})
+        for r in recs:
+            if r.get("review_type") in ("label", "toc"):
+                continue
+            text = await store.document_text(r["document_id"])
+            for sig in personnel.extract_signatures(text):
+                rows.append({
+                    **sig,
+                    "application_number": r.get("application_number"),
+                    "review_type": r.get("review_type"),
+                    "doc_subtype": r.get("doc_subtype"),
+                    "sponsor_name": r.get("sponsor_name"),
+                    "brand_name": r.get("brand_name"),
+                })
+    finally:
+        await store.close()
+    people = personnel.aggregate(rows)
+    if not people:
+        print("no signatures found (ingest some Drugs@FDA reviews first, e.g. `reg drugsfda add NDA…`)")
+        return
+    if args.dry_run:
+        for slug, p in sorted(people.items()):
+            print(f"  {p['name']:30} {p['n_signed_reviews']} review(s)  [{', '.join(p.get('review_disciplines') or [])}]")
+        print(f"\n{len(people)} person(s) — re-run without --dry-run to write dossiers")
+        return
+
+    store = RegStore.open(home)
+    written = 0
+    try:
+        for slug, p in people.items():
+            existing = await store.get_by_citekey(_meta.make_citekey(p))
+            md = personnel.dossier_markdown(p)
+            tmp = _download_dir(home) / f"{slug}.md"
+            tmp.write_text(md, encoding="utf-8")
+            if existing:
+                await store.remove(existing["citekey"], delete_file=True)
+            await store.add_document(p, src=tmp, move=True, force=True)
+            written += 1
+            print(f"  + person-{slug}: {p['name']} ({p['n_signed_reviews']} reviews)")
+        _viewer.write(home, await store.all_records())
+    finally:
+        await store.close()
+    print(f"\nwrote {written} dossier(s)")
+
+
+# --------------------------------------------------------------------------- #
+# argparse
+# --------------------------------------------------------------------------- #
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="reg", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--home", type=Path, help="library directory (default ~/.regulator or $REGULATOR_HOME)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def add(name, fn, help):
+        sp = sub.add_parser(name, help=help)
+        sp.set_defaults(fn=fn)
+        return sp
+
+    add("init", cmd_init, "create the library + viewer")
+
+    sp = add("list", cmd_list, "list documents")
+    sp.add_argument("--type", choices=_meta.DOC_TYPES)
+    sp.add_argument("--json", action="store_true")
+
+    sp = add("show", cmd_show, "show one document")
+    sp.add_argument("citekey")
+    sp.add_argument("--json", action="store_true")
+
+    sp = add("search", cmd_search, "substring metadata search over the catalog")
+    sp.add_argument("query")
+    sp.add_argument("--type", choices=_meta.DOC_TYPES)
+    sp.add_argument("--json", action="store_true")
+
+    sp = add("query", cmd_query, "semantic / full-text search inside the documents")
+    sp.add_argument("text")
+    sp.add_argument("--limit", type=int, default=8)
+    sp.add_argument("--fts", action="store_true", help="force keyword (BM25) search")
+    sp.add_argument("--json", action="store_true")
+
+    sp = add("text", cmd_text, "print one document's stored text")
+    sp.add_argument("citekey")
+
+    sp = add("tag", cmd_tag, "add/remove tags")
+    sp.add_argument("citekey")
+    sp.add_argument("--add", nargs="*")
+    sp.add_argument("--remove", nargs="*")
+
+    sp = add("rm", cmd_rm, "remove a document")
+    sp.add_argument("citekey")
+    sp.add_argument("--delete-file", action="store_true")
+
+    add("viewer", cmd_viewer, "(re)build the HTML viewer")
+
+    sp = add("check", cmd_check, "integrity check")
+    sp.add_argument("--json", action="store_true")
+
+    # ---- drugsfda group ----
+    g = sub.add_parser("drugsfda", help="Drugs@FDA: openFDA metadata + accessdata PDFs")
+    gs = g.add_subparsers(dest="sub", required=True)
+    s = gs.add_parser("search", help="search applications")
+    s.set_defaults(fn=cmd_drugsfda_search)
+    s.add_argument("query")
+    s.add_argument("--field", choices=["ingredient", "sponsor", "brand", "generic", "appno"])
+    s.add_argument("--limit", type=int, default=25)
+    s.add_argument("--json", action="store_true")
+    s = gs.add_parser("add", help="ingest an application's approval-package PDFs")
+    s.set_defaults(fn=cmd_drugsfda_add)
+    s.add_argument("appno", help="application number, e.g. NDA205834 or BLA761234")
+    s.add_argument("--submission", nargs="*", help="limit to submission tags, e.g. s000 s017")
+    s.add_argument("--type", nargs="*", help="limit to review types, e.g. medical clinpharm summary letter")
+    s.add_argument("--dry-run", action="store_true")
+
+    # ---- guidance group ----
+    g = sub.add_parser("guidance", help="FDA guidance documents")
+    gs = g.add_subparsers(dest="sub", required=True)
+    s = gs.add_parser("sync", help="fetch + cache the full guidance corpus")
+    s.set_defaults(fn=cmd_guidance_sync)
+    s.add_argument("--from-file", help="parse a locally-saved feed JSON (escape hatch for the bot wall)")
+    s = gs.add_parser("search", help="search the cached corpus")
+    s.set_defaults(fn=cmd_guidance_search)
+    s.add_argument("query")
+    s.add_argument("--limit", type=int, default=25)
+    s.add_argument("--json", action="store_true")
+    s = gs.add_parser("add", help="ingest a guidance doc by corpus match or URL")
+    s.set_defaults(fn=cmd_guidance_add)
+    s.add_argument("target", help="a search string, or a direct /media/<id>/download URL")
+    s.add_argument("--index", type=int, help="pick hit N when a search string is ambiguous")
+    s.add_argument("--title", help="title to use when adding by raw URL")
+
+    # ---- adcomm group ----
+    g = sub.add_parser("adcomm", help="advisory-committee materials")
+    gs = g.add_subparsers(dest="sub", required=True)
+    s = gs.add_parser("sync", help="extract (and optionally ingest) a meeting/hub page's materials")
+    s.set_defaults(fn=cmd_adcomm_sync)
+    s.add_argument("url", help="a meeting announcement or year-materials hub URL")
+    s.add_argument("--committee")
+    s.add_argument("--abbr", help="committee abbreviation, e.g. ODAC")
+    s.add_argument("--date", help="meeting date YYYY-MM-DD (else inferred)")
+    s.add_argument("--add", action="store_true", help="download + ingest the materials")
+    s.add_argument("--json", action="store_true")
+
+    # ---- personnel group ----
+    g = sub.add_parser("personnel", help="biographical dossiers on FDA staff")
+    gs = g.add_subparsers(dest="sub", required=True)
+    s = gs.add_parser("build", help="harvest reviewer signatures from ingested Drugs@FDA reviews")
+    s.set_defaults(fn=cmd_personnel_build)
+    s.add_argument("--dry-run", action="store_true")
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    explicit_home = args.home or (Path(os.environ["REGULATOR_HOME"]).expanduser()
+                                  if os.environ.get("REGULATOR_HOME") else None)
+    _load_dotenv(explicit_home)
+    home = (args.home or _default_home()).expanduser()
+    try:
+        asyncio.run(args.fn(args, home))
+    except EmbedderConfigError as e:
+        die(str(e))
+    except FileNotFoundError as e:
+        die(str(e))
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+
+
+if __name__ == "__main__":
+    main()

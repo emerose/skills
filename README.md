@@ -15,6 +15,11 @@ honestly:
 - **[research](skills/research/)** manages the *literature layer* that sits between them —
   reviews and grounded citations of the published record.
 
+A fourth, **[regulator](skills/regulator/)**, is a parallel library for the **FDA
+regulatory record** — guidance documents, Drugs@FDA approval packages, advisory-committee
+materials, and reviewer dossiers — letting an agent reason over FDA's published
+regulations the way bibliographer reasons over academic papers.
+
 They share two internal pieces: **[reportkit](skills/reportkit/)**, the grounded-report
 engine, and **[libkit](#libkit--embeddings)**, the single searchable store the skills
 index into instead of a bespoke database.
@@ -106,6 +111,28 @@ bibliographer library  →  [lit:] claims / paper-claims  →  litreview (PRISMA
 Driven by a `res` CLI plus the shared claims pytest plugin. See
 [`skills/research/SKILL.md`](skills/research/SKILL.md) and
 [`skills/research/references/`](skills/research/references/).
+
+### [regulator](skills/regulator/) — a library of FDA regulatory documents
+
+The regulatory-affairs counterpart to bibliographer. It discovers, downloads, and
+organizes FDA regulatory information from public sources, then indexes it into libkit for
+semantic + full-text search — so an agent can answer "what does FDA guidance say about X,"
+"how was a comparable drug approved / what was in its review," or "who reviewed it." Four
+sources, in descending order of machine-accessibility:
+
+- **Drugs@FDA** (`reg drugsfda`) — openFDA enumerates every approval-package PDF (medical /
+  clin-pharm / statistical reviews, approval letters, labels); accessdata serves them. A
+  clean API end-to-end.
+- **Guidance documents** (`reg guidance`) — the whole corpus is one JSON feed (bot-gated;
+  has a `--from-file` escape hatch), with ungated per-document PDFs.
+- **Advisory committee** (`reg adcomm`) — scrape a meeting page (or a year hub, auto-
+  recursed) for briefing docs, transcripts, and rosters.
+- **Personnel** (`reg personnel`) — no staff API; dossiers are derived from the electronic-
+  signature blocks on ingested review PDFs, enriched by org-chart/web research.
+
+Built on **libkit** through a bundled `reg` CLI. See
+[`skills/regulator/SKILL.md`](skills/regulator/SKILL.md) and
+[`skills/regulator/references/`](skills/regulator/references/).
 
 ## How they fit together
 
