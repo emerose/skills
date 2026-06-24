@@ -1,6 +1,6 @@
 {
   "name": "sq",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Sam Quigley's research skills, bundled as one plugin: bibliographer (personal academic-paper collection), scientist (provenance-tracked experiment pipeline), research (literature reviews + grounded [lit:] claims), and regulator (FDA regulatory-document library — guidance, Drugs@FDA approval packages, advisory-committee materials, reviewer dossiers). Invoked as /sq:bibliographer, /sq:scientist, /sq:research, /sq:regulator. Built on libkit.",
   "author": {
     "name": "Sam Quigley",
