@@ -1,7 +1,7 @@
 {
   "name": "sq",
   "version": "0.4.0",
-  "description": "Sam Quigley's skills, bundled as one plugin: bibliographer (personal academic-paper collection), scientist (provenance-tracked experiment pipeline), research (literature reviews + grounded [lit:] claims), regulator (FDA regulatory-document library — guidance, Drugs@FDA approval packages, advisory-committee materials, reviewer dossiers), and gworkspace (read/act on Gmail, Calendar, and Drive across multiple Google accounts via the gog CLI). Invoked as /sq:bibliographer, /sq:scientist, /sq:research, /sq:regulator, /sq:gworkspace. Research skills built on libkit.",
+  "description": "Sam Quigley's skills, bundled as one plugin: bibliographer (personal academic-paper collection), scientist (provenance-tracked experiment pipeline), research (literature reviews + grounded [lit:] claims), regulator (FDA regulatory-document library — guidance, Drugs@FDA approval packages, advisory-committee materials, reviewer dossiers), and gws (read/act on Gmail, Calendar, and Drive across multiple Google accounts via the gog CLI). Invoked as /sq:bibliographer, /sq:scientist, /sq:research, /sq:regulator, /sq:gws. Research skills built on libkit.",
   "author": {
     "name": "Sam Quigley",
     "email": "quigley@emerose.com"

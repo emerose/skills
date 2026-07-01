@@ -1,5 +1,5 @@
 ---
-name: gworkspace
+name: gws
 description: >-
   Read and act on Google Workspace — Gmail, Google Calendar, and Google Drive
   (plus Docs, Sheets, Slides, Contacts, and Tasks) — across MULTIPLE Google
@@ -21,7 +21,7 @@ description: >-
   papers use bibliographer; this skill is personal Google Workspace, not research.
 ---
 
-# Google Workspace (gworkspace)
+# Google Workspace (gws)
 
 This skill lets you read and act on a user's **Gmail, Google Calendar, and Google
 Drive** (and Docs/Sheets/Slides/Contacts/Tasks) across **multiple Google accounts

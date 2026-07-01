@@ -20,11 +20,11 @@ regulatory record** — guidance documents, Drugs@FDA approval packages, advisor
 materials, and reviewer dossiers — letting an agent reason over FDA's published
 regulations the way bibliographer reasons over academic papers.
 
-A fifth, **[gworkspace](skills/gworkspace/)**, is the odd one out: not a research library
+A fifth, **[gws](skills/gws/)**, is the odd one out: not a research library
 but a **Google Workspace client**. It lets an agent read and act on Gmail, Google Calendar,
 and Google Drive (plus Docs/Sheets/Contacts/Tasks) across **multiple Google accounts at
 once** — driven by the external [`gog`](https://github.com/openclaw/gogcli) CLI rather than
-libkit. See [`skills/gworkspace/SKILL.md`](skills/gworkspace/SKILL.md).
+libkit. See [`skills/gws/SKILL.md`](skills/gws/SKILL.md).
 
 They share two internal pieces: **[reportkit](skills/reportkit/)**, the grounded-report
 engine, and **[libkit](#libkit--embeddings)**, the single searchable store the skills
