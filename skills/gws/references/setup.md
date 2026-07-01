@@ -74,6 +74,22 @@ gog -a me@company.com calendar events --today
 shell, but **in this skill prefer explicit `-a`** so there's never ambiguity
 about which identity ran a command.
 
+### Enable the no-send guard (recommended for every account)
+
+Turn on gog's persistent send guard so email never goes out without a deliberate,
+consented step:
+
+```bash
+gog config no-send set you@gmail.com
+gog config no-send set me@company.com
+gog config no-send list          # confirm which accounts are guarded
+```
+
+With this on, drafting still works but `send`/`forward`/`autoreply`/`drafts send`
+are blocked until the guard is lifted. See the sending-policy section of
+[SKILL.md](../SKILL.md) for how consented sends work. (The guard lives in gog's
+local `config.json`, so it's a per-machine setup step, not part of the skill repo.)
+
 ### Aliases (do this — it makes everything readable)
 
 ```bash

@@ -50,14 +50,22 @@ gog -a work gmail trash <messageId> ...          # reversible (Trash), unlike pe
 Check `gog gmail labels modify --help` and `gog gmail archive --help` for exact
 flag names (`--add-label` / `--remove-label`, message-id positionals vs `--query`).
 
-## Write — confirm before sending
+## Write — sends are guarded by default
 
-Sending, forwarding, and reply-all are **outward-facing**. Default to drafting
-and showing the user the recipients + subject + body; only send after they say
-so. Use `--gmail-no-send` while exploring to hard-block accidental sends, or
-`--dry-run` to preview.
+Both accounts have gog's persistent **no-send guard** on, so `send` / `forward` /
+`autoreply` / `drafts send` fail until it's lifted. See **"Sending email: the
+no-send guard"** in [SKILL.md](../SKILL.md) for the full rule. In short: **draft
+by default; send only with explicit per-message consent, then re-arm the guard
+immediately.**
 
-### Draft first (preferred)
+```bash
+# The consented-send dance (only after the user OKs THIS message):
+gog config no-send remove <account>
+gog -a <account> gmail send --to … --subject … --body …
+gog config no-send set    <account>        # re-arm, every time
+```
+
+### Draft first (preferred — always allowed, even with the guard on)
 
 ```bash
 gog -a work gmail drafts create --to alice@x.com --cc bob@x.com \
@@ -68,7 +76,7 @@ gog -a work gmail drafts update <draftId> --body "…"
 gog -a work gmail drafts send <draftId>        # send after the user approves
 ```
 
-### Send / reply / forward directly (only on explicit go-ahead)
+### Send / reply / forward directly (guard must be lifted; only on explicit per-message consent)
 
 ```bash
 gog -a work gmail send --to alice@x.com --subject "…" --body "…"
