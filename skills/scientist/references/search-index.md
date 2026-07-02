@@ -28,6 +28,29 @@ file + metadata. Four document *kinds*, distinguished by the `kind` metadata key
   **`sci query "…" --kind claim`**. The highest-value searchable evidence (see
   [derive-claims.md](derive-claims.md) and [review-audit.md](review-audit.md)).
 
+### The store is a rebuildable cache — don't persist or sync it
+
+`.scientist/catalog.duckdb` is a **gitignored, throwaway index**, not a source of truth (SKILL.md
+§Core invariants — *Durable truth in git, derived layer in libkit*). Treat it accordingly:
+
+- **A fresh checkout / worktree legitimately has none** — gitignored files aren't shared across
+  worktrees, and this store isn't kept anywhere durable (not in git, not on the Drive/shared
+  checkout). So `sci init` + `reindex` in a new working tree is **expected**, reuses nothing, and is
+  not a sign something went wrong. The re-derive/verify path (`pytest <exp>/analysis/claims
+  --grounding-out`) needs **no store at all** — the store only powers `sci query`/catalog/report
+  indexing.
+- **Rebuilding is effectively free — the embedding/parse cost is a red herring.** libkit keeps a
+  machine-local, content-addressed cache (`~/Library/Caches/libkit/`: `embed/cache.db` vectors +
+  `parse/` OCR'd PDFs), so re-indexing unchanged content re-pays nothing. Empirically a full
+  `sci reindex` against a warm cache adds only a handful of new embeddings per changed experiment
+  (re-indexing identical content adds **zero**). Don't reach for "persist the DB to avoid re-embedding."
+- **Don't sync `catalog.duckdb` to Drive / shared storage.** It's a monolithic mutable binary
+  (whole-file re-upload on every `index`), its VSS/HNSW index can bloat to 100s of GB under churn,
+  DuckDB is single-writer (a syncing FS makes conflict copies → a corrupt/forked index), dehydration
+  stalls the mmap open, and a lagging index silently serves stale shas — worse than no index. If
+  durable insurance is ever wanted, back up the append-mostly `~/Library/Caches/libkit` cache dir,
+  **not** the live query DB.
+
 ## Setup: keys & the embedding backend
 
 Opening the library constructs an embedder (libkit fixes the vector dimension at creation), so
