@@ -257,6 +257,33 @@ skills, and invokes them automatically when relevant (or manually via `/sq:bibli
 the relevant `SKILL.md` and let it run the bundled scripts (or `uv tool install` the CLI
 below).
 
+### Updating to the latest skills
+
+New skills and fixes land here continuously, but an installed plugin is a **pinned
+snapshot** — it does not auto-update. Adding a skill upstream (e.g. `stable`) won't appear
+until you refresh the marketplace *and* update the plugin. Two steps, always in this order:
+
+```text
+/plugin marketplace update emerose-skills   # refetch this repo (marketplace name is derived from emerose/skills)
+/plugin                                      # → select sq@emerose-skills → Update
+```
+
+Restart the session afterward — the skill list is loaded at startup, so a newly added skill
+isn't callable until the next launch.
+
+**When `/plugin` isn't available** (the Claude.ai app, the Agent SDK, cron/headless runs, or
+any non-interactive harness), the slash command is missing but the `claude` CLI does the same
+job non-interactively:
+
+```bash
+claude plugin marketplace update emerose-skills
+claude plugin update sq@emerose-skills        # NB: the full plugin@marketplace form is required
+# → "Plugin sq updated from X to Y. Restart to apply changes."
+```
+
+Then restart. To confirm what actually landed: `claude plugin list` shows the installed
+version, and the skills live under `~/.claude/plugins/cache/emerose-skills/sq/<version>/skills/`.
+
 ### The `bib` CLI, as a standalone tool
 
 Install the bundled command with [uv](https://docs.astral.sh/uv/) so it's on your
