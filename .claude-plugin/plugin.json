@@ -1,6 +1,6 @@
 {
   "name": "sq",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Sam Quigley's skills, bundled as one plugin: bibliographer (personal academic-paper collection), scientist (provenance-tracked experiment pipeline), research (literature reviews + grounded [lit:] claims), regulator (FDA regulatory-document library — guidance, Drugs@FDA approval packages, advisory-committee materials, reviewer dossiers), gws (read/act on Gmail, Calendar, and Drive across multiple Google accounts via the gog CLI), and stable (read, search, triage, and organize physical mail from a Stable virtual mailbox, and track transcribed checks, via the Stable API). Invoked as /sq:bibliographer, /sq:scientist, /sq:research, /sq:regulator, /sq:gws, /sq:stable. Research skills built on libkit.",
   "author": {
     "name": "Sam Quigley",
