@@ -26,6 +26,13 @@ and Google Drive (plus Docs/Sheets/Contacts/Tasks) across **multiple Google acco
 once** — driven by the external [`gog`](https://github.com/openclaw/gogcli) CLI rather than
 libkit. See [`skills/gws/SKILL.md`](skills/gws/SKILL.md).
 
+A sixth, **[stable](skills/stable/)**, is a **physical-mail client**: it reads, searches,
+triages, and organizes the postal mail received at a [Stable](https://www.usestable.com)
+virtual mailbox, and tracks the paper checks Stable transcribes from it, via the Stable REST
+API. It's the postal-mail counterpart to gws's email — a thin `httpx` client, no libkit. The
+API is read/organize only (it can label mail with tags/teams but cannot itself request a
+scan, forward, shred, or check deposit). See [`skills/stable/SKILL.md`](skills/stable/SKILL.md).
+
 They share two internal pieces: **[reportkit](skills/reportkit/)**, the grounded-report
 engine, and **[libkit](#libkit--embeddings)**, the single searchable store the skills
 index into instead of a bespoke database.
