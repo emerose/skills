@@ -64,6 +64,18 @@ issued by Stable (email priority@usestable.com); they are not self-serve. Full
 details, including how to verify connectivity, are in
 [references/setup.md](references/setup.md).
 
+**The key is stored in the macOS login Keychain** (service `stable-api`, account
+`$USER`) and exported via the repo's committed `.envrc`. But **direnv only loads
+in an interactive shell** — a one-off agent command won't get `STABLE_API_KEY`
+automatically, so if it looks missing, don't assume it's lost. Pull it yourself:
+
+```bash
+export STABLE_API_KEY=$(security find-generic-password -s stable-api -a "$USER" -w)
+```
+
+See [references/setup.md](references/setup.md) for the full explanation and the
+`direnv exec` alternative.
+
 Run the CLI one of two ways:
 
 ```bash

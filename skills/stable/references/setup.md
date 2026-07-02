@@ -37,6 +37,26 @@ After that, `cd`-ing into the repo exports `STABLE_API_KEY` automatically and th
 `stable` CLI just works. To rotate: `security add-generic-password -U -s stable-api
 -a "$USER" -w '<new-key>'`.
 
+> **Agents: direnv will NOT auto-load for you.** direnv only exports the key in an
+> *interactive* shell that has the direnv hook installed. A one-off `bash -c` /
+> tool-invoked command (the usual way an agent runs things) never triggers the
+> hook, so `STABLE_API_KEY` will look "missing" even though the key is safely in
+> the Keychain. Don't conclude the key is lost — pull it yourself:
+>
+> ```bash
+> # export it from Keychain for the current command/session (works in any shell):
+> export STABLE_API_KEY=$(security find-generic-password -s stable-api -a "$USER" -w)
+> stable mail list --since 7d
+>
+> # …or let direnv resolve it for a single command, from the repo root:
+> direnv exec /Users/sq/Development/skills  stable mail list --since 7d
+> ```
+>
+> Quick check that the Keychain item exists (prints the length, not the secret):
+> `K=$(security find-generic-password -s stable-api -a "$USER" -w 2>/dev/null); echo ${#K}`
+> — a non-zero length (≈53) means it's there. If it prints `0`/errors, the item is
+> genuinely missing and needs the one-time store above.
+
 ### Alternative: ~/.env
 
 If you don't use direnv, drop it in `~/.env` (chmod 600):
@@ -56,8 +76,11 @@ stable locations list          # cheapest authenticated call; prints your mailbo
 # exit 0 = ok, exit 4 = auth problem (bad/missing key), exit 3 = authed but empty
 ```
 
-If you get exit `4` / an "HTTP 401/403" message, the key is missing or wrong —
-re-check `~/.env` and that the key is active. Don't retry blindly on `4`.
+If you get exit `4` / an "HTTP 401/403" message, the key is missing from the
+environment or wrong. Most often (for agents) it's not *missing* — it's in the
+Keychain but direnv didn't load it; export it with the Keychain one-liner above
+first. Otherwise re-check `~/.env` and that the key is active. Don't retry blindly
+on `4`.
 
 ## Dependencies
 
