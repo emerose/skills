@@ -1,0 +1,34 @@
+# Packaging for the `stable` CLI so it can be installed as a standalone tool:
+#
+#     uv tool install "git+https://github.com/emerose/skills#subdirectory=skills/stable"
+#     stable --help
+#
+# This is OPTIONAL. The skill itself runs the very same code with no install via
+# the PEP 723 self-contained script:  `uv run skills/stable/scripts/stable_cli.py`.
+# Library code lives in the importable `stable` package; `scripts/stable_cli.py`
+# is the CLI entry that imports it. The package is also usable directly from
+# Python (`from stable import StableClient`) — see stable/__init__.py.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stable-mailbox"
+version = "0.1.0"
+description = "A client + CLI for the Stable (usestable.com) virtual-mailbox API"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Sam Quigley", email = "quigley@emerose.com" }]
+dependencies = ["httpx>=0.27"]
+
+[project.urls]
+Homepage = "https://github.com/emerose/skills"
+Repository = "https://github.com/emerose/skills"
+
+[project.scripts]
+stable = "stable_cli:main"
+
+[tool.hatch.build.targets.wheel]
+sources = ["scripts"]
+only-include = ["stable", "scripts/stable_cli.py"]
+exclude = ["**/__pycache__", "**/*.pyc"]
