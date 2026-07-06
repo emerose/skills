@@ -264,6 +264,58 @@ def test_render_pdf_if_pandoc(tmp_path):
     assert 'id="fn1"' in html and 'href="#fn1"' in html
     assert 'id="fnref1"' in html
 
+def test_footnotes_filter_separates_and_dedups(tmp_path):
+    # footnotes.lua (LaTeX pass) does two things: a superscript comma between two adjacent
+    # footnote marks, and a stable \rptnote id per distinct note content so a re-cite reuses
+    # its id (the per-page collapse then happens in \rptnote at typeset time).
+    import subprocess
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc not installed")
+    lua = Path(R._FOOTNOTES_LUA)
+    src = ("Two here[^a][^b] and a recite[^a].\n\n"
+           "[^a]: shared note.\n[^b]: distinct note.\n")
+    md = tmp_path / "d.md"
+    md.write_text(src, encoding="utf-8")
+    tex = subprocess.run(["pandoc", str(md), "-t", "latex", f"--lua-filter={lua}"],
+                         capture_output=True, text=True, check=True).stdout
+    # adjacent marks get one superscript-comma separator; a lone mark gets none
+    assert tex.count("\\textsuperscript{,}") == 1
+    # [^a] shares one id across its two cites (occ 1 then 2); [^b] is a distinct id
+    assert "\\rptnote{1}{1}{shared note.}" in tex
+    assert "\\rptnote{2}{1}{distinct note.}" in tex
+    assert "\\rptnote{1}{2}{shared note.}" in tex
+
+
+def test_render_pdf_footnote_dedup_per_page(tmp_path):
+    # End-to-end: a claim cited twice on ONE page collapses to a single footnote (text once),
+    # but a cite on a LATER page reprints its own full footnote (locality). Needs xelatex; the
+    # render also exercises the \rptnote LaTeX helper (a bug there would raise RenderError).
+    if shutil.which("pandoc") is None or shutil.which("xelatex") is None:
+        pytest.skip("pandoc/xelatex not installed; PDF render unavailable")
+    exp = _exp(tmp_path)
+    _report_json(exp)
+    body = ("# KD\n\nKnockdown here [claim:test_knockdown] and again "
+            "[claim:test_knockdown].\n\n```{=latex}\n\\newpage\n```\n\n"
+            "Restated on a new page [claim:test_knockdown].\n")
+    md = _report_md(exp, body)
+    out = tmp_path / "out.pdf"
+    res = R.render(md, out, home=tmp_path, to="pdf")
+    assert Path(res["output"]).is_file()
+    try:
+        import pdfplumber
+    except ImportError:
+        return                                               # file exists; text check skipped
+    per_page = []
+    with pdfplumber.open(out) as pdf:
+        for pg in pdf.pages:
+            per_page.append((pg.extract_text() or "").replace(" ", ""))
+    stmt = "knockdownis53%atthetopdose"
+    # same-page double-cite: the statement is footnoted once on its page (not twice)
+    assert per_page[0].count(stmt) == 1
+    # across the page break it reprints, so the whole document shows it exactly twice
+    assert sum(p.count(stmt) for p in per_page) == 2
+
+
 def test_strip_front_matter_keys():
     md = ("---\ntitle: A report\nauthor: Kicho Science\ndate: 2026-06-17\n"
           "classification: INTERNAL\n---\n\n# Body\n\ntext\n")
