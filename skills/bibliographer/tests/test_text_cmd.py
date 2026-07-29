@@ -105,8 +105,10 @@ def test_text_default_is_a_bounded_excerpt(store, tmp_path, capsys):
     assert _MARKER in out.out
     assert _TAIL_MARKER not in out.out
     assert len(out.out.rstrip("\n")) == bib._DEFAULT_TEXT_CHARS
-    # Size note goes to stderr (so a pipe stays pure) and flags that more remains.
-    assert "stored text:" in out.err
+    # Size note goes to stderr (so a pipe stays pure) and loudly flags that the FULL
+    # text is stored and more remains — so an excerpt never reads as "abstract only".
+    assert "FULL TEXT is stored" in out.err
+    assert f"{len(_BODY):,}" in out.err            # reports the true total (with thousands sep)
     assert "--all" in out.err
     assert _MARKER not in out.err
 
@@ -126,6 +128,7 @@ def test_text_all_dumps_everything(store, tmp_path, capsys):
     assert _TAIL_MARKER in out.out          # only --all reaches the end
     assert out.out.rstrip("\n") == _BODY
     assert "--all" not in out.err           # nothing more to fetch
+    assert "complete" in out.err            # whole text shown → no truncation notice
 
 
 def test_text_offset_and_chars_window(store, tmp_path, capsys):
@@ -144,7 +147,7 @@ def test_text_offset_and_chars_window(store, tmp_path, capsys):
     out = capsys.readouterr()
     body = out.out.rstrip("\n")
     assert body == _BODY[2:22]
-    assert "showing 3–22" in out.err  # 1-based span in the note
+    assert f"chars 3–22 of {len(_BODY):,}" in out.err  # 1-based span in the note
 
 
 def test_text_json_reports_total(store, tmp_path, capsys):
@@ -166,6 +169,11 @@ def test_text_json_reports_total(store, tmp_path, capsys):
     assert payload["content_chars"] == 10
     assert payload["content_total"] == len(_BODY)
     assert payload["text"] == _BODY[:10]
+    # New signposting fields: total/shown/remaining/truncated.
+    assert payload["total"] == len(_BODY)
+    assert payload["shown"] == 10
+    assert payload["remaining"] == len(_BODY) - 10
+    assert payload["truncated"] is True
 
 
 def test_text_stub_falls_back_to_abstract(store, capsys):
@@ -184,6 +192,8 @@ def test_text_stub_falls_back_to_abstract(store, capsys):
     out = capsys.readouterr()
     assert "Only an abstract is stored here." in out.out
     assert "citation-only stub" in out.err
+    assert "no full text ingested" in out.err   # distinguishes stub from a truncated excerpt
+    assert "--all" not in out.err               # the whole (short) abstract already shown
 
 
 def test_text_unknown_citekey_dies(store, capsys):

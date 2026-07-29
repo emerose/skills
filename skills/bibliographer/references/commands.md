@@ -156,12 +156,16 @@ dressed up as semantic ones.
 `[lit:]` quote-check reads (`source(citekey, quote=...)`). Use it to pick a real
 verbatim phrase before authoring a literature claim, instead of guessing and
 re-running the grounding pytest. **By default it prints a bounded excerpt** (~4000
-chars) so a naive call never dumps a whole paper (~20k tokens) into context; the
-**stderr** size note reports the full length and flags when more remains.
+chars) so a naive call never dumps a whole paper (~20k tokens) into context. When the
+excerpt is only the opening of a longer body, the **stderr** note says so loudly —
+`FULL TEXT is stored (44,069 chars …) — showing first 4,000 of 44,069 chars; 40,069
+not shown — use --all …` — so an excerpt is never mistaken for "abstract only".
 `--offset`/`--chars` page through it; `--all` prints the whole text (the clean-pipe
-path, e.g. `bib text K --all | grep`); `--json` returns the window plus
-`content_total`. A citation-only **stub** has no full body — `bib text` prints its
-metadata + abstract and flags that quotes can only come from the abstract. Caveat:
+path, e.g. `bib text K --all | grep`) and prints no truncation notice. `--json`
+returns the window plus `total` / `shown` / `remaining` / `truncated` (and the
+back-compat `content_total` / `content_chars`). A citation-only **stub** has no full
+body — `bib text` prints its metadata + abstract and flags (`no full text ingested`)
+that quotes can only come from the abstract. Caveat:
 `bib text … | grep` is a *coarse locator*, not the verdict — shell `grep` does not
 fold unicode dashes / markdown emphasis / split whitespace the way the quote-check
 does, so a grep miss is not authoritative; `source(... quote=...)` stays the authority.
