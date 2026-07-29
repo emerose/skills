@@ -1393,8 +1393,10 @@ async def cmd_text(args: argparse.Namespace, store: BiblioStore) -> None:
     else:
         length = args.chars if args.chars is not None else _DEFAULT_TEXT_CHARS
     window = text[offset:] if length is None else text[offset : offset + length]
-    shown_end = offset + len(window)
-    more = shown_end < total  # text remains past this window
+    shown = len(window)
+    shown_end = offset + shown
+    remaining = total - shown_end        # chars past this window (>= 0)
+    truncated = remaining > 0            # more stored text remains beyond what was shown
 
     if args.json:
         emit_json({
@@ -1403,20 +1405,36 @@ async def cmd_text(args: argparse.Namespace, store: BiblioStore) -> None:
             "mode": mode,
             "text": window,
             "content_offset": offset,
-            "content_chars": len(window),
-            "content_total": total,
+            "content_chars": shown,      # kept for back-compat (== shown)
+            "content_total": total,      # kept for back-compat (== total)
+            "total": total,              # full stored-text length in chars
+            "shown": shown,              # chars in this window
+            "remaining": remaining,      # chars past this window (0 when complete)
+            "truncated": truncated,      # True when more text remains than was shown
         })
         return
 
     approx_k = round(total / 4000, 1)  # ~4 chars/token, then ÷1000 for k-tokens
     tok = "<1k" if approx_k < 0.1 else f"~{approx_k:g}k"
-    span = f"; showing {offset + 1}–{shown_end}" if (offset or len(window) < total) else ""
-    hint = " (--all for full text, --offset to page)" if more else ""
+    escalate = " — use --all (or --offset N / --chars N) for the rest"
+    where = (f"first {shown:,} of {total:,} chars" if offset == 0
+             else f"chars {offset + 1:,}–{shown_end:,} of {total:,}")
     if is_stub:
-        note = (f"[{args.citekey}] citation-only stub — no full text stored; the stored text is "
-                f"metadata + abstract ({total} chars). Quotes can only come from the abstract.{span}{hint}")
+        # Citation-only: no full body was ingested — the whole stored text is metadata +
+        # abstract, so quotes can only come from the abstract. (Distinct from a truncated
+        # full-text excerpt: there is no more body to page to.)
+        note = (f"[{args.citekey}] citation-only stub — no full text ingested; the stored text "
+                f"is metadata + abstract only ({total:,} chars). Quotes can only come from the abstract.")
+        if truncated:  # abstract itself longer than the excerpt cap (rare)
+            note += f" Showing {where};{escalate}"
+    elif truncated:
+        # FULL-TEXT record whose excerpt is just the opening — signpost loudly that the
+        # rest of the body IS stored and how to reach it, so it doesn't read as "abstract only".
+        note = (f"[{args.citekey}] FULL TEXT is stored ({total:,} chars, {tok} tokens) — "
+                f"showing {where}; {remaining:,} not shown{escalate}")
     else:
-        note = f"[{args.citekey}] stored text: {total} chars ({tok} tokens){span}{hint}"
+        # Whole stored text shown (fits under the cap, or --all): no truncation notice.
+        note = f"[{args.citekey}] stored text: complete — {total:,} chars ({tok} tokens)"
     print(note, file=sys.stderr)
     if not window.strip():
         print(f"(no stored text at offset {offset})", file=sys.stderr)
