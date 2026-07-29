@@ -135,7 +135,7 @@ reference (last column). Run `bib init` once per library before first use.
 | `discover` | find candidate papers on a topic across 6 search APIs — a recall pass that **banks nothing**; you judge + `bib add` the keepers | [literature-search](references/literature-search.md) |
 | `import` | bulk-import a folder into the author tree (**dry-run first**; moves by default) | [commands](references/commands.md) |
 | `enrich` | recover metadata for unverified scans / junk-filename records (content-verified) | [commands](references/commands.md) · [schema](references/schema.md) |
-| `list` `search` `query` `show` `text` | browse · metadata-search · semantic-search *inside* papers · show a record · dump stored text | [commands](references/commands.md) |
+| `list` `search` `query` `show` `text` | browse · **literal-substring** metadata match (feed it ONE word) · semantic-search *inside* papers · show a record · dump stored text | [commands](references/commands.md) |
 | `tag` `rm` `export` `viewer` | tag · remove · BibTeX export · (re)build the HTML viewer | [commands](references/commands.md) |
 | `fetch` `backfill` | get a PDF for one stub · bulk-attach OA PDFs to all stubs + worklist the rest | [getting-pdfs](references/getting-pdfs.md) |
 | `refresh` | backfill / refresh OpenAlex citation metrics | [commands](references/commands.md) |
@@ -165,6 +165,18 @@ are in [references/commands.md](references/commands.md).
 
 ## Gotchas (learned the hard way)
 
+- **`bib search` is a substring matcher — feed it ONE word, and never read a zero
+  result as absence.** It tests your query as a *single literal substring* of
+  `title+authors+venue+abstract+tags`; there is no tokenizing, ranking or semantics.
+  A natural-language query therefore misses even when the paper is right there:
+  `bib search "Urraca interstitial duplication EEG"` used to return 0 while
+  `bib search Urraca` returned the paper — and an agent took that zero as proof the
+  papers weren't in the library and told the user so. `search` now falls back to
+  all-words-anywhere (warning on stderr that it relaxed), and on a true zero prints
+  each word's own record count. **Read that stderr before concluding anything**, and
+  prefer a single distinctive token (surname, gene, unusual noun); use `bib query`
+  for anything that lives in a paper's body rather than its metadata. Details:
+  [commands](references/commands.md#bib-search-is-a-substring-matcher--feed-it-one-word).
 - **Library location is a real trade-off.** A library inside a cloud-synced folder
   (Google Drive, etc.) is browsable everywhere, but **moving hundreds of files
   into it triggers a heavy one-time cascade** — the cloud client re-syncs every

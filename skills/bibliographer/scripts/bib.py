@@ -1259,6 +1259,53 @@ async def cmd_list(args: argparse.Namespace, store: BiblioStore) -> None:
         print(f"\n{len(recs)} article(s) in {store.home}")
 
 
+def search_haystack(rec: dict[str, Any]) -> str:
+    """The lowercased blob `bib search` matches against.
+
+    One string per record: title, authors, venue, abstract and tags concatenated
+    **in that order**. Matching is substring, so a multi-word query only hits when
+    those words appear verbatim and adjacent *somewhere in this blob* — including
+    across a field boundary ("EEG Signature Urraca" spans title→authors).
+    """
+    hay = " ".join(
+        str(rec.get(k) or "") for k in ("title", "authors_text", "venue", "abstract")
+    )
+    hay += " " + " ".join(rec.get("tags") or [])
+    return hay.lower()
+
+
+def _zero_result_hint(query: str, pool: list[dict[str, Any]]) -> str:
+    """Explain a zero-result `search` so it is never misread as *absence*.
+
+    Reports each word's own record count: words that hit nothing are the only real
+    evidence the library lacks something; words that hit plenty prove the *phrasing*
+    failed, not the library. Without this, `0 result(s)` is indistinguishable from
+    "not in the collection" — a mistake a strict substring matcher invites.
+    """
+    tokens = query.lower().split()
+    counts = {t: sum(1 for r in pool if t in search_haystack(r)) for t in tokens}
+    present = [f"{t} ({n})" for t, n in counts.items() if n]
+    missing = [t for t, n in counts.items() if not n]
+    lines = [f"no match for {query!r} — this is NOT evidence the paper is absent."]
+    if not pool:
+        lines.append("  (no records to match — did --tag/--year filter everything out?)")
+        return "\n".join(lines)
+    if present:
+        lines.append("  words that DO match records: " + ", ".join(present))
+    if missing:
+        lines.append("  words matching nothing: " + ", ".join(missing))
+    if len(tokens) > 1:
+        lines.append(
+            "  `bib search` tests your words as ONE literal substring of "
+            "title+authors+venue+abstract+tags, so wording and order must be verbatim. "
+            "Retry with a SINGLE distinctive word (surname, gene, unusual noun), or use "
+            "`bib query` to search inside the papers."
+        )
+    else:
+        lines.append("  Try a shorter/looser word, or `bib query` to search inside the papers.")
+    return "\n".join(lines)
+
+
 async def cmd_search(args: argparse.Namespace, store: BiblioStore) -> None:
     filters: dict[str, Any] = {}
     if args.tag:
@@ -1268,16 +1315,25 @@ async def cmd_search(args: argparse.Namespace, store: BiblioStore) -> None:
     recs = await store.all_records(filters=filters or None)
 
     if args.query:
+        pool = recs
         q = args.query.lower()
-
-        def hit(r: dict[str, Any]) -> bool:
-            hay = " ".join(
-                str(r.get(k) or "") for k in ("title", "authors_text", "venue", "abstract")
-            ).lower()
-            hay += " " + " ".join(r.get("tags") or []).lower()
-            return q in hay
-
-        recs = [r for r in recs if hit(r)]
+        recs = [r for r in pool if q in search_haystack(r)]
+        tokens = q.split()
+        # A phrase-only matcher makes every natural-language query ("Urraca EEG
+        # beta power") a silent zero even when the paper is right there. Rather
+        # than let a caller read that as absence, relax to all-words-anywhere and
+        # say so — same principle as `query`'s loud [FTS-only] fallback.
+        if not recs and len(tokens) > 1:
+            recs = [r for r in pool if all(t in search_haystack(r) for t in tokens)]
+            if recs:
+                warn(
+                    f"no record contains the literal phrase {args.query!r}; showing the "
+                    f"{len(recs)} record(s) containing all {len(tokens)} words anywhere in "
+                    "their metadata instead (`bib search` is a substring matcher, not a "
+                    "ranked search engine)."
+                )
+        if not recs:
+            warn(_zero_result_hint(args.query, pool))
     if args.author:
         a = args.author.lower()
         recs = [r for r in recs if a in (r.get("authors_text") or "").lower()]
@@ -1942,8 +1998,38 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_discover)
 
-    sp = sub.add_parser("search", help="search catalog metadata (title/authors/venue/abstract/tags)")
-    sp.add_argument("query", nargs="?")
+    sp = sub.add_parser(
+        "search",
+        help="find records by a LITERAL SUBSTRING of their metadata (title/authors/venue/abstract/tags)",
+        description=(
+            "Substring lookup over catalog metadata — not ranked, not semantic. The query is "
+            "lowercased and tested as ONE literal substring of each record's "
+            "title + authors + venue + abstract + tags, concatenated in that order."
+        ),
+        epilog=(
+            "Matching, concretely:\n"
+            "  bib search Urraca                          ✓ phrase hit — one distinctive word\n"
+            "  bib search 'Characteristic EEG Signature'  ✓ phrase hit — verbatim and adjacent\n"
+            "  bib search 'EEG Signature Urraca'          ✓ phrase hit — spans title→authors\n"
+            "  bib search 'Urraca interstitial EEG'       ~ phrase MISSES; relaxed retry finds it\n"
+            "  bib search 'distinctive brainwave pattern' ✗ paraphrase — nothing here is semantic\n"
+            "\n"
+            "When the literal phrase misses, search retries as all-words-anywhere and warns on\n"
+            "stderr that it relaxed. That rescues most natural-language queries, but it is still\n"
+            "an AND over substrings: one absent or paraphrased word zeroes the whole query.\n"
+            "\n"
+            "Records added as citation-only stubs (or without a fetched abstract) offer only a\n"
+            "title/authors/venue/tags to match, so most of a paper's content is invisible here.\n"
+            "Use `bib query` to search INSIDE the papers, and `--author` for a surname.\n"
+            "\n"
+            "A zero result is NOT evidence a paper is absent — it reports each word's own record\n"
+            "count on stderr, and words that hit plenty mean your PHRASING failed. Before\n"
+            "reporting a paper missing: retry a single distinctive word, then check `bib query`.\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sp.add_argument("query", nargs="?",
+                    help="literal substring to match (a single distinctive word works best)")
     sp.add_argument("--author")
     sp.add_argument("--year")
     sp.add_argument("--tag")

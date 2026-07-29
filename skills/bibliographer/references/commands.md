@@ -132,7 +132,7 @@ and the parallel-agent backstop in [auditing.md](auditing.md).
 
 ```bash
 bib list                       # everything
-bib search transformer         # metadata search over title/authors/venue/abstract/tags
+bib search transformer         # LITERAL SUBSTRING of title/authors/venue/abstract/tags
 bib search --author hinton --year 2015
 bib search --tag topic:nlp
 bib query "why do transformers scale"   # SEMANTIC + full-text search INSIDE the papers (libkit)
@@ -144,6 +144,36 @@ bib text shao2021antisense --chars 1000  # a smaller window from --offset
 bib text shao2021antisense --all         # the ENTIRE stored text (opt-in; ~20k tokens for a full paper)
 bib text shao2021antisense --all | grep -in "knockdown"   # locate a phrase (note goes to stderr)
 ```
+
+### `bib search` is a substring matcher — feed it ONE word
+
+`search` is **not** a search engine and **not** semantic. It lowercases your query and
+tests it as **one literal substring** of each record's `title + authors + venue +
+abstract + tags`, concatenated in that order. So a multi-word query only hits when
+those words appear **verbatim and adjacent** in that blob:
+
+```bash
+bib search Urraca                             # ✓ phrase hit — one distinctive word
+bib search 'Characteristic EEG Signature'     # ✓ phrase hit — verbatim + adjacent in the title
+bib search 'EEG Signature Urraca'             # ✓ phrase hit (!) — spans the title→authors boundary
+bib search 'Urraca interstitial EEG'          # ~ phrase MISSES; the relaxed retry finds it
+bib search 'distinctive brainwave pattern'    # ✗ paraphrase — nothing here is semantic
+```
+
+When the literal phrase misses, `search` **retries as all-words-anywhere** and warns
+on stderr that it relaxed. That rescues most natural-language queries — but it is
+still an AND over substrings, so one absent or paraphrased word zeroes the query.
+**Query with a single distinctive token** — a surname, a gene, an unusual noun — then
+narrow with `--author` / `--year` / `--tag`. Note that citation-only stubs and records
+with no fetched abstract expose only a title/authors/venue/tags, so most of a paper's
+*content* is unmatchable by `search` at all; that is what `query` is for.
+
+**Never conclude a paper is absent from a zero-result `search`.** A phrasing miss says
+nothing about the library — this exact mistake once had an agent report papers missing
+that were in the collection all along. On a true zero, `search` prints **each word's
+own record count** to stderr: words that hit plenty prove the *phrasing* failed, and
+only words matching nothing are (weak) evidence of absence. Before reporting anything
+missing: retry a single distinctive word, and check `bib query`.
 
 Use `search` for fast metadata lookup; use `query` when the user wants to find
 *passages/concepts inside* the papers (it embeds the query and runs libkit's hybrid
