@@ -130,11 +130,24 @@ and the parallel-agent backstop in [auditing.md](auditing.md).
 
 ## Finding things — `list` / `search` / `query` / `show` / `text`
 
+**Choosing between them: ask what you KNOW, not what you want.**
+
+- **Something printed on the card** — a surname, year, venue, tag, DOI, or a word from
+  the title → **`search`**. Prefer the *field* that holds it (`--author` / `--year` /
+  `--tag`) over the free-text query, which is only a substring match over everything
+  at once. A surname belongs in `--author`, not in a sentence.
+- **Something the paper *says*** — an argument, a method, a measured result →
+  **`query`**. It reads the papers' text; `search` cannot see inside them at all.
+- **"Is this specific paper in the library?"** → *neither, on its own.* That is a
+  presence question, and one call cannot answer it — see
+  [Establishing that a paper is NOT in the library](#establishing-that-a-paper-is-not-in-the-library).
+
 ```bash
 bib list                       # everything
-bib search transformer         # LITERAL SUBSTRING of title/authors/venue/abstract/tags
+bib search transformer         # LITERAL SUBSTRING of the record's metadata
 bib search --author hinton --year 2015
 bib search --tag topic:nlp
+bib search 10.1002/aur.1284    # identifiers and citekeys are matchable too
 bib query "why do transformers scale"   # SEMANTIC + full-text search INSIDE the papers (libkit)
 bib show vaswani2017attention            # full record
 bib show vaswani2017attention --bibtex   # one BibTeX entry
@@ -147,10 +160,19 @@ bib text shao2021antisense --all | grep -in "knockdown"   # locate a phrase (not
 
 ### `bib search` is a substring matcher — feed it ONE word
 
+**The commonest mistake is not phrasing — it is skipping the field.** The incident
+below began with a surname handed to the free-text query instead of to `--author`:
+
+```bash
+bib search 'Urraca interstitial duplication characteristic EEG'   # ✗ a sentence, at a substring matcher
+bib search --author urraca                                        # ✓ the surname, in the surname field
+```
+
 `search` is **not** a search engine and **not** semantic. It lowercases your query and
 tests it as **one literal substring** of each record's `title + authors + venue +
-abstract + tags`, concatenated in that order. So a multi-word query only hits when
-those words appear **verbatim and adjacent** in that blob:
+abstract`, then its `citekey` and identifiers (DOI/arXiv/PMID/…), then its `tags` —
+all concatenated into one blob. So a multi-word query only hits when those words
+appear **verbatim and adjacent** in that blob:
 
 ```bash
 bib search Urraca                             # ✓ phrase hit — one distinctive word
@@ -188,6 +210,31 @@ failed; only words matching nothing are weak evidence of absence) and, when a qu
 matched but `--author`/`--tag`/`--year` emptied it, says so — that is a filter problem,
 not a wording one. Before reporting anything missing: retry the rarest word alone, and
 check `bib query`.
+
+### Establishing that a paper is NOT in the library
+
+A zero-result `search` is **never** sufficient. Presence is a different question from
+retrieval, and answering it takes three steps against three different surfaces — a
+paper invisible to one is often plainly visible to the next:
+
+1. **Field-scoped `search`.** `bib search --author <surname>` (add `--year` if the
+   surname is common). This is the step the incident skipped, and on its own it would
+   have answered the question. Free-text `search` is a substring match over one blob;
+   `--author` tests the authors field alone, so word order and phrasing cannot defeat it.
+2. **`query` on a distinctive title phrase or the paper's actual subject.** `search`
+   sees only the catalog card; `query` reads the papers' text, so it reaches everything
+   the card omits. Raise `--limit` (default 8) when you are trying to prove a negative —
+   a truncated top-N is not an exhaustive answer.
+3. **Identifier lookup, if you have one.** `bib search <doi>` / `<arxiv id>` / `<pmid>` /
+   `<citekey>` — all are matchable. This is the **only exact test**: identifiers are
+   assigned, not phrased, so a genuine identifier miss is real evidence of absence in a
+   way that no wording-based miss ever is.
+
+Only after all three may you write "not in the library" — and **say which steps you
+ran**, so a reader can tell a searched-and-absent claim from an unsearched one. "No
+paper by Urraca is in the collection" is a *negative claim*, and it needs its evidence
+attached like any other. If you ran one search and got a zero, what you know is that
+your phrasing missed; nothing more.
 
 `--json` returns an **envelope**, not a bare list, because an empty `[]` reads as absence
 to whatever parses it: `{query, filters, matched_by, searched, count, results}` — where

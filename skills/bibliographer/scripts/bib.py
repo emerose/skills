@@ -1262,16 +1262,21 @@ async def cmd_list(args: argparse.Namespace, store: BiblioStore) -> None:
 def search_haystack(rec: dict[str, Any]) -> str:
     """The lowercased blob `bib search` matches against.
 
-    One string per record: title, authors, venue, abstract and tags concatenated
-    **in that order**. Matching is substring, so a multi-word query only hits when
-    those words appear verbatim and adjacent *somewhere in this blob* — including
-    across a field boundary ("EEG Signature Urraca" spans title→authors).
+    One string per record: title, authors, venue, abstract, then the citekey and
+    identifiers, then tags. Matching is substring, so a multi-word query only hits
+    when those words appear verbatim and adjacent *somewhere in this blob* —
+    including across a field boundary ("EEG Signature Urraca" spans title→authors).
+
+    The identifiers are here because they are what a caller reaches for when it
+    wants a DEFINITIVE answer — "is 10.1002/aur.1284 in the library?". Omitting
+    them made that the single most misleading zero this command could produce: a
+    present paper returned `words matching nothing: 10.1002/aur.1284`, which reads
+    as proof of absence precisely because a DOI is exact.
     """
-    hay = " ".join(
-        str(rec.get(k) or "") for k in ("title", "authors_text", "venue", "abstract")
-    )
-    hay += " " + " ".join(rec.get("tags") or [])
-    return hay.lower()
+    parts = [str(rec.get(k) or "") for k in ("title", "authors_text", "venue", "abstract")]
+    parts += [str(rec.get(k) or "") for k in ("citekey", *_meta.IDENTIFIER_KEYS)]
+    parts += rec.get("tags") or []
+    return " ".join(parts).lower()
 
 
 # How many records a zero-result search SHOWS for its most distinctive word.
@@ -2117,15 +2122,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser(
         "search",
-        help="find records by a LITERAL SUBSTRING of their metadata (title/authors/venue/abstract/tags)",
+        help="find records by a LITERAL SUBSTRING of their metadata (title/authors/venue/abstract/ids/tags)",
         description=(
             "Substring lookup over catalog metadata — not ranked, not semantic. The query is "
             "lowercased and tested as ONE literal substring of each record's "
-            "title + authors + venue + abstract + tags, concatenated in that order."
+            "title + authors + venue + abstract, then its citekey and identifiers "
+            "(DOI/arXiv/PMID/…), then its tags — all concatenated into one blob."
         ),
         epilog=(
-            "Matching, concretely:\n"
+            "PUT WHAT YOU KNOW IN THE FIELD THAT HOLDS IT. The free-text query is a substring\n"
+            "match over everything at once; --author/--year/--tag test one field and cannot be\n"
+            "defeated by wording. A surname belongs in --author, not in a sentence:\n"
+            "  bib search 'Urraca interstitial duplication EEG'  ✗ a sentence, at a substring matcher\n"
+            "  bib search --author urraca                        ✓ the surname, in the surname field\n"
+            "\n"
+            "Free-text matching, concretely:\n"
             "  bib search Urraca                          ✓ phrase hit — one distinctive word\n"
+            "  bib search 10.1002/aur.1284                ✓ identifiers and citekeys match too\n"
             "  bib search 'Characteristic EEG Signature'  ✓ phrase hit — verbatim and adjacent\n"
             "  bib search 'EEG Signature Urraca'          ✓ phrase hit — spans title→authors\n"
             "  bib search 'Urraca interstitial EEG'       ~ phrase MISSES; relaxed retry finds it\n"
@@ -2136,16 +2149,19 @@ def build_parser() -> argparse.ArgumentParser:
             "an AND over substrings: one absent or paraphrased word zeroes the whole query.\n"
             "\n"
             "Records added as citation-only stubs (or without a fetched abstract) offer only a\n"
-            "title/authors/venue/tags to match, so most of a paper's content is invisible here.\n"
-            "Use `bib query` to search INSIDE the papers, and `--author` for a surname.\n"
+            "title/authors/venue/ids/tags to match, so most of a paper's content is invisible\n"
+            "here. Use `bib query` to search INSIDE the papers.\n"
             "\n"
             "A zero result is NOT evidence a paper is absent. On a zero, search prints to stderr\n"
             "the RECORDS its rarest matching word found — read those titles before concluding\n"
             "anything — plus every word's own record count (words that hit plenty mean your\n"
             "PHRASING failed) and whether --author/--tag/--year is what emptied the result.\n"
             "Under --json all of that ships inside the payload as a `diagnostic` object, since\n"
-            "an empty `results` list otherwise reads as absence. Before reporting a paper\n"
-            "missing: retry its rarest word alone, then check `bib query`.\n"
+            "an empty `results` list otherwise reads as absence. Establishing that a paper is\n"
+            "really absent takes THREE steps, not one: (1) `search --author <surname>`, (2)\n"
+            "`bib query` on a distinctive phrase (raise --limit; a top-N is not exhaustive),\n"
+            "(3) an identifier lookup if you have a DOI/PMID/arXiv id — the only exact test.\n"
+            "Say which of the three you ran when you report something missing.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

@@ -43,7 +43,7 @@ embeds → stores. Consequences bibliographer is built around:
 - **`bib search`** — bibliographer-side metadata lookup over the records
   (`Library.list_documents(filters=…)` + a Python pass). Instant; no embedding and
   no ranking — the query is one **literal substring** tested against
-  `title+authors+venue+abstract+tags`, so multi-word queries need verbatim adjacent
+  `title+authors+venue+abstract+citekey+identifiers+tags`, so multi-word queries need verbatim adjacent
   wording. Use it for "papers by X", "tagged Y", or a single distinctive token; see
   [commands.md](commands.md#bib-search-is-a-substring-matcher--feed-it-one-word).
 - **`bib query`** — `Library.query(text, filters, limit)`: embeds the query and

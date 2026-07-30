@@ -165,18 +165,14 @@ are in [references/commands.md](references/commands.md).
 
 ## Gotchas (learned the hard way)
 
-- **`bib search` is a substring matcher — feed it ONE word, and never read a zero
-  result as absence.** It tests your query as a *single literal substring* of
-  `title+authors+venue+abstract+tags`; there is no tokenizing, ranking or semantics.
-  A natural-language query therefore misses even when the paper is right there:
-  `bib search "Urraca interstitial duplication EEG"` used to return 0 while
-  `bib search Urraca` returned the paper — and an agent took that zero as proof the
-  papers weren't in the library and told the user so. `search` now falls back to
-  all-words-anywhere (warning on stderr that it relaxed), and on a true zero prints
-  each word's own record count. **Read that stderr before concluding anything**, and
-  prefer a single distinctive token (surname, gene, unusual noun); use `bib query`
-  for anything that lives in a paper's body rather than its metadata. Details:
-  [commands](references/commands.md#bib-search-is-a-substring-matcher--feed-it-one-word).
+- **`bib search` is a substring matcher, not a search engine.** Put what you know in
+  the field that holds it — `--author <surname>`, `--year`, `--tag` — and give the
+  free-text query ONE distinctive word; a natural-language sentence misses even when
+  the paper is right there. **Never conclude a paper is absent from a zero-result
+  search** (an agent once did, and told the user papers were missing that were in the
+  collection): a zero prints its findings to stderr — read them — and establishing real
+  absence takes the three steps in
+  [commands](references/commands.md#establishing-that-a-paper-is-not-in-the-library).
 - **Library location is a real trade-off.** A library inside a cloud-synced folder
   (Google Drive, etc.) is browsable everywhere, but **moving hundreds of files
   into it triggers a heavy one-time cascade** — the cloud client re-syncs every

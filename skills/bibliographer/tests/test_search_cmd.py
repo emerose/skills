@@ -19,6 +19,7 @@ _RECORDS: list[dict[str, Any]] = [
         "authors_text": "Urraca, Nora; Cleary, Jennifer; Reiter, Lawrence T.",
         "venue": "Autism Research",
         "year": "2013",
+        "doi": "10.1002/aur.1284",
         "abstract": "",
         "tags": ["topic:cross-disorder"],
     },
@@ -193,3 +194,16 @@ def test_haystack_covers_every_documented_field(capsys):
     assert "vaswani2017attention" in _search(capsys, "sequence transduction").out   # abstract
     assert "vaswani2017attention" in _search(capsys, "NeurIPS").out                 # venue
     assert "alageeli2014duplication" in _search(capsys, "topic:genetics-genomics").out  # tags
+
+
+def test_identifiers_and_citekeys_are_matchable(capsys):
+    """A DOI is the one query whose zero would be believable — so it must not lie.
+
+    Identifiers were absent from the haystack, so a present paper answered
+    `words matching nothing: 10.1002/aur.1284`: maximally absence-implying output,
+    for the one input that is exact rather than phrased.
+    """
+    out = _search(capsys, "10.1002/aur.1284")
+    assert "urraca2013interstitial" in out.out
+    assert out.err == ""
+    assert "urraca2013interstitial" in _search(capsys, "urraca2013interstitial").out
