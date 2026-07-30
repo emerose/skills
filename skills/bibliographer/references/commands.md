@@ -170,10 +170,31 @@ with no fetched abstract expose only a title/authors/venue/tags, so most of a pa
 
 **Never conclude a paper is absent from a zero-result `search`.** A phrasing miss says
 nothing about the library — this exact mistake once had an agent report papers missing
-that were in the collection all along. On a true zero, `search` prints **each word's
-own record count** to stderr: words that hit plenty prove the *phrasing* failed, and
-only words matching nothing are (weak) evidence of absence. Before reporting anything
-missing: retry a single distinctive word, and check `bib query`.
+that were in the collection all along. So a zero is never bare: `search` resolves your
+**rarest matching word to actual records and shows them**, so you usually recognise the
+paper without searching again:
+
+```
+$ bib search 'Urraca interstitial duplication characteristic EEG zebrafish'
+warning: no match for '…' — this is NOT evidence the paper is absent (searched 1790 record(s)).
+  closest single word 'urraca' matches 3 record(s) — is one of these yours?
+    [urraca2013interstitial] (2013) The Interstitial Duplication 15q11.2-q13 Syndrome Includes…
+  words that DO match records: urraca (3), interstitial (24), duplication (140), eeg (61)
+  words matching nothing: zebrafish
+```
+
+It also reports each word's own record count (words that hit plenty prove the *phrasing*
+failed; only words matching nothing are weak evidence of absence) and, when a query
+matched but `--author`/`--tag`/`--year` emptied it, says so — that is a filter problem,
+not a wording one. Before reporting anything missing: retry the rarest word alone, and
+check `bib query`.
+
+`--json` returns an **envelope**, not a bare list, because an empty `[]` reads as absence
+to whatever parses it: `{query, filters, matched_by, searched, count, results}` — where
+`matched_by` is `"phrase"`, `"all-words"` (the relaxed retry fired) or `null` — plus a
+`diagnostic` object on a zero carrying `absence_supported: false`, `per_word`,
+`closest_word` and `candidates`. **Read `matched_by` and `diagnostic`**; a zero-length
+`results` on its own means nothing.
 
 Use `search` for fast metadata lookup; use `query` when the user wants to find
 *passages/concepts inside* the papers (it embeds the query and runs libkit's hybrid

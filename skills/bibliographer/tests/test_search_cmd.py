@@ -107,6 +107,38 @@ def test_true_zero_reports_per_word_counts_and_denies_absence(capsys):
     assert "bib query" in out.err                       # points at the right tool
 
 
+def test_zero_SHOWS_the_records_its_best_word_found(capsys):
+    """The incident-ending line: a count makes you search again, a title does not."""
+    out = _search(capsys, "Urraca zzzqqxnotoken")
+    assert "closest single word 'urraca' matches 1 record(s)" in out.err
+    assert "[urraca2013interstitial]" in out.err
+    assert "Characteristic EEG Signature" in out.err    # the actual title, on stderr
+    assert "(2013)" in out.err
+
+
+def test_long_title_keeps_both_ends():
+    """A prefix cut would drop the identifying tail — elide the middle instead."""
+    long_title = "A " + "Very " * 60 + "Distinctive Ending"
+    assert bib._elide_middle(long_title).startswith("A Very")
+    assert bib._elide_middle(long_title).endswith("Distinctive Ending")
+    assert len(bib._elide_middle(long_title)) <= bib._ZERO_HINT_TITLE_CHARS
+
+
+def test_closest_word_is_the_RAREST_hit_not_the_first(capsys):
+    # 'duplication' is in two titles, 'urraca' in one — the rarer word identifies.
+    out = _search(capsys, "duplication urraca zzzqqxnotoken")
+    assert "closest single word 'urraca'" in out.err
+    assert "[urraca2013interstitial]" in out.err
+    assert "[alageeli2014duplication]" not in out.err
+
+
+def test_zero_from_filters_blames_the_filters_not_the_wording(capsys):
+    out = _search(capsys, "attention", author="hinton")   # query is fine; author is not
+    assert "0 result(s)" in out.out
+    assert "the query DID match 1 record(s)" in out.err
+    assert "loosen the filters" in out.err
+
+
 def test_single_token_zero_still_hints(capsys):
     out = _search(capsys, "zzzqqxnotoken")
     assert "0 result(s)" in out.out
@@ -114,12 +146,39 @@ def test_single_token_zero_still_hints(capsys):
     assert "bib query" in out.err
 
 
-def test_hint_and_relaxation_keep_json_clean(capsys):
+def test_json_is_an_envelope_carrying_how_it_matched(capsys):
     out = _search(capsys, "Urraca interstitial duplication", json=True)
     import json as _json
     payload = _json.loads(out.out)                      # stdout stays parseable JSON
-    assert [r["citekey"] for r in payload] == ["urraca2013interstitial"]
+    assert [r["citekey"] for r in payload["results"]] == ["urraca2013interstitial"]
+    assert payload["count"] == 1
+    assert payload["searched"] == len(_RECORDS)
+    assert payload["matched_by"] == "all-words"         # NOT a clean phrase hit
+    assert "diagnostic" not in payload
     assert "literal phrase" in out.err
+
+
+def test_json_zero_carries_the_epistemics_not_a_bare_empty_list(capsys):
+    """`[]` is the most absence-implying payload this command can emit; an agent
+    reading --json must get the same 'not evidence of absence' stdout-side."""
+    out = _search(capsys, "Urraca zzzqqxnotoken", json=True)
+    import json as _json
+    payload = _json.loads(out.out)
+    assert payload["results"] == []
+    assert payload["matched_by"] is None
+    diag = payload["diagnostic"]
+    assert diag["absence_supported"] is False
+    assert diag["per_word"] == {"urraca": 1, "zzzqqxnotoken": 0}
+    assert diag["closest_word"] == "urraca"
+    assert [c["citekey"] for c in diag["candidates"]] == ["urraca2013interstitial"]
+
+
+def test_json_reports_applied_filters(capsys):
+    out = _search(capsys, "attention", author="vaswani", json=True)
+    import json as _json
+    payload = _json.loads(out.out)
+    assert payload["filters"] == {"author": "vaswani"}
+    assert payload["matched_by"] == "phrase"
 
 
 def test_filters_still_narrow_the_pool(capsys):

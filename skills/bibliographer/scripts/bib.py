@@ -1274,34 +1274,124 @@ def search_haystack(rec: dict[str, Any]) -> str:
     return hay.lower()
 
 
-def _zero_result_hint(query: str, pool: list[dict[str, Any]]) -> str:
-    """Explain a zero-result `search` so it is never misread as *absence*.
+# How many records a zero-result search SHOWS for its most distinctive word.
+# Three is enough to recognise the paper you were after without turning a miss
+# into a wall of output. Length is bounded per title instead (_elide_middle).
+_ZERO_HINT_CANDIDATES = 3
+_ZERO_HINT_TITLE_CHARS = 140
 
-    Reports each word's own record count: words that hit nothing are the only real
-    evidence the library lacks something; words that hit plenty prove the *phrasing*
-    failed, not the library. Without this, `0 result(s)` is indistinguishable from
-    "not in the collection" — a mistake a strict substring matcher invites.
+
+def _elide_middle(text: str, limit: int = _ZERO_HINT_TITLE_CHARS) -> str:
+    """Shorten a title while keeping BOTH ends — recognition lives at the tail.
+
+    Academic title heads are generic ("The Interstitial Duplication 15q11.2-q13
+    Syndrome Includes…") and the distinguishing hook trails it ("…and a
+    Characteristic EEG Signature"). A plain prefix cut therefore removes exactly
+    the words that would let a reader recognise the paper they were looking for,
+    which would defeat the point of showing the record at all.
     """
-    tokens = query.lower().split()
-    counts = {t: sum(1 for r in pool if t in search_haystack(r)) for t in tokens}
-    present = [f"{t} ({n})" for t, n in counts.items() if n]
-    missing = [t for t, n in counts.items() if not n]
-    lines = [f"no match for {query!r} — this is NOT evidence the paper is absent."]
-    if not pool:
+    if len(text) <= limit:
+        return text
+    head = (limit - 3) * 2 // 3
+    return f"{text[:head].rstrip()} … {text[-(limit - 3 - head):].lstrip()}"
+
+
+def _distinctive_word(counts: dict[str, int]) -> str | None:
+    """The query word most worth showing records for: the *rarest* one that hits.
+
+    Rarity is the whole signal. A word matching 3 records is nearly an
+    identification; one matching 400 ("eeg") tells the reader nothing. Ties keep
+    query order. Returns None when no word matched anything.
+    """
+    hits = {t: n for t, n in counts.items() if n}
+    return min(hits, key=lambda t: hits[t]) if hits else None
+
+
+def _zero_diagnostic(
+    query: str | None, pool: list[dict[str, Any]], *, matched_before_filters: int = 0
+) -> dict[str, Any]:
+    """Structured explanation of a zero-result `search`, so it is never misread
+    as *absence*.
+
+    Counting each word's own records tells the caller which half of the failure it
+    is looking at: words that hit plenty prove the *phrasing* failed, and only words
+    matching nothing are (weak) evidence the library lacks something. But a count
+    still asks the caller to run a second search to see what it found — so we also
+    resolve the rarest hitting word to actual records and SHOW them. That is what
+    ends the "is this paper here?" question in one call instead of two.
+
+    ``matched_before_filters`` is how many records the free-text query matched
+    *before* --author/--tag/--year narrowed them away; non-zero means the query was
+    fine and the filters emptied it, which is a completely different fix.
+    """
+    diag: dict[str, Any] = {"absence_supported": False, "searched": len(pool)}
+    if matched_before_filters:
+        diag["removed_by_filters"] = matched_before_filters
+    if query and pool:
+        counts = {
+            t: sum(1 for r in pool if t in search_haystack(r)) for t in query.lower().split()
+        }
+        diag["per_word"] = counts
+        word = _distinctive_word(counts)
+        if word:
+            hits = [r for r in pool if word in search_haystack(r)]
+            diag["closest_word"] = word
+            diag["closest_word_total"] = len(hits)
+            diag["candidates"] = [
+                {"citekey": r.get("citekey"), "title": r.get("title"), "year": r.get("year")}
+                for r in hits[:_ZERO_HINT_CANDIDATES]
+            ]
+    return diag
+
+
+def _format_zero_diagnostic(query: str | None, diag: dict[str, Any]) -> str:
+    """Render :func:`_zero_diagnostic` for stderr — candidates FIRST.
+
+    The records come before the counts and the explanation because they are the
+    answer: a reader who recognises a title stops there and never needs the rest.
+    """
+    what = f"no match for {query!r}" if query else "no records match"
+    headline = (
+        f"{what} — this is NOT evidence the paper is absent "
+        f"(searched {diag['searched']} record(s))."
+    )
+    lines = [headline]
+    if not diag["searched"]:
         lines.append("  (no records to match — did --tag/--year filter everything out?)")
         return "\n".join(lines)
-    if present:
-        lines.append("  words that DO match records: " + ", ".join(present))
-    if missing:
-        lines.append("  words matching nothing: " + ", ".join(missing))
-    if len(tokens) > 1:
+    if diag.get("removed_by_filters"):
+        lines.append(
+            f"  the query DID match {diag['removed_by_filters']} record(s); "
+            "--author/--tag/--year then removed all of them — loosen the filters, "
+            "not the query."
+        )
+    if diag.get("candidates"):
+        total = diag["closest_word_total"]
+        shown = len(diag["candidates"])
+        more = f" (showing {shown})" if total > shown else ""
+        lines.append(
+            f"  closest single word {diag['closest_word']!r} matches "
+            f"{total} record(s){more} — is one of these yours?"
+        )
+        for c in diag["candidates"]:
+            title = _elide_middle(c["title"] or "(untitled)")
+            lines.append(f"    [{c['citekey']}] ({c['year'] or '????'}) {title}")
+    counts = diag.get("per_word") or {}
+    if counts:
+        present = [f"{t} ({n})" for t, n in counts.items() if n]
+        missing = [t for t, n in counts.items() if not n]
+        if present:
+            lines.append("  words that DO match records: " + ", ".join(present))
+        if missing:
+            lines.append("  words matching nothing: " + ", ".join(missing))
+    if len(counts) > 1:
         lines.append(
             "  `bib search` tests your words as ONE literal substring of "
             "title+authors+venue+abstract+tags, so wording and order must be verbatim. "
             "Retry with a SINGLE distinctive word (surname, gene, unusual noun), or use "
             "`bib query` to search inside the papers."
         )
-    else:
+    elif counts:
         lines.append("  Try a shorter/looser word, or `bib query` to search inside the papers.")
     return "\n".join(lines)
 
@@ -1312,13 +1402,15 @@ async def cmd_search(args: argparse.Namespace, store: BiblioStore) -> None:
         filters["tags"] = args.tag.lower()
     if args.year:
         filters["year"] = str(args.year)
-    recs = await store.all_records(filters=filters or None)
+    pool = await store.all_records(filters=filters or None)
+    recs = pool
+    matched_by: str | None = None
 
     if args.query:
-        pool = recs
         q = args.query.lower()
         recs = [r for r in pool if q in search_haystack(r)]
         tokens = q.split()
+        matched_by = "phrase" if recs else None
         # A phrase-only matcher makes every natural-language query ("Urraca EEG
         # beta power") a silent zero even when the paper is right there. Rather
         # than let a caller read that as absence, relax to all-words-anywhere and
@@ -1326,20 +1418,45 @@ async def cmd_search(args: argparse.Namespace, store: BiblioStore) -> None:
         if not recs and len(tokens) > 1:
             recs = [r for r in pool if all(t in search_haystack(r) for t in tokens)]
             if recs:
+                matched_by = "all-words"
                 warn(
                     f"no record contains the literal phrase {args.query!r}; showing the "
                     f"{len(recs)} record(s) containing all {len(tokens)} words anywhere in "
                     "their metadata instead (`bib search` is a substring matcher, not a "
                     "ranked search engine)."
                 )
-        if not recs:
-            warn(_zero_result_hint(args.query, pool))
+    matched_query = len(recs)
     if args.author:
         a = args.author.lower()
         recs = [r for r in recs if a in (r.get("authors_text") or "").lower()]
 
+    # Diagnose the zero AFTER every filter, so an --author/--tag that emptied a
+    # perfectly good query is reported as such rather than blamed on the wording.
+    diagnostic = None
+    if not recs:
+        diagnostic = _zero_diagnostic(
+            args.query, pool, matched_before_filters=matched_query if args.query else 0
+        )
+        warn(_format_zero_diagnostic(args.query, diagnostic))
+
     if args.json:
-        emit_json(recs)
+        applied = {k: v for k, v in
+                   (("tag", args.tag), ("year", args.year), ("author", args.author)) if v}
+        # An object, not a bare list: a zero-result `[]` is the single most
+        # absence-implying thing this command can emit, and --json is the path an
+        # agent takes. Ship the epistemics WITH the results — stderr is not part
+        # of a parsed payload. Mirrors `query`'s {mode, semantic, results} shape.
+        payload: dict[str, Any] = {
+            "query": args.query,
+            "filters": applied,
+            "matched_by": matched_by,  # "phrase" | "all-words" | null
+            "searched": len(pool),
+            "count": len(recs),
+            "results": recs,
+        }
+        if diagnostic is not None:
+            payload["diagnostic"] = diagnostic
+        emit_json(payload)
     else:
         print_table(recs)
         print(f"\n{len(recs)} result(s)")
@@ -2022,9 +2139,13 @@ def build_parser() -> argparse.ArgumentParser:
             "title/authors/venue/tags to match, so most of a paper's content is invisible here.\n"
             "Use `bib query` to search INSIDE the papers, and `--author` for a surname.\n"
             "\n"
-            "A zero result is NOT evidence a paper is absent — it reports each word's own record\n"
-            "count on stderr, and words that hit plenty mean your PHRASING failed. Before\n"
-            "reporting a paper missing: retry a single distinctive word, then check `bib query`.\n"
+            "A zero result is NOT evidence a paper is absent. On a zero, search prints to stderr\n"
+            "the RECORDS its rarest matching word found — read those titles before concluding\n"
+            "anything — plus every word's own record count (words that hit plenty mean your\n"
+            "PHRASING failed) and whether --author/--tag/--year is what emptied the result.\n"
+            "Under --json all of that ships inside the payload as a `diagnostic` object, since\n"
+            "an empty `results` list otherwise reads as absence. Before reporting a paper\n"
+            "missing: retry its rarest word alone, then check `bib query`.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
