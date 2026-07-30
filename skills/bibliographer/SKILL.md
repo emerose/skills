@@ -135,7 +135,7 @@ reference (last column). Run `bib init` once per library before first use.
 | `discover` | find candidate papers on a topic across 6 search APIs — a recall pass that **banks nothing**; you judge + `bib add` the keepers | [literature-search](references/literature-search.md) |
 | `import` | bulk-import a folder into the author tree (**dry-run first**; moves by default) | [commands](references/commands.md) |
 | `enrich` | recover metadata for unverified scans / junk-filename records (content-verified) | [commands](references/commands.md) · [schema](references/schema.md) |
-| `list` `search` `query` `show` `text` | browse · metadata-search · semantic-search *inside* papers · show a record · dump stored text | [commands](references/commands.md) |
+| `list` `search` `query` `show` `text` | browse · **literal-substring** metadata match (feed it ONE word) · semantic-search *inside* papers · show a record · dump stored text | [commands](references/commands.md) |
 | `tag` `rm` `export` `viewer` | tag · remove · BibTeX export · (re)build the HTML viewer | [commands](references/commands.md) |
 | `fetch` `backfill` | get a PDF for one stub · bulk-attach OA PDFs to all stubs + worklist the rest | [getting-pdfs](references/getting-pdfs.md) |
 | `refresh` | backfill / refresh OpenAlex citation metrics | [commands](references/commands.md) |
@@ -165,6 +165,14 @@ are in [references/commands.md](references/commands.md).
 
 ## Gotchas (learned the hard way)
 
+- **`bib search` is a substring matcher, not a search engine.** Put what you know in
+  the field that holds it — `--author <surname>`, `--year`, `--tag` — and give the
+  free-text query ONE distinctive word; a natural-language sentence misses even when
+  the paper is right there. **Never conclude a paper is absent from a zero-result
+  search** (an agent once did, and told the user papers were missing that were in the
+  collection): a zero prints its findings to stderr — read them — and establishing real
+  absence takes the three steps in
+  [commands](references/commands.md#establishing-that-a-paper-is-not-in-the-library).
 - **Library location is a real trade-off.** A library inside a cloud-synced folder
   (Google Drive, etc.) is browsable everywhere, but **moving hundreds of files
   into it triggers a heavy one-time cascade** — the cloud client re-syncs every
