@@ -100,8 +100,11 @@ sci meta K1-000000                           # show experiment.yml structured me
 ## Structured metadata lives in `experiment.yml` (not the prose)
 
 Each experiment folder has a tracked, schema'd `experiment.yml` sidecar — the single source of truth
-for structured metadata (`exp_id`, `cro`, `cro_study_ids`, `status`, `model`, `assays`, `asos`,
-`related`, and the `provenance` list). The **`README.md` stays purely prose; scientist never writes
+for structured metadata (`exp_id`, `name`, `title`, `cro`, `cro_study_ids`, `status`, `model`,
+`species`, `id_columns`, `assays`, `asos`, `related`, and the `provenance` list). `id_columns` is the
+one data-shape field: it names the columns this experiment's tidy tables carry as entity ids, and the
+accessor reads it to add the in-memory `canonical_id` (see `references/derive-claims.md`) — it is not
+authored from the README like the rest. The **`README.md` stays purely prose; scientist never writes
 to it, and never *reads* it for you** — deciding what an experiment's CRO/assays/model/status are is
 reading comprehension, which you do directly. Unknown fields / bad status raise a clear error on save.
 

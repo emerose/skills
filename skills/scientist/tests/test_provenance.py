@@ -66,6 +66,47 @@ def test_list_field_must_be_list():
 
 
 # --------------------------------------------------------------------------- #
+# id_columns — read by scientist.experiments.Study for the in-memory canonical_id,
+# so the validator must accept it and a write must not drop it (a rejected sidecar
+# makes `sci reindex` warn + discard ALL of an experiment's metadata, which then
+# silently blanks its catalog row).
+# --------------------------------------------------------------------------- #
+def test_id_columns_validates():
+    out = P.validate({"exp_id": "X", "id_columns": ["animal_id", "Subject ID"]})
+    assert out["id_columns"] == ["animal_id", "Subject ID"]
+
+
+def test_id_columns_must_be_list():
+    with pytest.raises(P.SidecarError, match="must be a YAML list"):
+        P.validate({"exp_id": "X", "id_columns": "animal_id"})
+
+
+def test_id_columns_survives_roundtrip(tmp_path):
+    P.write_sidecar(tmp_path, {"exp_id": "K1-230101", "status": "complete",
+                               "id_columns": ["animal_id"], "assays": ["qpcr"]})
+    assert "id_columns" in (tmp_path / "experiment.yml").read_text(encoding="utf-8")
+    loaded = P.read_sidecar(tmp_path)
+    assert loaded["id_columns"] == ["animal_id"]
+    # and the rest of the metadata rides along untouched
+    assert loaded["status"] == "complete"
+    assert loaded["assays"] == ["qpcr"]
+
+
+def test_id_columns_survives_review_rewrite(tmp_path):
+    """`sci review` re-reads, stamps, and rewrites the sidecar — id_columns (and the
+    metadata beside it) must come back out the other side."""
+    repo, exp, src, art = _make_exp(tmp_path)
+    P.write_sidecar(exp, {"exp_id": "E1", "cro": "Vendor A", "id_columns": ["animal_id"]})
+    updated, missing = P.review(repo, exp, P.read_sidecar(exp), today="2026-01-01")
+    P.write_sidecar(exp, updated)
+
+    loaded = P.read_sidecar(exp)
+    assert loaded["id_columns"] == ["animal_id"]
+    assert loaded["cro"] == "Vendor A"
+    assert P.provenance_entry(loaded, P.DEFAULT_ARTIFACT) is not None
+
+
+# --------------------------------------------------------------------------- #
 # provenance merge / dedup / sort / preserve
 # --------------------------------------------------------------------------- #
 def _entry(artifact, inputs, sha="aa", when="2026-01-01"):
