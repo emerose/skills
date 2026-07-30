@@ -12,7 +12,7 @@
       "name": "sq",
       "source": "./",
       "description": "Sam Quigley's skills, bundled as one plugin. Ships six skills: bibliographer (manage a personal collection of academic papers — add from DOI/arXiv/PMID/S2/PDF with auto-fetched metadata, file PDFs into an author tree, full-text + semantic search, HTML viewer, audit); scientist (manage a tree of scientific experiments as a provenance-tracked raw→data→analysis→claims pipeline — extract CRO files into tidy CSVs, re-derive analysis, assert grounded pytest-backed claims, index for search); research (the literature layer — author PROSPERO/PRISMA reviews, extract per-paper attributed claims, ground third-party facts as re-runnable [lit:] claims, assert bibliometric claims); regulator (discover, download, organize, and search FDA regulatory documents — guidance, Drugs@FDA approval packages/reviews, advisory-committee materials, and reviewer dossiers — so an agent can reason over FDA's regulatory record); gws (read and act on Gmail, Google Calendar, and Google Drive — plus Docs/Sheets/Contacts/Tasks — across multiple Google accounts at once, driven by the gog CLI); and stable (read, search, triage, and organize the physical mail received at a Stable virtual mailbox, and track the paper checks Stable transcribes from it, via the Stable REST API). Invoked as /sq:bibliographer, /sq:scientist, /sq:research, /sq:regulator, /sq:gws, /sq:stable. Research skills built on libkit.",
-      "version": "0.5.6",
+      "version": "0.5.7",
       "author": {
         "name": "Sam Quigley",
         "email": "quigley@emerose.com"
