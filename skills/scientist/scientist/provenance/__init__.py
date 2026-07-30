@@ -87,9 +87,13 @@ SCHEMA: dict[str, str] = {
     "exp_id": _SCALAR, "name": _SCALAR, "title": _SCALAR, "cro": _SCALAR,
     "status": _SCALAR, "model": _SCALAR, "species": _SCALAR,
     "cro_study_ids": _LIST, "assays": _LIST, "asos": _LIST, "related": _LIST,
+    # data-shape: the columns this experiment's tidy tables carry as entity ids;
+    # ``Study`` reads it to add the in-memory ``canonical_id`` (see experiments/).
+    "id_columns": _LIST,
 }
 _FIELD_ORDER = ["exp_id", "name", "title", "cro", "cro_study_ids", "status",
-                "model", "species", "assays", "asos", "related", "provenance"]
+                "model", "species", "id_columns", "assays", "asos", "related",
+                "provenance"]
 
 
 # ``SidecarError`` and ``sha256_file`` are imported from ``reportkit._ledger`` above (the single
