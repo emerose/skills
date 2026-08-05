@@ -258,6 +258,92 @@ def test_in_folder_inputs_excludes_readme_and_sidecar(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# regenerable tooling output is not evidence
+#
+# The claims run rewrites analysis/grounding_report.{json,md} on every pytest and
+# they are gitignored (never committed), so recording one as a provenance input
+# grounds an artifact on a file that can't be shipped AND re-dirties `sci audit`
+# after every run. Excluded when recording, and ignored when checking staleness so
+# ledgers written before the rule stop reporting phantom drift.
+# --------------------------------------------------------------------------- #
+def _exp_with_regenerable(tmp_path):
+    """An experiment carrying real evidence plus every flavour of tooling output."""
+    exp = tmp_path / "E1"
+    (exp / "raw").mkdir(parents=True)
+    (exp / "raw" / "a.xlsx").write_bytes(b"real evidence")
+    (exp / "analysis" / "claims" / ".pytest_cache" / "v").mkdir(parents=True)
+    (exp / "analysis" / "fit.csv").write_bytes(b"ec50\n1.0\n")
+    (exp / "analysis" / "grounding_report.json").write_text('{"claims": []}')
+    (exp / "analysis" / "grounding_report.md").write_text("# grounding\n")
+    (exp / "analysis" / ".gitignore").write_text("grounding_report.json\n")
+    (exp / "analysis" / "claims" / "grounding_report.json").write_text("{}")
+    (exp / "analysis" / "claims" / ".pytest_cache" / "v" / "nodeids").write_text("[]")
+    return exp
+
+
+def test_in_folder_inputs_excludes_regenerable_tooling_output(tmp_path):
+    exp = _exp_with_regenerable(tmp_path)
+    names = {p.name for p in P.in_folder_inputs(exp)}
+    # real evidence survives; every regenerable/tooling file is gone
+    assert names == {"a.xlsx", "fit.csv"}
+
+
+def test_is_non_evidence_predicate():
+    assert P.is_non_evidence("E1/analysis/grounding_report.json")
+    assert P.is_non_evidence("E1/analysis/claims/grounding_report.md")
+    assert P.is_non_evidence("E1/analysis/claims/.pytest_cache/v/cache/nodeids")
+    assert P.is_non_evidence("E1/analysis/.gitignore")
+    assert P.is_non_evidence("E1/raw/~$draft.docx")
+    # real evidence is never swept up — including a file merely *named* like a report
+    assert not P.is_non_evidence("E1/data/01_qpcr.csv")
+    assert not P.is_non_evidence("E1/reports/grounding_report_summary.pdf")
+
+
+def test_review_does_not_record_regenerable_output(tmp_path):
+    exp = _exp_with_regenerable(tmp_path)
+    (exp / "README.md").write_text("# prose\n")
+    sidecar, missing = P.review(tmp_path, exp, {"exp_id": "E1"}, today="2026-01-01")
+    recorded = {i["path"] for i in
+                P.provenance_entry(sidecar, P.DEFAULT_ARTIFACT)["inputs"]}
+    assert recorded == {"E1/raw/a.xlsx", "E1/analysis/fit.csv"}
+    assert not any("grounding_report" in p or "pytest_cache" in p for p in recorded)
+
+
+def test_staleness_ignores_recorded_regenerable_inputs(tmp_path):
+    """A ledger written BEFORE this rule recorded the grounding report. Regenerating
+    it (new bytes) or deleting it must not read as drift."""
+    exp = _exp_with_regenerable(tmp_path)
+    real = exp / "raw" / "a.xlsx"
+    P.write_sidecar(exp, {
+        "exp_id": "E1",
+        "provenance": [{
+            "artifact": "README.md",
+            "artifact_sha256": None,
+            "reviewed_at": "2026-01-01",
+            "inputs": [
+                {"path": "E1/raw/a.xlsx", "sha256": P.sha256_file(real)},
+                {"path": "E1/analysis/fit.csv",
+                 "sha256": P.sha256_file(exp / "analysis" / "fit.csv")},
+                # the pre-rule entries: one that will be rewritten, one deleted
+                {"path": "E1/analysis/grounding_report.json", "sha256": "stale-sha"},
+                {"path": "E1/analysis/grounding_report.md", "sha256": "stale-sha"},
+            ],
+        }],
+    })
+    (exp / "analysis" / "grounding_report.json").write_text('{"claims": ["rerun"]}')
+    (exp / "analysis" / "grounding_report.md").unlink()
+
+    st = P.staleness(exp, repo_root=tmp_path)
+    assert st["state"] == "up-to-date"
+
+    # …and real drift is still caught, so the filter didn't blunt the check
+    real.write_bytes(b"edited")
+    st = P.staleness(exp, repo_root=tmp_path)
+    assert st["state"] == "stale"
+    assert st["changed"] == ["E1/raw/a.xlsx"]
+
+
+# --------------------------------------------------------------------------- #
 # README review (artifact provenance with declared external inputs) — the layer
 # the store's `review`/`fingerprint`/`audit` commands build on. Exercises the
 # shared provenance core API.

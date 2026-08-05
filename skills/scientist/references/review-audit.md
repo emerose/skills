@@ -27,7 +27,11 @@ sci audit  [K1-000000] [--json]          # staleness vs recorded provenance + a 
   (the README), each input file with its `sha256`, plus the README's own `sha256` and the date. Inputs
   = the experiment's in-folder data files (everything except a root `README.*` and the sidecar) **plus**
   any external dependency you declare with `--input` (repeatable; e.g. CRO slides under `Shared/`).
-  External inputs persist across re-reviews.
+  External inputs persist across re-reviews. **Regenerable tooling output is never an input** —
+  `grounding_report.{json,md}`, `__pycache__/`, `.pytest_cache/`, `.gitignore`, and OS cruft are
+  excluded when recording *and* ignored by `audit`, so a claims re-run can't dirty the ledger and a
+  ledger written before this rule stops reporting phantom drift (it is gitignored and machine-owned —
+  see the callout below; it can't ground anything, because it is never committed).
 - **`audit`** — re-hashes every recorded input + the README and reports `up-to-date`, `stale` (naming
   each input that **changed** / went **missing** / was **added**, and whether the README itself was
   edited since review), `no-provenance` (never reviewed), or `no-/invalid-experiment-yml`. `--json` adds
