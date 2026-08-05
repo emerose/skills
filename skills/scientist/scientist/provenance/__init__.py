@@ -224,12 +224,45 @@ DEFAULT_ARTIFACT = "README.md"
 
 _IN_FOLDER_DIRS = ("raw", "data", "reports", "analysis")
 
+# Files that live under the input dirs but are NOT evidence, so they never belong in a
+# provenance input list. Two families:
+#
+# * OS/editor cruft (``.DS_Store``, ``~$`` lock files, AppleDouble ``._`` forks);
+# * **regenerable tooling output** — the grounding report the claims run rewrites on every
+#   `pytest`, plus the caches beside it. These are gitignored (the per-experiment
+#   ``analysis/.gitignore`` lists ``grounding_report.json``/``.md``) and therefore never
+#   committed, so recording one as an input grounds an artifact on a file that cannot be
+#   shipped, and re-dirties `sci audit` after every claims run. ``.gitignore`` itself is
+#   tooling config in the same spirit — it configures the tree, it isn't evidence about it.
+#
+# Applied on BOTH sides of the ledger: excluded when an input set is recorded, and ignored
+# when staleness re-hashes recorded inputs — a file that is not evidence cannot drift, so a
+# ledger written before this rule stops reporting phantom `changed`/`missing` drift without
+# needing a re-review of every experiment.
+_NON_EVIDENCE_DIRS = frozenset({"__pycache__", ".pytest_cache"})
+_NON_EVIDENCE_NAMES = frozenset({".DS_Store", "Thumbs.db", ".gitignore",
+                                 GROUNDING_REPORT_NAME, "grounding_report.md"})
+
+
+def is_non_evidence(path: str | Path) -> bool:
+    """True if ``path`` is OS cruft or regenerable tooling output rather than evidence —
+    see :data:`_NON_EVIDENCE_NAMES`. Takes a path in any form (absolute, or a
+    repo-relative ledger string); only the name + parent directories are inspected."""
+    p = Path(path)
+    if _NON_EVIDENCE_DIRS.intersection(p.parts):
+        return True
+    name = p.name
+    return (name in _NON_EVIDENCE_NAMES
+            or name.startswith("~$") or name.startswith("._"))
+
 
 def in_folder_inputs(exp_dir: Path) -> list[Path]:
     """Absolute paths of the experiment's in-folder data files: everything under
     ``raw/`` ``data/`` ``reports/`` ``analysis/``, EXCLUDING a root ``README.*`` and
     the ``experiment.yml`` sidecar (those are prose/metadata, not evidence). Sorted,
-    OS-cruft (``.DS_Store``, ``~$`` lock files, ``__pycache__``) skipped."""
+    with OS cruft and regenerable tooling output (the ``grounding_report.*`` a claims
+    run rewrites, ``__pycache__``/``.pytest_cache``) skipped — see
+    :func:`is_non_evidence`."""
     exp = Path(exp_dir)
     out: list[Path] = []
     for sub in _IN_FOLDER_DIRS:
@@ -239,10 +272,7 @@ def in_folder_inputs(exp_dir: Path) -> list[Path]:
         for f in d.rglob("*"):
             if not f.is_file():
                 continue
-            if "__pycache__" in f.parts:
-                continue
-            name = f.name
-            if name in {".DS_Store", "Thumbs.db"} or name.startswith("~$") or name.startswith("._"):
+            if is_non_evidence(f):
                 continue
             out.append(f)
     return sorted(out)
@@ -387,7 +417,10 @@ def staleness(exp_dir: Path, repo_root: Path | None = None) -> dict[str, Any]:
     recorded: dict[str, str | None] = {}
     for e in recorded_inputs:
         for i in e.get("inputs") or []:
-            if isinstance(i, dict) and i.get("path"):
+            # Skip non-evidence entries a pre-rule ledger may still carry (a regenerable
+            # grounding_report, a stale .pytest_cache path): they are not evidence, so
+            # neither their absence nor their churn is drift worth reporting.
+            if isinstance(i, dict) and i.get("path") and not is_non_evidence(i["path"]):
                 recorded[i["path"]] = i.get("sha256")
 
     changed, missing = [], []
