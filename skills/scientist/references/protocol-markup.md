@@ -41,8 +41,32 @@ is not an answer either — it shows what changed, not why.
 **Leave CRO-internal comments alone**: items awaiting their study director, individual
 scientist or principal investigator, their site notes, and fields only they can fill.
 
-**Write like correspondence.** No "Sponsor:" prefix, active voice, and the detail that earns
-its place — lot numbers, concentrations, section references. Ask questions as questions.
+**Write like correspondence, because that is what it is.** These comments are read by a study
+director you work with, not filed as a formal response. Draft them in that voice from the start
+rather than writing formally and softening afterward.
+
+- No standing prefix or label on each comment — no "Sponsor:", just say the thing.
+- Relaxed, normal register. Precise, but not officious.
+- Active voice, standard US English style, and the spelling the document already uses.
+- Only detail that earns its place: lot numbers, concentrations, section references stay;
+  throat-clearing goes.
+- Ask questions as questions, rather than "please advise: (a)… (b)… (c)…".
+
+```
+✗  Sponsor: yes - please provide the biodistribution results to the Study Director
+   for inclusion in the report.
+✓  Yes — please give the biodistribution results to the Study Director for the report.
+
+✗  Sponsor: please advise: (a) do you scale divalent supplementation with ASO
+   concentration across a dose ladder, or hold it constant; (b) what do you
+   recommend here; and (c) what should the vehicle group receive.
+✓  What do you do here: scale divalent supplementation with ASO across a ladder, or
+   hold it constant? What would you recommend? And what should the vehicle group get,
+   so we can rule magnesium out as a cause of anything we see at the high dose?
+```
+
+The formal register reads as distancing, and the padding buries the questions that need
+answers — which is the whole point of sending the document back.
 
 **Mark up only what matters.** A cosmetic inconsistency is better raised as a comment asking
 the CRO to make the document self-consistent than imposed as a tracked change, especially
