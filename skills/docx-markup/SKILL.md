@@ -1,3 +1,23 @@
+---
+name: docx-markup
+description: >-
+  Return a Word document to whoever wrote it, marked up — tracked changes for what
+  you changed, threaded comment replies for what they asked, and their own file
+  otherwise untouched. Reads the author's existing comments first (a field flagged
+  "please confirm" is a question to you, not their error), decides what belongs in a
+  change versus a comment, replies inside each thread rather than alongside it, and
+  never resolves a comment it is answering. Writes real OOXML tracked changes and
+  threaded replies with the standard library, which python-docx cannot do, and
+  handles the four traps that yield a file LibreOffice and pandoc open happily while
+  Word rejects it or renders it wrong. Use this skill whenever the user wants to mark
+  up, redline, review, or comment on a .docx and send it back — a CRO study plan or
+  protocol, a contract or SOW, a manuscript, a report circulated for review — or to
+  answer the comments already in one. Triggers include "mark this up", "redline this",
+  "return it with tracked changes", "reply to the comments in this doc", "review this
+  contract", "comment on this draft". For creating or reading Word documents rather
+  than marking one up, use the docx skill instead.
+---
+
 # Marking up a Word document
 
 Returning a `.docx` to whoever wrote it — tracked changes for what you changed, comments for
@@ -9,7 +29,7 @@ Use `scripts/docx_markup.py`. It writes tracked changes and threaded comment rep
 standard library alone; python-docx can do neither.
 
 ```bash
-python3 .../scientist/scripts/docx_markup.py my_edits.py "their draft.docx" "marked up.docx" "Your Name"
+python3 scripts/docx_markup.py my_edits.py "their draft.docx" "marked up.docx" "Your Name"
 ```
 
 `my_edits.py` exposes `apply(G)` and holds the edits themselves — organize it by document
@@ -142,16 +162,3 @@ reads:
 
 If Word itself cannot be run, say the verification is indirect rather than reporting it as
 confirmation.
-
-## Worked example: a CRO study plan
-
-The recurring case in this skill. A CRO sends a draft study plan carrying its own comments —
-blanks for the sponsor to fill, questions for the sponsor to answer, notes to its own scientists.
-File the CRO original in the experiment's `protocol/` and never overwrite it; put the marked-up
-copy beside it, and the edit list under `analysis/`.
-
-Reading their comments first paid for itself on one such review: a formulation arrangement that
-looked like the CRO departing from the signed SOW turned out to be a comment asking the sponsor
-to decide; a sponsor-approval date that looked like a claim was flagged "to update" by the study
-director; and one comment transposed two tissue allocations relative to the SOW, which needed
-querying rather than correcting. None of that is visible in the document body.
