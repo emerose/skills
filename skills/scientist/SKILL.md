@@ -49,7 +49,7 @@ Each phase's detail lives in `references/` and is loaded only when you need it. 
 | Extract raw CRO files → tidy `data/` CSVs, and audit that `data/` is grounded in `raw/` | [references/extract.md](references/extract.md) |
 | Re-derive analysis (fits/stats/figures) and author grounded scientific **claims** | [references/derive-claims.md](references/derive-claims.md) |
 | Index / search / catalog the tree, file a delivery, scaffold a new experiment | [references/search-index.md](references/search-index.md) |
-| Mark up a CRO's **draft protocol / study plan** — read their comments, reply in-thread, return tracked changes | [references/protocol-markup.md](references/protocol-markup.md) |
+| Mark up **any Word document** — return it with tracked changes and threaded comment replies (a CRO study plan, a contract, anything circulated for review) | [references/docx-markup.md](references/docx-markup.md) |
 | Review provenance, audit staleness, structural check, **trace** a result raw→claims, **enforce** prose↔claims | [references/review-audit.md](references/review-audit.md) |
 | &nbsp;&nbsp;↳ deep reference for the structural / staleness / semantic audit passes (`sci check` / `sci audit` / parallel-agent) | [references/auditing.md](references/auditing.md) |
 | Author a human-facing **report** from grounded claims — `sci report` mechanics (cite `[claim:<id>]`, embed grounded figures, audit + render) | [references/report.md](references/report.md) |
