@@ -9,7 +9,7 @@ helpers, append_ins/insert_para_after/delete_para, and add_comment/reply/resolve
 Always rebuilds from the source, so it is safe to re-run after editing the edit list.
 Stdlib only: python-docx cannot write tracked changes or comments.
 
-See references/docx-markup.md for the four traps this handles, all of which yield a
+See SKILL.md for the four traps this handles, all of which yield a
 file that LibreOffice and pandoc open happily and Word rejects or renders wrong.
 """
 import copy, re, shutil, zipfile, os, sys
