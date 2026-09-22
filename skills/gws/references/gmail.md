@@ -50,42 +50,21 @@ gog -a work gmail trash <messageId> ...          # reversible (Trash), unlike pe
 Check `gog gmail labels modify --help` and `gog gmail archive --help` for exact
 flag names (`--add-label` / `--remove-label`, message-id positionals vs `--query`).
 
-## Write — sends are guarded by default
+## Write — drafts only
 
-Both accounts have gog's persistent **no-send guard** on, so `send` / `forward` /
-`autoreply` / `drafts send` fail until it's lifted. See **"Sending email: the
-no-send guard"** in [SKILL.md](../SKILL.md) for the full rule. In short: **draft
-by default; send only with explicit per-message consent, then re-arm the guard
-immediately.**
-
-```bash
-# The consented-send dance (only after the user OKs THIS message):
-gog config no-send remove <account>
-gog -a <account> gmail send --to … --subject … --body …
-gog config no-send set    <account>        # re-arm, every time
-```
-
-### Draft first (preferred — always allowed, even with the guard on)
+Never send email, replies, or forwards, and never disable or bypass a no-send
+guard. Sam sends the finished drafts himself. A request to “send” means prepare
+a draft under this standing policy; there is no per-message sending exception.
+See [SKILL.md](../SKILL.md) for the controlling draft-only rule.
 
 ```bash
-gog -a work gmail drafts create --to alice@x.com --cc bob@x.com \
-  --subject "Q3 numbers" --body "Hi Alice, …"
+gog -a work gmail drafts create --to alice@example.com \
+  --subject "Follow-up" --body-file draft.txt
 gog -a work gmail drafts list --json
 gog -a work gmail drafts get <draftId> --json
-gog -a work gmail drafts update <draftId> --body "…"
-gog -a work gmail drafts send <draftId>        # send after the user approves
+gog -a work gmail drafts update <draftId> --body-file draft.txt
 ```
 
-### Send / reply / forward directly (guard must be lifted; only on explicit per-message consent)
-
-```bash
-gog -a work gmail send --to alice@x.com --subject "…" --body "…"
-gog -a work gmail send --to alice@x.com --subject "…" --body-file draft.txt   # or --body-html-file, '-' for stdin
-gog -a work gmail send --reply-to-message-id <id> --reply-all --body "…" --quote
-gog -a work gmail forward <messageId> --to carol@x.com --body "FYI"
-```
-
-Useful `send` flags: `--cc`/`--bcc`, `--attach <path>` (repeatable),
-`--from <verified-send-as-alias>`, `--signature`, `--reply-to-message-id` /
-`--thread-id` for threading, `--reply-all`, `--quote`. Full list:
-`gog gmail send --help`.
+Use `gog gmail drafts create --help` for supported threading and attachment
+flags. Verify the saved recipients, subject, body, attachments and thread, then
+provide the draft to Sam for him to send.
